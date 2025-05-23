@@ -2,3 +2,6 @@
 	path = libs/karax
 	url = ../karax.git
 	branch = new-karax
+[submodule "libs/codetracer"]
+	path = libs/codetracer
+	url = https://github.com/metacraft-labs/codetracer.git

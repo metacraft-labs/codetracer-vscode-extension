@@ -16,6 +16,31 @@
       {
         "command": "ct-vscode.toggleCT",
         "title": "Toggle CodeTracer"
+      },
+      {
+        "command": "ct-vscode.openCalltrace",
+        "title": "Open Calltrace Panel",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.openState",
+        "title": "Open State Panel",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.openScratchpad",
+        "title": "Open Scratchpad Panel",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.openEventLog",
+        "title": "Open Event Log Panel",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.openTerminalOutput",
+        "title": "Open Terminal Output Panel",
+        "category": "CodeTracer"
       }
     ],
     "keybindings": [
@@ -29,7 +54,25 @@
         "command": "ct-vscode.onEnter",
         "when": "editorTextFocus"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codetracer-sidebar-view",
+          "title": "CodeTracer",
+          "icon": "./public/extension/codetracer_vscode_logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "codetracer-sidebar-view": [
+        {
+          "type": "webview",
+          "id": "codetracer-sidebar-panel",
+          "name": "CodeTracer"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
