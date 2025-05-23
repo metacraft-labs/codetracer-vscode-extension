@@ -1,7 +1,8 @@
 {
   "name": "ct-vscode",
-  "displayName": "ct_vscode",
+  "displayName": "CodeTracer",
   "description": "",
+  "icon": "codetracer_vscode_logo.png",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.92.0"
