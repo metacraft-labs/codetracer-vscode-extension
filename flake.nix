@@ -20,6 +20,7 @@
             yarn
             nodePackages.typescript
             nodePackages.eslint
+            vsce
             pkgs.nim
           ];
 

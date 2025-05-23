@@ -9,3 +9,43 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+libs/codetracer
+public/dist
+nix/**
+db-backend/
+.direnv/**
+
+
+# Node/Nix dependencies
+node_modules
+result
+*.vsix
+*.log
+*.lock
+*.env
+*.DS_Store
+
+# Build output
+dist/
+build/
+coverage/
+
+# Dev and test files
+.vscode/
+tests/
+scripts/
+*.test.*
+*.spec.*
+
+# Git
+.git
+.gitignore
+
+# Nix
+flake.lock
+.nix-*
+direnv
+.envrc
+
+# Large or unnecessary 3rd party
+**/third_party/**
