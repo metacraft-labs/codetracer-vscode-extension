@@ -18,6 +18,7 @@
           buildInputs = with pkgs; [
             nodejs_20
             yarn
+            just
             nodePackages.typescript
             nodePackages.eslint
             vsce

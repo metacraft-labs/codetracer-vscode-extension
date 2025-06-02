@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
+apt-get update && apt-get install -y nix
+
 git submodule update --init --recursive
+
 nix develop \
   --extra-experimental-features nix-command \
   --extra-experimental-features flakes \
