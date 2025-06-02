@@ -118,233 +118,98 @@ function getDarkTheme(panel: vscode.WebviewPanel, context: vscode.ExtensionConte
     );
 }
 
-export function getStateWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    let uiJs = getUiJs(panel, context);
-    let frontendBundle = getFrontendBundle(panel, context);
-    let thirdParty = getThirdParty(panel, context);
-    let defaultDarkTheme = getDarkTheme(panel, context);
-
-    // TODO: Add .css file to webViewContent
+function generateWebviewHtml(
+    panel: vscode.WebviewPanel,
+    context: vscode.ExtensionContext,
+    componentId: string,
+    createFn: string,
+    messageHandler?: string,
+): string {
+    const uiJs = getUiJs(panel, context);
+    const frontendBundle = getFrontendBundle(panel, context);
+    const thirdParty = getThirdParty(panel, context);
+    const defaultDarkTheme = getDarkTheme(panel, context);
 
     return `
-		<!doctype html>
-		<html>
-			<head>
-				<meta charset='utf-8'>
-				<title>CodeTracer</title>
-				<link id='theme' rel='stylesheet' href='${defaultDarkTheme}'>
-			<script>
-				inElectron = false
-				loadScripts = true
-			</script>
-			</head>
-			<body>
-				<div id='stateComponent-0' class='component-container active-state'></div>
+            <!doctype html>
+            <html>
+                    <head>
+                            <meta charset='utf-8'>
+                            <title>CodeTracer</title>
+                            <link id='theme' rel='stylesheet' href='${defaultDarkTheme}'>
+                    <script>
+                            inElectron = false
+                            loadScripts = true
+                    </script>
+                    </head>
+                    <body>
+                            <div id='${componentId}-0' class='component-container active-state'></div>
 
-				<footer>
-					<div id='search-results'>
-					</div>
-					<div id='status'>
-					</div>
-				</footer>
-				</div>
-				<script src="${frontendBundle}" type="text/javascript"> </script>
-				<script src='${thirdParty}' type='text/javascript'></script>
-				<script src='${uiJs}'></script>
-				<script>
-					let component = null
-					window.addEventListener('DOMContentLoaded', () => {
-						window.component = makeStateComponentForExtension('stateComponent-0');
-					});
-					window.addEventListener('message', event => {
-						if (event.data.command === 'loaded-locals') {
-								registerLocals(window.component, event.data.values)
-							}
-					});
-				</script>
-			</body>
-		</html>
+                            <footer>
+                                    <div id='search-results'>
+                                    </div>
+                                    <div id='status'>
+                                    </div>
+                            </footer>
+                            </div>
+                            <script src="${frontendBundle}" type="text/javascript"> </script>
+                            <script src='${thirdParty}' type='text/javascript'></script>
+                            <script src='${uiJs}'></script>
+                            <script>
+                                    let component = null;
+                                    window.addEventListener('DOMContentLoaded', () => {
+                                            window.component = ${createFn}('${componentId}-0');
+                                    });
+                                    ${messageHandler ? `window.addEventListener('message', event => {${messageHandler}});` : ''}
+                            </script>
+                    </body>
+            </html>
+    `;
+}
 
-	`;
+export function getStateWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
+    return generateWebviewHtml(
+        panel,
+        context,
+        'stateComponent',
+        'makeStateComponentForExtension',
+        `if (event.data.command === 'loaded-locals') { registerLocals(window.component, event.data.values); }`
+    );
 }
 
 export function getCalltraceWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    let uiJs = getUiJs(panel, context);
-    let frontendBundle = getFrontendBundle(panel, context);
-    let thirdParty = getThirdParty(panel, context);
-    let defaultDarkTheme = getDarkTheme(panel, context);
-
-    // TODO: Add .css file to webViewContent
-
-    return `
-		<!doctype html>
-		<html>
-			<head>
-				<meta charset='utf-8'>
-				<title>CodeTracer</title>
-				<link id='theme' rel='stylesheet' href='${defaultDarkTheme}'>
-			<script>
-				inElectron = false
-				loadScripts = true
-			</script>
-			</head>
-			<body>
-				<div id='calltraceComponent-0' class='component-container active-state'></div>
-
-				<footer>
-					<div id='search-results'>
-					</div>
-					<div id='status'>
-					</div>
-				</footer>
-				</div>
-				<script src="${frontendBundle}" type="text/javascript"> </script>
-				<script src='${thirdParty}' type='text/javascript'></script>
-				<script src='${uiJs}'></script>
-				<script>
-					let component = null
-					window.addEventListener('DOMContentLoaded', () => {
-						window.component = makeCalltraceComponentForExtension('calltraceComponent-0');
-					});
-					window.addEventListener('message', event => {
-						if (event.data.command === 'complete-call-move') {
-							updateCalltrace(window.component, event.data.callKey)
-						}
-					});
-				</script>
-			</body>
-		</html>
-	`;
+    return generateWebviewHtml(
+        panel,
+        context,
+        'calltraceComponent',
+        'makeCalltraceComponentForExtension',
+        `if (event.data.command === 'complete-call-move') { updateCalltrace(window.component, event.data.callKey); }`
+    );
 }
 
 export function getEventLogWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    let uiJs = getUiJs(panel, context);
-    let frontendBundle = getFrontendBundle(panel, context);
-    let thirdParty = getThirdParty(panel, context);
-    let defaultDarkTheme = getDarkTheme(panel, context);
-
-    // TODO: Add .css file to webViewContent
-
-    return `
-		<!doctype html>
-		<html>
-			<head>
-				<meta charset='utf-8'>
-				<title>CodeTracer</title>
-				<link id='theme' rel='stylesheet' href='${defaultDarkTheme}'>
-			<script>
-				inElectron = false
-				loadScripts = true
-			</script>
-			</head>
-			<body>
-				<div id='eventLogComponent-0' class='component-container active-state'></div>
-
-				<footer>
-					<div id='search-results'>
-					</div>
-					<div id='status'>
-					</div>
-				</footer>
-				</div>
-				<script src="${frontendBundle}" type="text/javascript"> </script>
-				<script src='${thirdParty}' type='text/javascript'></script>
-				<script src='${uiJs}'></script>
-				<script>
-					let component = null
-					window.addEventListener('DOMContentLoaded', () => {
-						window.component = makeEventLogComponentForExtension('eventLogComponent-0');
-					});
-				</script>
-			</body>
-		</html>
-	`;
+    return generateWebviewHtml(
+        panel,
+        context,
+        'eventLogComponent',
+        'makeEventLogComponentForExtension'
+    );
 }
 
 export function getScratchpadWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    let uiJs = getUiJs(panel, context);
-    let frontendBundle = getFrontendBundle(panel, context);
-    let thirdParty = getThirdParty(panel, context);
-    let defaultDarkTheme = getDarkTheme(panel, context);
-
-    // TODO: Add .css file to webViewContent
-
-    return `
-		<!doctype html>
-		<html>
-			<head>
-				<meta charset='utf-8'>
-				<title>CodeTracer</title>
-				<link id='theme' rel='stylesheet' href='${defaultDarkTheme}'>
-			<script>
-				inElectron = false
-				loadScripts = true
-			</script>
-			</head>
-			<body>
-				<div id='scratchpadComponent-0' class='component-container active-state'></div>
-
-				<footer>
-					<div id='search-results'>
-					</div>
-					<div id='status'>
-					</div>
-				</footer>
-				</div>
-				<script src="${frontendBundle}" type="text/javascript"> </script>
-				<script src='${thirdParty}' type='text/javascript'></script>
-				<script src='${uiJs}'></script>
-				<script>
-					let component = null
-					window.addEventListener('DOMContentLoaded', () => {
-						window.component = makeScratchpadComponentForExtension('scratchpadComponent-0');
-					});
-				</script>
-			</body>
-		</html>
-	`;
+    return generateWebviewHtml(
+        panel,
+        context,
+        'scratchpadComponent',
+        'makeScratchpadComponentForExtension'
+    );
 }
 
 export function getTerminalOutputWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    let uiJs = getUiJs(panel, context);
-    let frontendBundle = getFrontendBundle(panel, context);
-    let thirdParty = getThirdParty(panel, context);
-    let defaultDarkTheme = getDarkTheme(panel, context);
-
-    // TODO: Add .css file to webViewContent
-
-    return `
-		<!doctype html>
-		<html>
-			<head>
-				<meta charset='utf-8'>
-				<title>CodeTracer</title>
-				<link id='theme' rel='stylesheet' href='${defaultDarkTheme}'>
-			<script>
-				inElectron = false
-				loadScripts = true
-			</script>
-			</head>
-			<body>
-				<div id='terminalOutputComponent-0' class='component-container active-state'></div>
-
-				<footer>
-					<div id='search-results'>
-					</div>
-					<div id='status'>
-					</div>
-				</footer>
-				</div>
-				<script src="${frontendBundle}" type="text/javascript"> </script>
-				<script src='${thirdParty}' type='text/javascript'></script>
-				<script src='${uiJs}'></script>
-				<script>
-					let component = null
-					window.addEventListener('DOMContentLoaded', () => {
-						window.component = makeTerminalOutputComponentForExtension('terminalOutputComponent-0');
-					});
-				</script>
-			</body>
-		</html>
-	`;
+    return generateWebviewHtml(
+        panel,
+        context,
+        'terminalOutputComponent',
+        'makeTerminalOutputComponentForExtension'
+    );
 }
