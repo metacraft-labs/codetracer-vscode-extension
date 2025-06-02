@@ -3,8 +3,11 @@ build:
     mkdir -p ./media
     
     pushd libs/codetracer && \
-    nix develop .#devShells.x86_64-linux.default --command ./build_ui_js.sh ../../media/ui.js && \
-    popd;
+        nix develop \
+            --extra-experimental-features nix-command \
+            --extra-experimental-features flakes \
+            .#devShells.x86_64-linux.default --command ./build_ui_js.sh ../../media/ui.js && \
+        popd;
     if [[ ! -e ./media/frontend_bundle.js && ! -f ./media/frontend_bundle.js ]]; then
         rm -f ./media/frontend_bundle.js
         ln -s $(pwd)/libs/codetracer/src/public/dist/frontend_bundle.js ./media/frontend_bundle.js
