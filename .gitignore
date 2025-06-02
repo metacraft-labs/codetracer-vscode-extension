@@ -21,7 +21,6 @@ yarn-error.log*
 
 # Nix
 /result
-/flake.lock
 *.drv
 .nix-gc-roots/
 
