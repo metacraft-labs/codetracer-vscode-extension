@@ -23,6 +23,7 @@ yarn-error.log*
 /result
 *.drv
 .nix-gc-roots/
+*.vsix
 
 # macOS
 .DS_Store
