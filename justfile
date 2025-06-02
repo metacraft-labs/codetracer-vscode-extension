@@ -22,3 +22,6 @@ build:
         ln -s $(pwd)/libs/codetracer/src/build-debug/frontend/styles/default_dark_theme.css ./media/styles/default_dark_theme.css
     fi;
     npm run compile
+
+build-npm:
+    npm run compile

@@ -3,4 +3,4 @@
 echo "INSIDE nix devshell"
 
 npm install
-just build
+just build-npm
