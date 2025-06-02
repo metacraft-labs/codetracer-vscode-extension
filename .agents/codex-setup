@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+git submodule update --init --recursive
+nix develop \
+  --extra-experimental-features nix-command \
+  --extra-experimental-features flakes \
+  -c .agents/codex-setup-in-nix.sh
