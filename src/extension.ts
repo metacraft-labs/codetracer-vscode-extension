@@ -43,7 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			if (vscode.debug.activeDebugSession?.type === 'codetracer-debug') {
 				await vscode.commands.executeCommand('workbench.action.debug.stop');
-			  }
+			}
 		} else {
 			// Start CT
 			ctStarted = true;
@@ -57,7 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
 				type: "codetracer-debug",
 				request: "launch",
 				name: "Launch Codetracer",
-				cwd: "/home/nedy/codetracer-wasm-recorder",
+				cwd: "",
 				traceFolder: "~/.local/share/codetracer/trace-2"
 			};
 
