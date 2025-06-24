@@ -140,8 +140,6 @@ export function initPanels(context: vscode.ExtensionContext): CodeTracerPanels {
 }
 
 export function disposePanels() {
-  console.log("------- BEFORE ------");
-  console.log(panelMap);
   for (const key of Object.keys(panelMap) as (keyof CodeTracerPanels)[]) {
     const panel = panelMap[key];
     if (panel) {
@@ -149,8 +147,6 @@ export function disposePanels() {
     }
     delete panelMap[key];
   }
-  console.log("------- AFTER ------");
-  console.log(panelMap);
 }
 
 export function disposeCommands() {

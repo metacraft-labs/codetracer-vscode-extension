@@ -13,6 +13,37 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "debuggers": [
+      {
+        "type": "codetracer-debug",
+        "label": "Codetracer Debugger",
+        "program": "/home/nedy/codetracer-github/src/build-debug/bin/db-backend",
+        "args": ["--stdio"],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the trace folder containing .json files",
+                "default": "/home/nedy/.local/share/codetracer/trace-2"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "codetracer-debug",
+            "request": "launch",
+            "name": "Launch Codetracer",
+            "trace_folder": "/home/nedy/.local/share/codetracer/trace-2",
+            "arguments": {"cwd": "/home/nedy/codetracer-wasm-recorder", "traceFolder": "~/.local/share/codetracer/trace-2"}
+          }
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "ct-vscode.toggleCT",

@@ -23,7 +23,7 @@ function intValue(i: number): any {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	const toggleCT = vscode.commands.registerCommand('ct-vscode.toggleCT', () => {
+	const toggleCT = vscode.commands.registerCommand('ct-vscode.toggleCT', async () => {
 		if (ctStarted) {
 			// Stop CT
 			ctStarted = false;
@@ -41,10 +41,30 @@ export function activate(context: vscode.ExtensionContext) {
 				backendProcess.kill();
 				backendProcess = null;
 			}
+			if (vscode.debug.activeDebugSession?.type === 'codetracer-debug') {
+				await vscode.commands.executeCommand('workbench.action.debug.stop');
+			  }
 		} else {
 			// Start CT
 			ctStarted = true;
 			// const callerPid = process.pid.toString();
+			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+			if (!workspaceFolder) {
+				vscode.window.showErrorMessage("No workspace folder is open.");
+				return;
+			}
+			const debugConfig = {
+				type: "codetracer-debug",
+				request: "launch",
+				name: "Launch Codetracer",
+				cwd: "/home/nedy/codetracer-wasm-recorder",
+				traceFolder: "~/.local/share/codetracer/trace-2"
+			};
+
+			const started = await vscode.debug.startDebugging(workspaceFolder, debugConfig);
+			if (!started) {
+				vscode.window.showErrorMessage('Failed to start Codetracer debugger.');
+			}
 
 			// // Resolve trace paths
 			// const traceDir = path.join(os.homedir(), '.local', 'share', 'codetracer', 'trace-1');
@@ -120,8 +140,8 @@ export function activate(context: vscode.ExtensionContext) {
 				vscode.window.showInformationMessage('Next clicked');
 				panels.state.webview.postMessage({ command: 'next' });
 				panels.state.webview.postMessage({
-				  command: 'loaded-locals',
-				  values: [{ expression: 'a', value: intValue(10) }]
+					command: 'loaded-locals',
+					values: [{ expression: 'a', value: intValue(10) }]
 				});
 			});
 
@@ -135,6 +155,12 @@ export function activate(context: vscode.ExtensionContext) {
 			new utils.CodeTracerViewProvider(context)
 		)
 	);
+
+	vscode.debug.onDidTerminateDebugSession(session => {
+		if (session.type === 'codetracer-debug') {
+			ctStarted = false;
+		}
+	});
 
 	context.subscriptions.push(toggleCT);
 }
