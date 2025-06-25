@@ -55,7 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
 							onDidSendMessage: async(msg) => {
 								if (msg.type === 'event' && msg.event === 'stopped') {
 									// Currently the args are not used in the db-backend but are used in the rr-backend!
-									let res = await vscode.debug.activeDebugSession?.customRequest("load-locals", { rrTicks: 0, countBudget: 0, minCountLimit: 0});
+									let res = await vscode.debug.activeDebugSession?.customRequest("ct/load-locals", { rrTicks: 0, countBudget: 0, minCountLimit: 0});
 									panels.state.webview.postMessage({
 										command: 'loaded-locals',
 										arg: res
@@ -72,7 +72,7 @@ export function activate(context: vscode.ExtensionContext) {
 				request: "launch",
 				name: "Launch Codetracer",
 				cwd: "",
-				traceFolder: "~/.local/share/codetracer/trace-2"
+				traceFolder: "~/.local/share/codetracer/trace-425"
 			};
 
 			const started = await vscode.debug.startDebugging(workspaceFolder, debugConfig);

@@ -1,6 +1,6 @@
-import * as vscode from 'vscode';
-import { getOrCreatePanel } from './panelManager';
-import * as utils from './utils';
+import * as vscode from "vscode";
+import { getOrCreatePanel } from "./panelManager";
+import * as utils from "./utils";
 
 export interface CodeTracerPanels {
   state: vscode.WebviewPanel;
@@ -19,11 +19,11 @@ interface CodeTracerPanelCommands {
 }
 
 const idToPanelKey: Record<string, keyof CodeTracerPanels> = {
-  openState: 'state',
-  openCalltrace: 'calltrace',
-  openScratchpad: 'scratchpad',
-  openEventLog: 'eventLog',
-  openTerminalOutput: 'terminalOutput'
+  openState: "state",
+  openCalltrace: "calltrace",
+  openScratchpad: "scratchpad",
+  openEventLog: "eventLog",
+  openTerminalOutput: "terminalOutput",
 };
 
 const panelMap: Partial<CodeTracerPanels> = {};
@@ -34,104 +34,140 @@ function registerPanelCommand(
   context: vscode.ExtensionContext,
   createPanel: (context: vscode.ExtensionContext) => vscode.WebviewPanel
 ): vscode.Disposable {
-  return vscode.commands.registerCommand('ct-vscode.' + commandId, () => {
-    const panel = panelMap[idToPanelKey[commandId]] = createPanel(context);
+  return vscode.commands.registerCommand("ct-vscode." + commandId, () => {
+    const panel = (panelMap[idToPanelKey[commandId]] = createPanel(context));
     panel.reveal();
   });
 }
 
-function createStatePanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
+function createStatePanel(
+  context: vscode.ExtensionContext
+): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
-      id: 'stateComponent',
-      title: 'State',
-      getContent: utils.getStateWebviewContent
+      id: "stateComponent",
+      title: "State",
+      getContent: utils.getStateWebviewContent,
     },
-    context
-  )
+    context,
+    (message, panel) => {
+      const command = message.command;
+      console.log(command);
+      // TODO: if dap request; maybe detecting by additional field?; resend or send to dap directly(or through a service)
+    }
+  );
 }
 
-function createCalltracePanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
+function createCalltracePanel(
+  context: vscode.ExtensionContext
+): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
-      id: 'calltraceComponent',
-      title: 'Calltrace',
-      getContent: utils.getCalltraceWebviewContent
+      id: "calltraceComponent",
+      title: "Calltrace",
+      getContent: utils.getCalltraceWebviewContent,
     },
     context,
     (message, panel) => {
       const command = String.fromCharCode(...message.command);
-      if (command === 'calltrace-jump') {
+      if (command === "calltrace-jump") {
         console.log(message.callKey);
         panel.webview.postMessage({
-          command: 'complete-call-move',
-          callKey: message.callKey
+          command: "complete-call-move",
+          callKey: message.callKey,
         });
       }
     }
-  )
+  );
 }
 
-function createScratchpadPanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
+function createScratchpadPanel(
+  context: vscode.ExtensionContext
+): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
-      id: 'scratchpadComponent',
-      title: 'Scratchpad',
-      getContent: utils.getScratchpadWebviewContent
+      id: "scratchpadComponent",
+      title: "Scratchpad",
+      getContent: utils.getScratchpadWebviewContent,
     },
     context
-  )
+  );
 }
 
-function createEventLogPanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
+function createEventLogPanel(
+  context: vscode.ExtensionContext
+): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
-      id: 'eventLogComponent',
-      title: 'Event Log',
-      getContent: utils.getEventLogWebviewContent
+      id: "eventLogComponent",
+      title: "Event Log",
+      getContent: utils.getEventLogWebviewContent,
     },
     context
-  )
+  );
 }
 
-function createTerminalPanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
+function createTerminalPanel(
+  context: vscode.ExtensionContext
+): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
-      id: 'terminalOutputComponent',
-      title: 'Terminal',
-      getContent: utils.getTerminalOutputWebviewContent
+      id: "terminalOutputComponent",
+      title: "Terminal",
+      getContent: utils.getTerminalOutputWebviewContent,
     },
     context
-  )
+  );
 }
 
 export function initPanels(context: vscode.ExtensionContext): CodeTracerPanels {
-  const state = panelMap.state = createStatePanel(context);
-  panelCommands.state = registerPanelCommand('openState', context, createStatePanel);
+  const state = (panelMap.state = createStatePanel(context));
+  panelCommands.state = registerPanelCommand(
+    "openState",
+    context,
+    createStatePanel
+  );
 
-  const calltrace = panelMap.calltrace = createCalltracePanel(context);
-  panelCommands.calltrace = registerPanelCommand('openCalltrace', context, createCalltracePanel);
+  const calltrace = (panelMap.calltrace = createCalltracePanel(context));
+  panelCommands.calltrace = registerPanelCommand(
+    "openCalltrace",
+    context,
+    createCalltracePanel
+  );
 
-  const scratchpad = panelMap.scratchpad = createScratchpadPanel(context);
-  panelCommands.scratchpad = registerPanelCommand('openScratchpad', context, createScratchpadPanel);
+  const scratchpad = (panelMap.scratchpad = createScratchpadPanel(context));
+  panelCommands.scratchpad = registerPanelCommand(
+    "openScratchpad",
+    context,
+    createScratchpadPanel
+  );
 
-  const eventLog = panelMap.eventLog = createEventLogPanel(context);
-  panelCommands.eventLog = registerPanelCommand('openEventLog', context, createEventLogPanel);
+  const eventLog = (panelMap.eventLog = createEventLogPanel(context));
+  panelCommands.eventLog = registerPanelCommand(
+    "openEventLog",
+    context,
+    createEventLogPanel
+  );
 
-  const terminalOutput = panelMap.terminalOutput = createTerminalPanel(context);
-  panelCommands.terminalOutput = registerPanelCommand('openTerminalOutput', context, createTerminalPanel);
+  const terminalOutput = (panelMap.terminalOutput =
+    createTerminalPanel(context));
+  panelCommands.terminalOutput = registerPanelCommand(
+    "openTerminalOutput",
+    context,
+    createTerminalPanel
+  );
 
   setTimeout(() => {
     terminalOutput.reveal();
-    vscode.commands.executeCommand('workbench.action.moveEditorToBelowGroup');
+    vscode.commands.executeCommand("workbench.action.moveEditorToBelowGroup");
     eventLog.reveal();
-    vscode.commands.executeCommand('workbench.action.moveEditorToBelowGroup');
-    vscode.commands.executeCommand('workbench.action.moveEditorLeftInGroup');
+    vscode.commands.executeCommand("workbench.action.moveEditorToBelowGroup");
+    vscode.commands.executeCommand("workbench.action.moveEditorLeftInGroup");
   }, 500);
 
   setTimeout(() => {
     calltrace.reveal();
-    vscode.commands.executeCommand('workbench.action.moveEditorToRightGroup');
+    vscode.commands.executeCommand("workbench.action.moveEditorToRightGroup");
   }, 500);
 
   state.reveal(vscode.ViewColumn.Two);
@@ -150,7 +186,9 @@ export function disposePanels() {
 }
 
 export function disposeCommands() {
-  for (const key of Object.keys(panelCommands) as (keyof typeof panelCommands)[]) {
+  for (const key of Object.keys(
+    panelCommands
+  ) as (keyof typeof panelCommands)[]) {
     const disposable = panelCommands[key];
     if (disposable) {
       disposable.dispose();
