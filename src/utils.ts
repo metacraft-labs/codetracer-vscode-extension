@@ -177,7 +177,7 @@ export function getStateWebviewContent(panel: vscode.WebviewPanel, context: vsco
         'makeStateComponentForExtension',
         `window.addEventListener('message', event => {
             if (event.data.command === 'loaded-locals') {
-                registerLocals(window.component, event.data.values);
+                registerLocals(window.component, event.data.arg);
             }
         });`
     );
