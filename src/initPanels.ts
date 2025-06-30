@@ -40,8 +40,28 @@ function registerPanelCommand(
   });
 }
 
+interface CtMessage {
+  command: string;
+  eventKind: any;
+  value: any;
+  isDap: boolean;
+  shouldReturnValue: boolean;
+}
+
+interface DapMessage {
+  command: string;
+  value: any;
+}
+
+function dapRedirect(
+  dapMessage: DapMessage,
+  shouldReturnValue: boolean,
+  panel: any
+) {}
+
 function createStatePanel(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  viewsApi: any
 ): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
@@ -50,9 +70,23 @@ function createStatePanel(
       getContent: utils.getStateWebviewContent,
     },
     context,
-    (message, panel) => {
+    (message: CtMessage, panel: any) => {
       const command = message.command;
       console.log(command);
+      if (message.isDap) {
+        let webviewSubscriber = { webview: panel.webview };
+        viewsApi.receive(message.eventKind, message.value, webviewSubscriber);
+      }
+  
+      }
+
+      // redirect
+      // json; protocol; send
+      // -> vscode;
+      // methods;
+      // json;
+      // something that redirects those;
+
       // TODO: if dap request; maybe detecting by additional field?; resend or send to dap directly(or through a service)
     }
   );
@@ -120,12 +154,13 @@ function createTerminalPanel(
   );
 }
 
-export function initPanels(context: vscode.ExtensionContext): CodeTracerPanels {
-  const state = (panelMap.state = createStatePanel(context));
-  panelCommands.state = registerPanelCommand(
-    "openState",
-    context,
-    createStatePanel
+export function initPanels(
+  context: vscode.ExtensionContext,
+  viewsApi: any
+): CodeTracerPanels {
+  const state = (panelMap.state = createStatePanel(context, viewsApi));
+  panelCommands.state = registerPanelCommand("openState", context, () =>
+    createStatePanel(context, viewsApi)
   );
 
   const calltrace = (panelMap.calltrace = createCalltracePanel(context));

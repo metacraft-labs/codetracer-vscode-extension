@@ -1,50 +1,48 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
 
 export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
-    constructor(private context: vscode.ExtensionContext) { }
+  constructor(private context: vscode.ExtensionContext) {}
 
-    resolveWebviewView(
-        webviewView: vscode.WebviewView,
-        _context: vscode.WebviewViewResolveContext,
-        _token: vscode.CancellationToken
-    ) {
-        const webview = webviewView.webview;
-        webview.options = {
-            enableScripts: true,
-            localResourceRoots: [
-                vscode.Uri.joinPath(this.context.extensionUri, 'media')
-            ]
-        };
+  resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ) {
+    const webview = webviewView.webview;
+    webview.options = {
+      enableScripts: true,
+      localResourceRoots: [
+        vscode.Uri.joinPath(this.context.extensionUri, "media"),
+      ],
+    };
 
-        webview.html = this.getHtml();
-        webviewView.webview.onDidReceiveMessage(
-            message => {
-                switch (message.command) {
-                    case 'toggleCT':
-                        vscode.commands.executeCommand('ct-vscode.toggleCT');
-                        break;
-                    case 'openState':
-                        vscode.commands.executeCommand('ct-vscode.openState');
-                        break;
-                    case 'openScratchpad':
-                        vscode.commands.executeCommand('ct-vscode.openScratchpad');
-                        break;
-                    case 'openCalltrace':
-                        vscode.commands.executeCommand('ct-vscode.openCalltrace');
-                        break;
-                    case 'openEventLog':
-                        vscode.commands.executeCommand('ct-vscode.openEventLog');
-                        break;
-                    case 'openTerminalOutput':
-                        vscode.commands.executeCommand('ct-vscode.openTerminalOutput');
-                        break;
-                }
-            },
-        );
-    }
+    webview.html = this.getHtml();
+    webviewView.webview.onDidReceiveMessage((message) => {
+      switch (message.command) {
+        case "toggleCT":
+          vscode.commands.executeCommand("ct-vscode.toggleCT");
+          break;
+        case "openState":
+          vscode.commands.executeCommand("ct-vscode.openState");
+          break;
+        case "openScratchpad":
+          vscode.commands.executeCommand("ct-vscode.openScratchpad");
+          break;
+        case "openCalltrace":
+          vscode.commands.executeCommand("ct-vscode.openCalltrace");
+          break;
+        case "openEventLog":
+          vscode.commands.executeCommand("ct-vscode.openEventLog");
+          break;
+        case "openTerminalOutput":
+          vscode.commands.executeCommand("ct-vscode.openTerminalOutput");
+          break;
+      }
+    });
+  }
 
-    private getHtml(): string {
-        return `
+  private getHtml(): string {
+    return `
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -91,48 +89,72 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
           </body>
           </html>
         `;
-    }
+  }
 }
 
-function getUiJs(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): vscode.Uri {
-    return panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(context.extensionUri, 'media', 'ui.js')
-    );
+function getUiJs(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext
+): vscode.Uri {
+  return panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "ui.js")
+  );
 }
 
-function getFrontendBundle(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): vscode.Uri {
-    return panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(context.extensionUri, 'media', 'frontend_bundle.js')
-    );
+function getFrontendBundle(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext
+): vscode.Uri {
+  return panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "frontend_bundle.js")
+  );
 }
 
-function getThirdParty(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): vscode.Uri {
-    return panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(context.extensionUri, 'media', 'third_party', 'jstree.min.js')
-    );
+function getThirdParty(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext
+): vscode.Uri {
+  return panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(
+      context.extensionUri,
+      "media",
+      "third_party",
+      "jstree.min.js"
+    )
+  );
 }
 
-function getDarkTheme(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): vscode.Uri {
-    return panel.webview.asWebviewUri(
-        vscode.Uri.joinPath(context.extensionUri, 'media', 'styles', 'default_dark_theme.css')
-    );
+function getDarkTheme(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext
+): vscode.Uri {
+  return panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(
+      context.extensionUri,
+      "media",
+      "styles",
+      "default_dark_theme.css"
+    )
+  );
 }
 
 function getCommonHtml(
-    panel: vscode.WebviewPanel,
-    context: vscode.ExtensionContext,
-    componentId: string,
-    componentFactory: string,
-    messageHandler?: string
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext,
+  componentId: string,
+  componentFactory: string,
+  messageHandler?: string
 ): string {
-    const uiJs = getUiJs(panel, context);
-    const frontendBundle = getFrontendBundle(panel, context);
-    const thirdParty = getThirdParty(panel, context);
-    const defaultDarkTheme = getDarkTheme(panel, context);
+  const uiJs = getUiJs(panel, context);
+  const frontendBundle = getFrontendBundle(panel, context);
+  const thirdParty = getThirdParty(panel, context);
+  const defaultDarkTheme = getDarkTheme(panel, context);
 
-    const messageHandlerScript = messageHandler ? `\n        ${messageHandler}` : '';
+  const messageHandlerScript = messageHandler
+    ? `\n        ${messageHandler}`
+    : "";
 
-    return `
+  return `
                 <!doctype html>
                 <html>
                         <head>
@@ -169,57 +191,72 @@ function getCommonHtml(
         `;
 }
 
-export function getStateWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    return getCommonHtml(
-        panel,
-        context,
-        'stateComponent',
-        'makeStateComponentForExtension',
-        `window.addEventListener('message', event => {
+export function getStateWebviewContent(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext
+): string {
+  return getCommonHtml(
+    panel,
+    context,
+    "stateComponent",
+    "makeStateComponentForExtension",
+    `window.addEventListener('message', event => {
             if (event.data.command === 'loaded-locals') {
                 registerLocals(window.component, event.data.arg);
             }
         });`
-    );
+  );
 }
 
-export function getCalltraceWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    return getCommonHtml(
-        panel,
-        context,
-        'calltraceComponent',
-        'makeCalltraceComponentForExtension',
-        `window.addEventListener('message', event => {
+export function getCalltraceWebviewContent(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext
+): string {
+  return getCommonHtml(
+    panel,
+    context,
+    "calltraceComponent",
+    "makeCalltraceComponentForExtension",
+    `window.addEventListener('message', event => {
             if (event.data.command === 'complete-call-move') {
                 updateCalltrace(window.component, event.data.callKey);
             }
         });`
-    );
+  );
 }
 
-export function getEventLogWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    return getCommonHtml(
-        panel,
-        context,
-        'eventLogComponent',
-        'makeEventLogComponentForExtension'
-    );
+export function getEventLogWebviewContent(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext
+): string {
+  return getCommonHtml(
+    panel,
+    context,
+    "eventLogComponent",
+    "makeEventLogComponentForExtension"
+  );
 }
 
-export function getScratchpadWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    return getCommonHtml(
-        panel,
-        context,
-        'scratchpadComponent',
-        'makeScratchpadComponentForExtension'
-    );
+export function getScratchpadWebviewContent(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext
+): string {
+  return getCommonHtml(
+    panel,
+    context,
+    "scratchpadComponent",
+    "makeScratchpadComponentForExtension"
+  );
 }
 
-export function getTerminalOutputWebviewContent(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): string {
-    return getCommonHtml(
-        panel,
-        context,
-        'terminalOutputComponent',
-        'makeTerminalOutputComponentForExtension'
-    );
+export function getTerminalOutputWebviewContent(
+  panel: vscode.WebviewPanel,
+  context: vscode.ExtensionContext
+): string {
+  return getCommonHtml(
+    panel,
+    context,
+    "terminalOutputComponent",
+    "makeTerminalOutputComponentForExtension"
+  );
 }
