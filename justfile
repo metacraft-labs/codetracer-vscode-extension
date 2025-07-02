@@ -6,7 +6,7 @@ build:
         nix develop \
             --extra-experimental-features nix-command \
             --extra-experimental-features flakes \
-            .#devShells.x86_64-linux.default --command ./build_ui_js.sh ../../media/ui.js && \
+            .#devShells.x86_64-linux.default --command ./build_extension_files.sh ../../media/ui.js ../../media/ct_vscode.js && \
         popd;
     if [[ ! -e ./media/frontend_bundle.js && ! -f ./media/frontend_bundle.js ]]; then
         rm -f ./media/frontend_bundle.js
@@ -22,6 +22,7 @@ build:
         ln -s $(pwd)/libs/codetracer/src/build-debug/frontend/styles/default_dark_theme.css ./media/styles/default_dark_theme.css
     fi;
     npm run compile
+    cp ./media/ct_vscode.js out/ct_vscode.js
 
 build-npm:
     npm run compile

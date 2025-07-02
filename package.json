@@ -17,7 +17,7 @@
       {
         "type": "codetracer-debug",
         "label": "Codetracer Debugger",
-        "program": "/home/alexander92/codetracer/src/build-debug/bin/db-backend",
+        "program": "/home/alexander92/ct_vscode_extension/libs/codetracer/src/build-debug/bin/db-backend",
         "args": [
           "--stdio"
         ],

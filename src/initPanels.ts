@@ -77,8 +77,6 @@ function createStatePanel(
         let webviewSubscriber = { webview: panel.webview };
         viewsApi.receive(message.eventKind, message.value, webviewSubscriber);
       }
-  
-      }
 
       // redirect
       // json; protocol; send

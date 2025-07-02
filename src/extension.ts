@@ -8,7 +8,7 @@ import {
   setupVsCodeExtensionViewsApi,
   newVsCodeDap,
   setupVsCodeBackendApi,
-} from "./ct";
+} from "./ct_vscode.js";
 
 let backendProcess: ChildProcess | null = null;
 
@@ -59,7 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
         let viewsApi = setupVsCodeExtensionViewsApi(
           "vscode-extension-to-views"
         );
-        let vsCodeDap = newVsCodeDap(context);
+        let vsCodeDap = newVsCodeDap(vscode, context);
         let backendApi = setupVsCodeBackendApi(
           "vscode-extension-to-backend",
           vsCodeDap,
@@ -68,30 +68,30 @@ export function activate(context: vscode.ExtensionContext) {
         // we can still implement here onEvent
 
         const panels = initPanels(context, viewsApi);
-        // vscodeBackendApi.subscribe()
-        context.subscriptions.push(
-          vscode.debug.registerDebugAdapterTrackerFactory("*", {
-            createDebugAdapterTracker(session: vscode.DebugSession) {
-              return {
-                onDidSendMessage: async (msg) => {
-                  if (msg.type === "event" && msg.event === "stopped") {
-                    // ->
-                    // Currently the args are not used in the db-backend but are used in the rr-backend!
-                    let res =
-                      await vscode.debug.activeDebugSession?.customRequest(
-                        "ct/load-locals",
-                        { rrTicks: 0, countBudget: 0, minCountLimit: 0 }
-                      );
-                    panels.state.webview.postMessage({
-                      command: "loaded-locals",
-                      arg: res,
-                    });
-                  }
-                },
-              };
-            },
-          })
-        );
+
+        // context.subscriptions.push(
+        //   vscode.debug.registerDebugAdapterTrackerFactory("*", {
+        //     createDebugAdapterTracker(session: vscode.DebugSession) {
+        //       return {
+        //         onDidSendMessage: async (msg) => {
+        //           if (msg.type === "event" && msg.event === "stopped") {
+        //             // ->
+        //             // Currently the args are not used in the db-backend but are used in the rr-backend!
+        //             let res =
+        //               await vscode.debug.activeDebugSession?.customRequest(
+        //                 "ct/load-locals",
+        //                 { rrTicks: 0, countBudget: 0, minCountLimit: 0 }
+        //               );
+        //             panels.state.webview.postMessage({
+        //               command: "loaded-locals",
+        //               arg: res,
+        //             });
+        //           }
+        //         },
+        //       };
+        //     },
+        //   })
+        // );
 
         const debugConfig = {
           type: "codetracer-debug",
