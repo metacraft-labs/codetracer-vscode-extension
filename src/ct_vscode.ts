@@ -42,3 +42,10 @@ export declare function setupMiddlewareApis(
   dapApi: DapVsCodeApi,
   viewsApi: MediatorWithSubscribers
 ): void;
+
+export declare function receive(
+  api: MediatorWithSubscribers,
+  kind: any, // ct event kind
+  rawValue: any,
+  subscriber: any // not typed here
+): void;

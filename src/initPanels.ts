@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { getOrCreatePanel } from "./panelManager";
 import * as utils from "./utils";
+import { receive } from "./ct_vscode";
 
 export interface CodeTracerPanels {
   state: vscode.WebviewPanel;
@@ -41,11 +42,11 @@ function registerPanelCommand(
 }
 
 interface CtMessage {
-  command: string;
-  eventKind: any;
+  // command: string;
+  kind: any;
   value: any;
-  isDap: boolean;
-  shouldReturnValue: boolean;
+  // isDap: boolean;
+  // shouldReturnValue: boolean;
 }
 
 interface DapMessage {
@@ -71,21 +72,9 @@ function createStatePanel(
     },
     context,
     (message: CtMessage, panel: any) => {
-      const command = message.command;
-      console.log(command);
-      if (message.isDap) {
-        let webviewSubscriber = { webview: panel.webview };
-        viewsApi.receive(message.eventKind, message.value, webviewSubscriber);
-      }
-
-      // redirect
-      // json; protocol; send
-      // -> vscode;
-      // methods;
-      // json;
-      // something that redirects those;
-
-      // TODO: if dap request; maybe detecting by additional field?; resend or send to dap directly(or through a service)
+      console.log(message);
+      let webviewSubscriber = { webview: panel.webview };
+      receive(viewsApi, message.kind, message.value, webviewSubscriber);
     }
   );
 }

@@ -200,11 +200,8 @@ export function getStateWebviewContent(
     context,
     "stateComponent",
     "makeStateComponentForExtension",
-    `window.addEventListener('message', event => {
-            if (event.data.command === 'loaded-locals') {
-                registerLocals(window.component, event.data.arg);
-            }
-        });`
+    `let viewsApi = newVsCodeViewApi("state view api", vscode, window);
+     registerStateComponent(window.component, viewsApi);`
   );
 }
 
