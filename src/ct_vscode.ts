@@ -20,9 +20,11 @@ export interface MediatorWithSubscribers {
   asSubscriber: any; // not typed here for now
   subscribers: any[]; // not typed here for now
   handlers: any[]; // not typed here for now
+  isRemote: boolean;
 }
 
-export interface VsCodeDapApi {
+export interface DapVsCodeApi {
+  handlers: any[]; // handler functions, for now not typed here
   context: vscode.ExtensionContext;
   vscode: any; // module vscode
 }
@@ -31,13 +33,12 @@ export declare function setupVsCodeExtensionViewsApi(
   name: string
 ): MediatorWithSubscribers;
 
-export declare function newVsCodeDap(
+export declare function newDapVsCodeApi(
   vscode: any,
   context: vscode.ExtensionContext
-): VsCodeDapApi;
+): DapVsCodeApi;
 
-export declare function setupVsCodeBackendApi(
-  name: string,
-  dapApi: VsCodeDapApi,
+export declare function setupMiddlewareApis(
+  dapApi: DapVsCodeApi,
   viewsApi: MediatorWithSubscribers
-): MediatorWithSubscribers;
+): void;

@@ -3,11 +3,11 @@ import { ChildProcess } from "child_process";
 import { initPanels, disposePanels, disposeCommands } from "./initPanels";
 import * as utils from "./utils";
 import {
-  Mediator,
-  VsCodeDapApi,
+  MediatorWithSubscribers,
+  DapVsCodeApi,
   setupVsCodeExtensionViewsApi,
-  newVsCodeDap,
-  setupVsCodeBackendApi,
+  newDapVsCodeApi,
+  setupMiddlewareApis,
 } from "./ct_vscode.js";
 
 let backendProcess: ChildProcess | null = null;
@@ -59,13 +59,9 @@ export function activate(context: vscode.ExtensionContext) {
         let viewsApi = setupVsCodeExtensionViewsApi(
           "vscode-extension-to-views"
         );
-        let vsCodeDap = newVsCodeDap(vscode, context);
-        let backendApi = setupVsCodeBackendApi(
-          "vscode-extension-to-backend",
-          vsCodeDap,
-          viewsApi
-        );
-        // we can still implement here onEvent
+        let dapVsCodeApi = newDapVsCodeApi(vscode, context);
+
+        let backendApi = setupMiddlewareApis(dapVsCodeApi, viewsApi);
 
         const panels = initPanels(context, viewsApi);
 
