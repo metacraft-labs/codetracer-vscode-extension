@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { getOrCreatePanel } from "./panelManager";
 import * as utils from "./utils";
-import { receive } from "./ct_vscode";
+import { receive, newWebviewSubscriber } from "./ct_vscode";
 
 export interface CodeTracerPanels {
   state: vscode.WebviewPanel;
@@ -72,8 +72,8 @@ function createStatePanel(
     },
     context,
     (message: CtMessage, panel: any) => {
-      console.log(message);
-      let webviewSubscriber = { webview: panel.webview };
+      console.log("received from webview: ", message);
+      let webviewSubscriber = newWebviewSubscriber(panel.webview);
       receive(viewsApi, message.kind, message.value, webviewSubscriber);
     }
   );

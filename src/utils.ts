@@ -182,8 +182,11 @@ function getCommonHtml(
                                 <script>
                                         let component = null
                                         window.addEventListener('DOMContentLoaded', () => {
-                                                window.component = ${componentFactory}('${componentId}-0');
-                                        });${messageHandlerScript}
+                                            window.component = ${componentFactory}('${componentId}-0');
+                                            // for now the message handler/api setup code depends on
+                                            // window.component/component being initialized
+                                            ${messageHandlerScript}
+                                        });
                                 </script>
                         </body>
                 </html>
@@ -201,6 +204,7 @@ export function getStateWebviewContent(
     "stateComponent",
     "makeStateComponentForExtension",
     `let viewsApi = newVsCodeViewApi("state view api", vscode, window);
+     window.viewsApi = viewsApi; // for easier debugging
      registerStateComponent(window.component, viewsApi);`
   );
 }

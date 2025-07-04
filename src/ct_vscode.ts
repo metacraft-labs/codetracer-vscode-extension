@@ -7,11 +7,11 @@ import * as vscode from "vscode";
 
 // this class has emit, subscribe etc methods but mostly availabe in nim for now..
 // here used mostly as an opaque type
-export interface Mediator {
-  name: string;
-  transport: any; // not typed here for now
-  asSubscriber: any; // not typed here for now
-}
+// export interface Mediator {
+//   name: string;
+//   transport: any; // not typed here for now
+//   asSubscriber: any; // not typed here for now
+// }
 
 // inheriting the Mediator type/class in nim
 export interface MediatorWithSubscribers {
@@ -27,6 +27,10 @@ export interface DapVsCodeApi {
   handlers: any[]; // handler functions, for now not typed here
   context: vscode.ExtensionContext;
   vscode: any; // module vscode
+}
+
+export interface WebviewSubscriber {
+  webview: vscode.Webview;
 }
 
 export declare function setupVsCodeExtensionViewsApi(
@@ -49,3 +53,7 @@ export declare function receive(
   rawValue: any,
   subscriber: any // not typed here
 ): void;
+
+export declare function newWebviewSubscriber(
+  webview: vscode.Webview
+): WebviewSubscriber;

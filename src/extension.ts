@@ -56,38 +56,16 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        let viewsApi = setupVsCodeExtensionViewsApi(
+        const viewsApi = setupVsCodeExtensionViewsApi(
           "vscode-extension-to-views"
         );
-        let dapVsCodeApi = newDapVsCodeApi(vscode, context);
+        (vscode.window as any).viewsApi = viewsApi; // easier debugging
+        const dapVsCodeApi = newDapVsCodeApi(vscode, context);
 
-        let backendApi = setupMiddlewareApis(dapVsCodeApi, viewsApi);
+        setupMiddlewareApis(dapVsCodeApi, viewsApi);
 
         const panels = initPanels(context, viewsApi);
-
-        // context.subscriptions.push(
-        //   vscode.debug.registerDebugAdapterTrackerFactory("*", {
-        //     createDebugAdapterTracker(session: vscode.DebugSession) {
-        //       return {
-        //         onDidSendMessage: async (msg) => {
-        //           if (msg.type === "event" && msg.event === "stopped") {
-        //             // ->
-        //             // Currently the args are not used in the db-backend but are used in the rr-backend!
-        //             let res =
-        //               await vscode.debug.activeDebugSession?.customRequest(
-        //                 "ct/load-locals",
-        //                 { rrTicks: 0, countBudget: 0, minCountLimit: 0 }
-        //               );
-        //             panels.state.webview.postMessage({
-        //               command: "loaded-locals",
-        //               arg: res,
-        //             });
-        //           }
-        //         },
-        //       };
-        //     },
-        //   })
-        // );
+        (vscode.window as any).panels = panels; // easier debugging
 
         const debugConfig = {
           type: "codetracer-debug",
