@@ -218,11 +218,9 @@ export function getCalltraceWebviewContent(
     context,
     "calltraceComponent",
     "makeCalltraceComponentForExtension",
-    `window.addEventListener('message', event => {
-            if (event.data.command === 'complete-call-move') {
-                updateCalltrace(window.component, event.data.callKey);
-            }
-        });`
+    `let viewsApi = newVsCodeViewApi("calltrace view api", vscode, window);
+     window.viewsApi = viewsApi; // for easier debugging
+     registerCalltraceComponent(window.component, viewsApi);`
   );
 }
 

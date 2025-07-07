@@ -80,7 +80,8 @@ function createStatePanel(
 }
 
 function createCalltracePanel(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  viewsApi: any
 ): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
@@ -89,15 +90,10 @@ function createCalltracePanel(
       getContent: utils.getCalltraceWebviewContent,
     },
     context,
-    (message, panel) => {
-      const command = String.fromCharCode(...message.command);
-      if (command === "calltrace-jump") {
-        console.log(message.callKey);
-        panel.webview.postMessage({
-          command: "complete-call-move",
-          callKey: message.callKey,
-        });
-      }
+    (message: CtMessage, panel: any) => {
+      console.log("received from webview: ", message);
+      let webviewSubscriber = newWebviewSubscriber(panel.webview);
+      receive(viewsApi, message.kind, message.value, webviewSubscriber);
     }
   );
 }
@@ -150,11 +146,9 @@ export function initPanels(
     createStatePanel(context, viewsApi)
   );
 
-  const calltrace = (panelMap.calltrace = createCalltracePanel(context));
-  panelCommands.calltrace = registerPanelCommand(
-    "openCalltrace",
-    context,
-    createCalltracePanel
+  const calltrace = (panelMap.calltrace = createCalltracePanel(context, viewsApi));
+  panelCommands.calltrace = registerPanelCommand("openCalltrace", context, () =>
+    createStatePanel(context, viewsApi)
   );
 
   const scratchpad = (panelMap.scratchpad = createScratchpadPanel(context));
