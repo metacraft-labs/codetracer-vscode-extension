@@ -1,12 +1,13 @@
 build:
     #!/usr/bin/env bash
     mkdir -p ./media
-    
+    mkdir -p ./backend
+
     pushd libs/codetracer && \
         nix develop \
             --extra-experimental-features nix-command \
             --extra-experimental-features flakes \
-            .#devShells.x86_64-linux.default --command ./build_extension_files.sh ../../media/ui.js ../../media/ct_vscode.js && \
+            .#devShells.x86_64-linux.default --command ./build_for_extension.sh ../../media/ui.js ../../media/ct_vscode.js ../../backend/db-backend && \ 
         popd;
     if [[ ! -e ./media/frontend_bundle.js && ! -f ./media/frontend_bundle.js ]]; then
         rm -f ./media/frontend_bundle.js

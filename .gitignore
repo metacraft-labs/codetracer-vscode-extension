@@ -4,6 +4,7 @@ out/
 dist/
 
 media
+backend
 # TypeScript build artifacts
 *.tsbuildinfo
 
