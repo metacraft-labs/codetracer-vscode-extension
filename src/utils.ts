@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
-  constructor(private context: vscode.ExtensionContext) {}
+  constructor(private context: vscode.ExtensionContext) { }
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -232,7 +232,10 @@ export function getEventLogWebviewContent(
     panel,
     context,
     "eventLogComponent",
-    "makeEventLogComponentForExtension"
+    "makeEventLogComponentForExtension",
+    `let viewsApi = newVsCodeViewApi("eventLog view api", vscode, window);
+     window.viewsApi = viewsApi; // for easier debugging
+     registerEventLogComponent(window.component, viewsApi);`
   );
 }
 
