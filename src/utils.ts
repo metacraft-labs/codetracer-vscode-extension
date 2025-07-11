@@ -259,6 +259,9 @@ export function getTerminalOutputWebviewContent(
     panel,
     context,
     "terminalOutputComponent",
-    "makeTerminalOutputComponentForExtension"
+    "makeTerminalOutputComponentForExtension",
+    `let viewsApi = newVsCodeViewApi("terminal view api", vscode, window);
+     window.viewsApi = viewsApi; // for easier debugging
+     registerTerminalOutputComponent(window.component, viewsApi);`
   );
 }

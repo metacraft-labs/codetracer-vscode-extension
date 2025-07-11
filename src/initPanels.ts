@@ -58,7 +58,7 @@ function dapRedirect(
   dapMessage: DapMessage,
   shouldReturnValue: boolean,
   panel: any
-) {}
+) { }
 
 function createStatePanel(
   context: vscode.ExtensionContext,
@@ -112,7 +112,8 @@ function createScratchpadPanel(
 }
 
 function createEventLogPanel(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  viewsApi: any
 ): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
@@ -120,12 +121,18 @@ function createEventLogPanel(
       title: "Event Log",
       getContent: utils.getEventLogWebviewContent,
     },
-    context
+    context,
+    (message: CtMessage, panel: any) => {
+      console.log("received from webview: ", message);
+      let webviewSubscriber = newWebviewSubscriber(panel.webview);
+      receive(viewsApi, message.kind, message.value, webviewSubscriber);
+    }
   );
 }
 
 function createTerminalPanel(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  viewsApi: any
 ): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
@@ -133,7 +140,12 @@ function createTerminalPanel(
       title: "Terminal",
       getContent: utils.getTerminalOutputWebviewContent,
     },
-    context
+    context,
+    (message: CtMessage, panel: any) => {
+      console.log("received from webview: ", message);
+      let webviewSubscriber = newWebviewSubscriber(panel.webview);
+      receive(viewsApi, message.kind, message.value, webviewSubscriber);
+    }
   );
 }
 
@@ -148,7 +160,7 @@ export function initPanels(
 
   const calltrace = (panelMap.calltrace = createCalltracePanel(context, viewsApi));
   panelCommands.calltrace = registerPanelCommand("openCalltrace", context, () =>
-    createStatePanel(context, viewsApi)
+    createCalltracePanel(context, viewsApi)
   );
 
   const scratchpad = (panelMap.scratchpad = createScratchpadPanel(context));
@@ -158,19 +170,19 @@ export function initPanels(
     createScratchpadPanel
   );
 
-  const eventLog = (panelMap.eventLog = createEventLogPanel(context));
+  const eventLog = (panelMap.eventLog = createEventLogPanel(context, viewsApi));
   panelCommands.eventLog = registerPanelCommand(
     "openEventLog",
     context,
-    createEventLogPanel
+    () => createEventLogPanel(context, viewsApi)
   );
 
   const terminalOutput = (panelMap.terminalOutput =
-    createTerminalPanel(context));
+    createTerminalPanel(context, viewsApi));
   panelCommands.terminalOutput = registerPanelCommand(
     "openTerminalOutput",
     context,
-    createTerminalPanel
+    () => createTerminalPanel(context, viewsApi)
   );
 
   setTimeout(() => {
