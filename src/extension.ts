@@ -72,7 +72,7 @@ export function activate(context: vscode.ExtensionContext) {
           request: "launch",
           name: "Launch Codetracer",
           cwd: "",
-          traceFolder: "~/.local/share/codetracer/trace-4",
+          traceFolder: "~/.local/share/codetracer/trace-3",
         };
 
         const started = await vscode.debug.startDebugging(
