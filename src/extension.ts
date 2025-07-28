@@ -7,7 +7,8 @@ import {
   DapVsCodeApi,
   setupVsCodeExtensionViewsApi,
   newDapVsCodeApi,
-  setupMiddlewareApis,
+  setupEditorApi,
+  setupMiddlewareApis
 } from "./ct_vscode.js";
 
 let backendProcess: ChildProcess | null = null;
@@ -61,8 +62,9 @@ export function activate(context: vscode.ExtensionContext) {
         );
         (vscode.window as any).viewsApi = viewsApi; // easier debugging
         const dapVsCodeApi = newDapVsCodeApi(vscode, context);
-
+		
         setupMiddlewareApis(dapVsCodeApi, viewsApi);
+        setupEditorApi(dapVsCodeApi, vscode, context, vscode.window.activeTextEditor);
 
         const panels = initPanels(context, viewsApi);
         (vscode.window as any).panels = panels; // easier debugging
