@@ -47,6 +47,18 @@ export declare function setupMiddlewareApis(
   viewsApi: MediatorWithSubscribers
 ): void;
 
+export declare function setupEditorApi(
+  dapApi: DapVsCodeApi,
+  vscode: any,
+  context: vscode.ExtensionContext,
+  editor: any,
+): void;
+
+export declare function registerEditorViewComponent(
+  component: any,
+  api: MediatorWithSubscribers
+): void;
+
 export declare function receive(
   api: MediatorWithSubscribers,
   kind: any, // ct event kind
