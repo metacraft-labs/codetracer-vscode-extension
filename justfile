@@ -25,5 +25,9 @@ build:
     npm run compile
     cp ./media/ct_vscode.js out/ct_vscode.js
 
+    if [ ! -L ~/codetracer-data ] && [ ! -e ~/codetracer-data ]; then \
+        ln -s ~/.local/share/codetracer ~/codetracer-data;
+    fi
+
 build-npm:
     npm run compile

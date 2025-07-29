@@ -27,6 +27,8 @@ export interface DapVsCodeApi {
   handlers: any[]; // handler functions, for now not typed here
   context: vscode.ExtensionContext;
   vscode: any; // module vscode
+  flowFunction: (editor: any, update: any) => void;
+  completeMoveFunction: (editor: any, response: any, dapApi: DapVsCodeApi) => void;
 }
 
 export interface WebviewSubscriber {
@@ -57,6 +59,20 @@ export declare function setupEditorApi(
 export declare function registerEditorViewComponent(
   component: any,
   api: MediatorWithSubscribers
+): void;
+
+export declare function vsUpdatedFlow(
+  editor: any,
+  update: any
+): void;
+
+// export declare const vsUpdatedFlow: any;
+// export declare const completeMove: any;
+
+export declare function completeMove(
+  editor: any,
+  response: any,
+  dapApi: DapVsCodeApi
 ): void;
 
 export declare function receive(
