@@ -13,7 +13,9 @@ import {
   setupEditorApi,
   setupMiddlewareApis,
   completeMove,
-  vsUpdatedFlow
+  vsUpdatedFlow,
+  ctSourceLineJump,
+  CtJumpBehaviour
 } from "./ct_vscode.js";
 
 let backendProcess: ChildProcess | null = null;
@@ -37,7 +39,7 @@ async function pickTraceFolder(): Promise<string | undefined> {
   return undefined;
 }
 
-async function toggleCt(context: vscode.ExtensionContext) {
+async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi) {
   if (ctStarted) {
     // Stop CT
     ctStarted = false;
@@ -55,15 +57,18 @@ async function toggleCt(context: vscode.ExtensionContext) {
       await vscode.commands.executeCommand("workbench.action.debug.stop");
     }
 
+    // Toggle off context menu functions
+    vscode.commands.executeCommand('setContext', 'codetracer:active', false);
+
   } else {
     // Start CT
-    
+
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
       vscode.window.showErrorMessage("No workspace folder is open.");
       return;
     }
-    
+
     // Trace selector
     const selectedFile = await pickTraceFolder()
     if (!selectedFile) {
@@ -75,7 +80,7 @@ async function toggleCt(context: vscode.ExtensionContext) {
       "vscode-extension-to-views"
     );
     (vscode.window as any).viewsApi = viewsApi; // easier debugging
-    const dapVsCodeApi = newDapVsCodeApi(vscode, context);
+    
     (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
 
     // Setup middleware
@@ -85,7 +90,7 @@ async function toggleCt(context: vscode.ExtensionContext) {
     // console.log(dapVsCodeApi);
     setupMiddlewareApis(dapVsCodeApi, viewsApi);
     // setupEditorApi(dapVsCodeApi, vscode, context, vscode.window.activeTextEditor);
-    
+
     // Initialize panels
     const panels = initPanels(context, viewsApi);
     (vscode.window as any).panels = panels; // easier debugging
@@ -131,13 +136,19 @@ async function toggleCt(context: vscode.ExtensionContext) {
     }
 
     ctStarted = true;
+
+    // Toggle on context menu functions
+    vscode.commands.executeCommand('setContext', 'codetracer:active', true);
+
   }
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  const dapVsCodeApi = newDapVsCodeApi(vscode, context);
+
   const toggleCT = vscode.commands.registerCommand(
     "ct-vscode.toggleCT",
-    async () => toggleCt(context)
+    async () => toggleCt(context, dapVsCodeApi)
   );
 
   context.subscriptions.push(toggleCT);
@@ -152,8 +163,47 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.debug.onDidTerminateDebugSession(async (session) => {
       if (session.type === "codetracer-debug") {
-        toggleCt(context);
+        toggleCt(context, dapVsCodeApi);
       }
+    })
+  );
+
+  // context menu functions setup
+  context.subscriptions.push(
+    vscode.commands.registerCommand("ct-vscode.smartSourceLineJump", () => {
+      const editor = vscode.window.activeTextEditor;
+
+      if (editor == null) return;
+
+      const line = editor.selection.active.line + 1;
+      const filePath = editor.document.uri.fsPath;
+
+      ctSourceLineJump(dapVsCodeApi, line, filePath, CtJumpBehaviour.SmartJump)
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("ct-vscode.forwardSourceLineJump", () => {
+      const editor = vscode.window.activeTextEditor;
+
+      if (!editor) return;
+
+      const line = editor.selection.active.line + 1;
+      const filePath = editor.document.uri.fsPath;
+
+      ctSourceLineJump(dapVsCodeApi, line, filePath, CtJumpBehaviour.ForwardJump);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("ct-vscode.backwardSourceLineJump", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (editor == null) return;
+
+      const line = editor.selection.active.line + 1;
+      const filePath = editor.document.uri.fsPath;
+
+      ctSourceLineJump(dapVsCodeApi, line, filePath, CtJumpBehaviour.BackwardJump)
     })
   );
 }
