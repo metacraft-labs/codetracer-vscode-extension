@@ -65,8 +65,42 @@
         "command": "ct-vscode.openTerminalOutput",
         "title": "Open Terminal Output Panel",
         "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.smartSourceLineJump",
+        "title": "Jump to line",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.forwardSourceLineJump",
+        "title": "Jump forward to line",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.backwardSourceLineJump",
+        "title": "Jump backward to line",
+        "category": "CodeTracer"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "ct-vscode.smartSourceLineJump",
+          "when": "codetracer:active",
+          "group": "navigation"
+        },
+        {
+          "command": "ct-vscode.forwardSourceLineJump",
+          "when": "codetracer:active",
+          "group": "navigation"
+        },
+        {
+          "command": "ct-vscode.backwardSourceLineJump",
+          "when": "codetracer:active",
+          "group": "navigation"
+        }
+      ]
+    },
     "keybindings": [
       {
         "key": "enter",

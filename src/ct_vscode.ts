@@ -49,6 +49,13 @@ export declare function setupMiddlewareApis(
   viewsApi: MediatorWithSubscribers
 ): void;
 
+export declare function ctSourceLineJump(
+  dapApi: DapVsCodeApi,
+  line: number,
+  path: string,
+  behaviour: number
+): void;
+
 export declare function setupEditorApi(
   dapApi: DapVsCodeApi,
   vscode: any,
@@ -85,3 +92,9 @@ export declare function receive(
 export declare function newWebviewSubscriber(
   webview: vscode.Webview
 ): WebviewSubscriber;
+
+export const enum CtJumpBehaviour {
+  SmartJump = 0,
+  ForwardJump = 1,
+  BackwardJump = 2
+}
