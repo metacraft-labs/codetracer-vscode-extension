@@ -133,7 +133,7 @@ function getDarkTheme(
       context.extensionUri,
       "media",
       "styles",
-      "default_dark_theme.css"
+      "default_dark_theme_extension.css"
     )
   );
 }

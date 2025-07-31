@@ -17,10 +17,10 @@ build:
         rm -rf ./media/third_party
         ln -s $(pwd)/libs/codetracer/src/public/third_party media/third_party
     fi;
-    if [[ ! -e ./media/styles/default_dark_theme.css && ! -f ./media/styles/default_dark_theme.css ]]; then
-        rm -f ./media/styles/default_dark_theme.css
+    if [[ ! -e ./media/styles/default_dark_theme_extension.css && ! -f ./media/styles/default_dark_theme_extension.css ]]; then
+        rm -f ./media/styles/default_dark_theme_extension.css
         mkdir -p ./media/styles
-        ln -s $(pwd)/libs/codetracer/src/build-debug/frontend/styles/default_dark_theme.css ./media/styles/default_dark_theme.css
+        ln -s $(pwd)/libs/codetracer/src/build-debug/frontend/styles/default_dark_theme_extension.css ./media/styles/default_dark_theme_extension.css
     fi;
     npm run compile
     cp ./media/ct_vscode.js out/ct_vscode.js
