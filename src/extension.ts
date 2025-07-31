@@ -163,7 +163,9 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.debug.onDidTerminateDebugSession(async (session) => {
       if (session.type === "codetracer-debug") {
-        toggleCt(context, dapVsCodeApi);
+        if (ctStarted) {
+          toggleCt(context, dapVsCodeApi);
+        }
       }
     })
   );
