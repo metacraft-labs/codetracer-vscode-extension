@@ -1,12 +1,25 @@
+## 📥 Running from an Existing Clone
 
-## 📥 Running After Download
+If you already have the repository cloned, the following commands bring it up to date and start the extension:
 
-If you cloned the repository and need to run a specific branch, use these commands to set up the extension:
+1. **Update your branch**
 
-```bash
-git pull <branch-name>
-git submodule update --init --recursive
-just build
-```
+   ```bash
+   git pull
+   ```
 
-Open `src/extension.ts` in VS Code and press <kbd>F5</kbd> to launch the Extension Development Host for testing.
+2. **Synchronize submodules**
+
+   ```bash
+   git submodule update --init --recursive
+   ```
+
+3. **Build the extension**
+
+   ```bash
+   just build
+   ```
+
+4. **Test in VS Code**
+
+   Open `src/extension.ts` in VS Code and press `F5` to launch the Extension Development Host.
