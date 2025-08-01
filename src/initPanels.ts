@@ -99,7 +99,8 @@ function createCalltracePanel(
 }
 
 function createScratchpadPanel(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  viewsApi: any
 ): vscode.WebviewPanel {
   return getOrCreatePanel(
     {
@@ -107,7 +108,12 @@ function createScratchpadPanel(
       title: "Scratchpad",
       getContent: utils.getScratchpadWebviewContent,
     },
-    context
+    context,
+    (message: CtMessage, panel: any) => {
+      console.log("received from webview: ", message);
+      let webviewSubscriber = newWebviewSubscriber(panel.webview);
+      receive(viewsApi, message.kind, message.value, webviewSubscriber);
+    }
   );
 }
 
@@ -163,11 +169,11 @@ export function initPanels(
     createCalltracePanel(context, viewsApi)
   );
 
-  const scratchpad = (panelMap.scratchpad = createScratchpadPanel(context));
+  const scratchpad = (panelMap.scratchpad = createScratchpadPanel(context, viewsApi));
   panelCommands.scratchpad = registerPanelCommand(
     "openScratchpad",
     context,
-    createScratchpadPanel
+    () => createScratchpadPanel(context, viewsApi)
   );
 
   const eventLog = (panelMap.eventLog = createEventLogPanel(context, viewsApi));

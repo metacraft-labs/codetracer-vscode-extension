@@ -167,6 +167,7 @@ function getCommonHtml(
                         </script>
                         </head>
                         <body>
+                                <div id="context-menu-container" style="display: none;"></div>
                                 <div id='${componentId}-0' class='component-container active-state'></div>
 
                                 <footer>
