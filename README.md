@@ -23,3 +23,5 @@ If you already have the repository cloned, the following commands bring it up to
 4. **Test in VS Code**
 
    Open `src/extension.ts` in VS Code and press `F5` to launch the Extension Development Host.
+
+NOTE: You will need to have a trace recording in `~/.local/share/codetracer/` to have them listed on `ToggleCT`
