@@ -23,6 +23,11 @@ export interface MediatorWithSubscribers {
   isRemote: boolean;
 }
 
+export interface TraceInfo {
+  outputFolder: string,
+  program: string
+}
+
 export interface DapVsCodeApi {
   handlers: any[]; // handler functions, for now not typed here
   context: vscode.ExtensionContext;
@@ -38,6 +43,8 @@ export interface WebviewSubscriber {
 export declare function setupVsCodeExtensionViewsApi(
   name: string
 ): MediatorWithSubscribers;
+
+export declare function getRecentTraces(): Promise<Array<TraceInfo> | undefined>
 
 export declare function newDapVsCodeApi(
   vscode: any,
