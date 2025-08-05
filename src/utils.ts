@@ -9,6 +9,24 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ) {
     const webview = webviewView.webview;
+    const fontUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(
+        this.context.extensionUri,
+        'media',
+        'fonts',
+        'SpaceGrotesk-VariableFont_wght.ttf'
+      )
+    );
+
+    const darkCssUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(
+        this.context.extensionUri,
+        'media',
+        'styles',
+        'default_dark_theme_extension.css'
+      )
+    );
+
     webview.options = {
       enableScripts: true,
       localResourceRoots: [
@@ -16,7 +34,7 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
       ],
     };
 
-    webview.html = this.getHtml();
+    webview.html = this.getHtml(darkCssUri, fontUri);
     webviewView.webview.onDidReceiveMessage((message) => {
       switch (message.command) {
         case "toggleCT":
@@ -41,27 +59,32 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private getHtml(): string {
+  private getHtml(cssUri: vscode.Uri, fontUri: vscode.Uri): string {
     return `
           <!DOCTYPE html>
           <html lang="en">
           <head>
             <meta charset="UTF-8">
+            <link id='theme' rel='stylesheet' href='${cssUri}'>
             <style>
-              body { font-family: sans-serif; padding: 10px; }
-              div { display: flex; flex-direction: column }
+              @font-face {
+                font-family: 'SpaceGroteskVs';
+                src: url('${fontUri}') format('truetype');
+              }
+              body {
+                font-family: 'SpaceGroteskVs' !important;
+              }
             </style>
           </head>
-          <body>
-            <h3>Command Module</h3>
-            <button id="toggleBtn">Toggle CT</button>
-            </br>
-            <div>
-                <button id="state">Open State</button>
-                <button id="scratchpad">Open Scratchpad</button>
-                <button id="calltrace">Open Calltrace</button>
-                <button id="eventLog">Open EventLog</button>
-                <button id="terminalOutput">Open Terminal Output</button>
+          <body class="sidebar-menu-body">
+            <div class="sidebar-menu-header">COMMAND MODULE</div>
+            <div class="sidebar-menu-items">
+              <div class="sidebar-menu-item" id="toggleBtn">Toggle CT</div>
+              <div class="sidebar-menu-item" id="sidebar-state">Open State</div>
+              <div class="sidebar-menu-item" id="sidebar-scratchpad">Open Scratchpad</div>
+              <div class="sidebar-menu-item" id="sidebar-calltrace">Open Calltrace</div>
+              <div class="sidebar-menu-item" id="sidebar-eventLog">Open EventLog</div>
+              <div class="sidebar-menu-item" id="sidebar-terminalOutput">Open Terminal Output</div>
             </div>
             
       
@@ -70,19 +93,19 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
               document.getElementById('toggleBtn').addEventListener('click', () => {
                 vscode.postMessage({ command: 'toggleCT' });
               });
-              document.getElementById('state').addEventListener('click', () => {
+              document.getElementById('sidebar-state').addEventListener('click', () => {
                 vscode.postMessage({ command: 'openState' });
               });
-              document.getElementById('scratchpad').addEventListener('click', () => {
+              document.getElementById('sidebar-scratchpad').addEventListener('click', () => {
                 vscode.postMessage({ command: 'openScratchpad' });
               });
-              document.getElementById('calltrace').addEventListener('click', () => {
+              document.getElementById('sidebar-calltrace').addEventListener('click', () => {
                 vscode.postMessage({ command: 'openCalltrace' });
               });
-              document.getElementById('eventLog').addEventListener('click', () => {
+              document.getElementById('sidebar-eventLog').addEventListener('click', () => {
                 vscode.postMessage({ command: 'openEventLog' });
               });
-              document.getElementById('terminalOutput').addEventListener('click', () => {
+              document.getElementById('sidebar-terminalOutput').addEventListener('click', () => {
                 vscode.postMessage({ command: 'openTerminalOutput' });
               });
             </script>
@@ -156,7 +179,7 @@ function getCommonHtml(
 
   return `
                 <!doctype html>
-                <html>
+                <html class="component-container-html">
                         <head>
                                 <meta charset='utf-8'>
                                 <title>CodeTracer</title>
@@ -166,7 +189,7 @@ function getCommonHtml(
                                 loadScripts = true
                         </script>
                         </head>
-                        <body>
+                        <body class="component-container-body">
                                 <div id="context-menu-container" style="display: none;"></div>
                                 <div id='${componentId}-0' class='component-container active-state'></div>
 

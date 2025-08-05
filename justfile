@@ -22,6 +22,11 @@ build:
         mkdir -p ./media/styles
         ln -s $(pwd)/libs/codetracer/src/build-debug/frontend/styles/default_dark_theme_extension.css ./media/styles/default_dark_theme_extension.css
     fi;
+    if [[ ! -e ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf && ! -f ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf ]]; then
+        rm -f ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf
+        mkdir -p ./media/fonts
+        ln -s $(pwd)/libs/codetracer/src/public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf
+    fi;
     npm run compile
     cp ./media/ct_vscode.js out/ct_vscode.js
 
