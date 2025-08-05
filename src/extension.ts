@@ -11,28 +11,37 @@ import {
   newDapVsCodeApi,
   setupMiddlewareApis,
   ctSourceLineJump,
-  CtJumpBehaviour
+  CtJumpBehaviour,
+  getRecentTraces,
+  TraceInfo,
 } from "./ct_vscode.js";
 
-let backendProcess: ChildProcess | null = null;
 let ctStarted = false;
 
-async function pickTraceFolder(): Promise<string | undefined> {
-  const baseDir = path.join(os.homedir(), '.local', 'share', 'codetracer');
-  const folders = fs.readdirSync(baseDir).filter(name =>
-    fs.statSync(path.join(baseDir, name)).isDirectory()
-  ).reverse(); // Reverse the order (latest last => first)
+export async function pickTraceFolder(): Promise<string | undefined> {
+  const recentTraces: TraceInfo[] | undefined = await getRecentTraces();
+  if (!recentTraces || recentTraces.length === 0) {
+    vscode.window.showWarningMessage("No recent trace folders found.");
+    return;
+  }
 
-  const picked = await vscode.window.showQuickPick(folders, {
-    placeHolder: 'Select a trace folder to use',
+  const options = recentTraces
+    .filter(trace => fs.existsSync(trace.outputFolder))
+    .map(trace => {
+      const folderName = trace.program;
+      return {
+        label: folderName,
+        description: trace.outputFolder,
+        fullPath: trace.outputFolder
+      };
+    });
+
+  const picked = await vscode.window.showQuickPick(options, {
+    placeHolder: "Select a trace folder to use",
     canPickMany: false
   });
 
-  if (picked) {
-    return path.join(baseDir, picked);
-  }
-
-  return undefined;
+  return picked?.fullPath.endsWith('/') ? picked?.fullPath.slice(0, -1) : picked?.fullPath;
 }
 
 async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi) {
@@ -43,11 +52,6 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
 
     disposePanels();
     disposeCommands();
-
-    if (backendProcess) {
-      backendProcess.kill();
-      backendProcess = null;
-    }
 
     if (vscode.debug.activeDebugSession?.type === "codetracer-debug") {
       await vscode.commands.executeCommand("workbench.action.debug.stop");
@@ -67,6 +71,7 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
 
     // Trace selector
     const selectedFile = await pickTraceFolder()
+
     if (!selectedFile) {
       vscode.window.showWarningMessage('No trace folder selected.');
       return;
