@@ -13,6 +13,16 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "CodeTracer path",
+      "properties": {
+        "myExtension.codetracerExe": {
+          "type": "string",
+          "default": "" ,
+          "description": "Path to the CodeTracer AppImage"
+        }
+      }
+    },
     "debuggers": [
       {
         "type": "codetracer-debug",

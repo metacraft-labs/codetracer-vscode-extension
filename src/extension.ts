@@ -14,15 +14,24 @@ import {
   CtJumpBehaviour,
   getRecentTraces,
   getRecentTransactions,
-  getTransactionTraceId,
+  getTransactionTrace,
   TraceInfo,
   TransactionInfo,
 } from "./ct_vscode.js";
 
 let ctStarted = false;
 
-async function pickTraceFolder(): Promise<string | undefined> {
-  const recentTraces: TraceInfo[] | undefined = await getRecentTraces();
+async function pickTraceFolder(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
+  const recentTraces: TraceInfo[] | undefined = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Loading recent traces...",
+      cancellable: false,
+    },
+    async () => {
+      return await getRecentTraces(codetracerExe, isNixOS);
+    }
+  );
   if (!recentTraces || recentTraces.length === 0) {
     vscode.window.showWarningMessage("No recent trace folders found.");
     return;
@@ -47,8 +56,18 @@ async function pickTraceFolder(): Promise<string | undefined> {
   return picked?.fullPath;
 }
 
-async function pickTxFolder(): Promise<string | undefined> {
-  const recentTransactions: TransactionInfo[] | undefined = await getRecentTransactions();
+async function pickTxFolder(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
+  const recentTransactions: TransactionInfo[] | undefined = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Loading recent transactions...",
+      cancellable: false,
+    },
+    async () => {
+      return await getRecentTransactions(codetracerExe, isNixOS);
+    }
+  );
+
   if (!recentTransactions || recentTransactions.length === 0) {
     vscode.window.showWarningMessage("No recent transactions found.");
     return;
@@ -70,18 +89,26 @@ async function pickTxFolder(): Promise<string | undefined> {
   });
 
   if (picked) {
-    let trace = await getTransactionTraceId(picked.txHash);
+    let trace: TraceInfo | undefined = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Loading trace for transaction...",
+        cancellable: false,
+      },
+      async () => {
+        return await getTransactionTrace(codetracerExe, picked.txHash, isNixOS);
+      }
+    );
     return trace?.outputFolder;
   }
 
   return undefined;
 }
 
-async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi, loadTx: boolean = false) {
+async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi, codetracerExe: string, loadTx: boolean = false) {
   if (ctStarted) {
     // Stop CT
     ctStarted = false;
-    vscode.window.showInformationMessage("CodeTracer stopped.");
 
     disposePanels();
     disposeCommands();
@@ -95,15 +122,16 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
 
   } else {
     // Start CT
-
+    const isNixOS = os.version().includes("NixOS");
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+
     if (!workspaceFolder) {
       vscode.window.showErrorMessage("No workspace folder is open.");
       return;
     }
 
     // Trace selector
-    const selectedFile = !loadTx ? await pickTraceFolder() : await pickTxFolder();
+    const selectedFile = !loadTx ? await pickTraceFolder(codetracerExe, isNixOS) : await pickTxFolder(codetracerExe, isNixOS);
 
     if (!selectedFile) {
       return;
@@ -149,41 +177,74 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
   }
 }
 
+function getLinuxDistro(): string | undefined {
+  if (os.platform() !== 'linux') return undefined;
+
+  try {
+    const osRelease = fs.readFileSync('/etc/os-release', 'utf-8');
+    const lines = osRelease.split('\n');
+    const idLine = lines.find(line => line.startsWith('ID='));
+    if (idLine) {
+      return idLine.replace('ID=', '').replace(/"/g, '');
+    }
+  } catch (err) {
+    console.error("Unable to read /etc/os-release:", err);
+  }
+
+  return undefined;
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const dapVsCodeApi = newDapVsCodeApi(vscode, context);
+  const config = vscode.workspace.getConfiguration("myExtension");
+  let codetracerExe = config.get<string>("codetracerExe");
 
-  const toggleCT = vscode.commands.registerCommand(
-    "ct-vscode.toggleCT",
-    async () => toggleCt(context, dapVsCodeApi)
-  );
+  // Fallback to env var if user didn't set it
+  if (!codetracerExe) {
+    codetracerExe = process.env.CODETRACER_EXE;
+  }
 
-  context.subscriptions.push(toggleCT);
+  // TODO: Look in the $PATH env if it still doesn't have it
+  if (!codetracerExe) {
+    vscode.window.showErrorMessage("CodeTracer executable path not set in config or $CODETRACER_EXE");
+  } else {
+    console.log("Using codetracer executable path:", codetracerExe);
+  }
 
-  context.subscriptions.push(vscode.commands.registerCommand(
-    "ct-vscode.loadRecentTraces",
-    async () => toggleCt(context, dapVsCodeApi)
-  ))
+  if (codetracerExe) {
+    const toggleCT = vscode.commands.registerCommand(
+      "ct-vscode.toggleCT",
+      async () => toggleCt(context, dapVsCodeApi, codetracerExe)
+    );
 
-  context.subscriptions.push(vscode.commands.registerCommand(
-    "ct-vscode.loadRecentTransactions",
-    async () => toggleCt(context, dapVsCodeApi, true)
-  ))
+    context.subscriptions.push(toggleCT);
+
+    context.subscriptions.push(vscode.commands.registerCommand(
+      "ct-vscode.loadRecentTraces",
+      async () => toggleCt(context, dapVsCodeApi, codetracerExe)
+    ))
+
+      context.subscriptions.push(vscode.commands.registerCommand(
+        "ct-vscode.loadRecentTransactions",
+        async () => toggleCt(context, dapVsCodeApi, codetracerExe, true)
+      ))
+
+      context.subscriptions.push(
+        vscode.debug.onDidTerminateDebugSession(async (session) => {
+          if (session.type === "codetracer-debug") {
+            if (ctStarted) {
+              toggleCt(context, dapVsCodeApi, codetracerExe);
+            }
+          }
+        })
+      );
+  }
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       "codetracer-sidebar-panel",
       new utils.CodeTracerViewProvider(context)
     )
-  );
-
-  context.subscriptions.push(
-    vscode.debug.onDidTerminateDebugSession(async (session) => {
-      if (session.type === "codetracer-debug") {
-        if (ctStarted) {
-          toggleCt(context, dapVsCodeApi);
-        }
-      }
-    })
   );
 
   // context menu functions setup
