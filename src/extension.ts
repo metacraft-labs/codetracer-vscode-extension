@@ -15,11 +15,40 @@ import {
   getRecentTraces,
   getRecentTransactions,
   getTransactionTrace,
+  getCurrentTrace,
   TraceInfo,
   TransactionInfo,
 } from "./ct_vscode.js";
 
 let ctStarted = false;
+
+enum LoadMode {
+  Trace = "trace",
+  Tx = "tx",
+  File = "file",
+  None = "none"
+}
+
+async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
+  const trace: TraceInfo | undefined = await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Preparing trace file...",
+      cancellable: false,
+    },
+    async () => {
+      if (vscode.window.activeTextEditor) {
+        let workDir = vscode.window.activeTextEditor.document.uri.fsPath
+        return await getCurrentTrace(codetracerExe, workDir, isNixOS);
+      }
+      else {
+        vscode.window.showErrorMessage("No active text editor!")
+      }
+    }
+  );
+
+  return trace?.outputFolder
+}
 
 async function pickTraceFolder(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
   const recentTraces: TraceInfo[] | undefined = await vscode.window.withProgress(
@@ -105,7 +134,7 @@ async function pickTxFolder(codetracerExe: string, isNixOS: boolean): Promise<st
   return undefined;
 }
 
-async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi, codetracerExe: string, loadTx: boolean = false) {
+async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi, codetracerExe: string, loadMode: LoadMode) {
   if (ctStarted) {
     // Stop CT
     ctStarted = false;
@@ -131,7 +160,19 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     }
 
     // Trace selector
-    const selectedFile = !loadTx ? await pickTraceFolder(codetracerExe, isNixOS) : await pickTxFolder(codetracerExe, isNixOS);
+    let selectedFilePromise: Promise<string | undefined> | undefined
+    switch(loadMode) {
+      case LoadMode.Trace:
+        selectedFilePromise = pickTraceFolder(codetracerExe, isNixOS);
+        break;
+      case LoadMode.Tx:
+        selectedFilePromise = pickTxFolder(codetracerExe, isNixOS);
+        break;
+      case LoadMode.File:
+        selectedFilePromise = runCurrent(codetracerExe, isNixOS);
+        break;
+    }
+    const selectedFile = await selectedFilePromise;
 
     if (!selectedFile) {
       return;
@@ -177,23 +218,6 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
   }
 }
 
-function getLinuxDistro(): string | undefined {
-  if (os.platform() !== 'linux') return undefined;
-
-  try {
-    const osRelease = fs.readFileSync('/etc/os-release', 'utf-8');
-    const lines = osRelease.split('\n');
-    const idLine = lines.find(line => line.startsWith('ID='));
-    if (idLine) {
-      return idLine.replace('ID=', '').replace(/"/g, '');
-    }
-  } catch (err) {
-    console.error("Unable to read /etc/os-release:", err);
-  }
-
-  return undefined;
-}
-
 export function activate(context: vscode.ExtensionContext) {
   const dapVsCodeApi = newDapVsCodeApi(vscode, context);
   const config = vscode.workspace.getConfiguration("myExtension");
@@ -214,26 +238,31 @@ export function activate(context: vscode.ExtensionContext) {
   if (codetracerExe) {
     const toggleCT = vscode.commands.registerCommand(
       "ct-vscode.toggleCT",
-      async () => toggleCt(context, dapVsCodeApi, codetracerExe)
+      async () => toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.File)
     );
 
     context.subscriptions.push(toggleCT);
 
     context.subscriptions.push(vscode.commands.registerCommand(
+      "ct-vscode.loadCurrentFile",
+      async () => toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.File)
+    ))
+
+    context.subscriptions.push(vscode.commands.registerCommand(
       "ct-vscode.loadRecentTraces",
-      async () => toggleCt(context, dapVsCodeApi, codetracerExe)
+      async () => toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.Trace)
     ))
 
       context.subscriptions.push(vscode.commands.registerCommand(
         "ct-vscode.loadRecentTransactions",
-        async () => toggleCt(context, dapVsCodeApi, codetracerExe, true)
+        async () => toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.Tx)
       ))
 
       context.subscriptions.push(
         vscode.debug.onDidTerminateDebugSession(async (session) => {
           if (session.type === "codetracer-debug") {
             if (ctStarted) {
-              toggleCt(context, dapVsCodeApi, codetracerExe);
+              toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.None);
             }
           }
         })

@@ -37,6 +37,9 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
     webview.html = this.getHtml(darkCssUri, fontUri);
     webviewView.webview.onDidReceiveMessage((message) => {
       switch (message.command) {
+        case "loadCurrentFile":
+          vscode.commands.executeCommand("ct-vscode.loadCurrentFile");
+          break;
         case "loadRecentTraces":
           vscode.commands.executeCommand("ct-vscode.loadRecentTraces");
           break;
@@ -82,6 +85,7 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
           <body class="sidebar-menu-body">
             <div class="sidebar-menu-header">COMMAND MODULE</div>
             <div class="sidebar-menu-items">
+              <div class="sidebar-menu-item" id="loadCurrentFile">Record and run current file</div>
               <div class="sidebar-menu-item" id="loadRecentTraces">Load Recent Traces</div>
               <div class="sidebar-menu-item" id="loadRecentTransactions">Load Recent Transactions</div>
               <div class="sidebar-menu-item" id="sidebar-state">Open State</div>
@@ -94,6 +98,9 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
       
             <script>
               const vscode = acquireVsCodeApi();
+              document.getElementById('loadCurrentFile').addEventListener('click', () => {
+                vscode.postMessage({ command: 'loadCurrentFile' });
+              });
               document.getElementById('loadRecentTraces').addEventListener('click', () => {
                 vscode.postMessage({ command: 'loadRecentTraces' });
               });

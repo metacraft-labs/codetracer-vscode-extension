@@ -56,6 +56,12 @@ export declare function getRecentTraces(codetracerExe: string, isNixOS: boolean)
 
 export declare function getRecentTransactions(codetracerExe: string, isNixOS: boolean): Promise<Array<TransactionInfo> | undefined>
 
+export declare function getCurrentTrace(
+  codetracerExe: string,
+  workDir: string,
+  isNixOS: boolean
+): Promise<TraceInfo | undefined>
+
 export declare function getTransactionTrace(
   codetracerExe: string,
   txHash: string,
