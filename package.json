@@ -52,6 +52,10 @@
         "title": "Toggle CodeTracer"
       },
       {
+        "command": "ct-vscode.loadCurrentFile",
+        "title": "Record and run current active editor file"
+      },
+      {
         "command": "ct-vscode.loadRecentTraces",
         "title": "Load from a list of recent traces"
       },
