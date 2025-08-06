@@ -42,6 +42,14 @@
         "title": "Toggle CodeTracer"
       },
       {
+        "command": "ct-vscode.loadRecentTraces",
+        "title": "Load from a list of recent traces"
+      },
+      {
+        "command": "ct-vscode.loadRecentTransactions",
+        "title": "Load from a list of recent transactions"
+      },
+      {
         "command": "ct-vscode.openCalltrace",
         "title": "Open Calltrace Panel",
         "category": "CodeTracer"

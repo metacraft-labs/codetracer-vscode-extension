@@ -13,12 +13,15 @@ import {
   ctSourceLineJump,
   CtJumpBehaviour,
   getRecentTraces,
+  getRecentTransactions,
+  getTransactionTraceId,
   TraceInfo,
+  TransactionInfo,
 } from "./ct_vscode.js";
 
 let ctStarted = false;
 
-export async function pickTraceFolder(): Promise<string | undefined> {
+async function pickTraceFolder(): Promise<string | undefined> {
   const recentTraces: TraceInfo[] | undefined = await getRecentTraces();
   if (!recentTraces || recentTraces.length === 0) {
     vscode.window.showWarningMessage("No recent trace folders found.");
@@ -41,10 +44,40 @@ export async function pickTraceFolder(): Promise<string | undefined> {
     canPickMany: false
   });
 
-  return picked?.fullPath.endsWith('/') ? picked?.fullPath.slice(0, -1) : picked?.fullPath;
+  return picked?.fullPath;
 }
 
-async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi) {
+async function pickTxFolder(): Promise<string | undefined> {
+  const recentTransactions: TransactionInfo[] | undefined = await getRecentTransactions();
+  if (!recentTransactions || recentTransactions.length === 0) {
+    vscode.window.showWarningMessage("No recent transactions found.");
+    return;
+  }
+
+  const options = recentTransactions
+    .map(trace => {
+      const folderName = trace.toAddress;
+      return {
+        label: folderName,
+        description: trace.toAddress,
+        txHash: trace.txHash
+      };
+    });
+
+  const picked = await vscode.window.showQuickPick(options, {
+    placeHolder: "Select a transaction to use",
+    canPickMany: false
+  });
+
+  if (picked) {
+    let trace = await getTransactionTraceId(picked.txHash);
+    return trace?.outputFolder;
+  }
+
+  return undefined;
+}
+
+async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi, loadTx: boolean = false) {
   if (ctStarted) {
     // Stop CT
     ctStarted = false;
@@ -70,10 +103,9 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     }
 
     // Trace selector
-    const selectedFile = await pickTraceFolder()
+    const selectedFile = !loadTx ? await pickTraceFolder() : await pickTxFolder();
 
     if (!selectedFile) {
-      vscode.window.showWarningMessage('No trace folder selected.');
       return;
     }
 
@@ -85,38 +117,11 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
 
     // Setup middleware
-    // dapVsCodeApi.flowFunction = vsUpdatedFlow;
-    // dapVsCodeApi.completeMoveFunction = completeMove;
-    // completeMove(vscode.window.activeTextEditor, dapVsCodeApi);
-    // console.log(dapVsCodeApi);
     setupMiddlewareApis(dapVsCodeApi, viewsApi);
-    // setupEditorApi(dapVsCodeApi, vscode, context, vscode.window.activeTextEditor);
 
     // Initialize panels
     const panels = initPanels(context, viewsApi);
     (vscode.window as any).panels = panels; // easier debugging
-
-    // // TODO: Find place for folder selection in the logic
-    // Get custom folder
-    // const codetracerFolder = vscode.Uri.joinPath(context.extensionUri, 'media', 'codetracer-data');
-
-    // const folderUri = await vscode.window.showOpenDialog({
-    //   canSelectFiles: false,
-    //   canSelectFolders: true,
-    //   canSelectMany: false,
-    //   openLabel: 'Select Codetracer Folder',
-    //   defaultUri: vscode.Uri.file(codetracerFolder.path)
-    // });
-
-    // // TODO: For now hardcode for easier development
-    // let selectedFile = "~/.local/share/codetracer/trace-3"
-
-    // if (folderUri && folderUri.length > 0) {
-    //   selectedFile = folderUri[0].fsPath;
-    //   vscode.window.showInformationMessage(`You selected: ${selectedFile}`);
-    // } else {
-    //   vscode.window.showWarningMessage('No file selected');
-    // }
 
     const debugConfig = {
       type: "codetracer-debug",
@@ -153,6 +158,16 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(toggleCT);
+
+  context.subscriptions.push(vscode.commands.registerCommand(
+    "ct-vscode.loadRecentTraces",
+    async () => toggleCt(context, dapVsCodeApi)
+  ))
+
+  context.subscriptions.push(vscode.commands.registerCommand(
+    "ct-vscode.loadRecentTransactions",
+    async () => toggleCt(context, dapVsCodeApi, true)
+  ))
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
