@@ -52,12 +52,14 @@ export declare function setupVsCodeExtensionViewsApi(
   name: string
 ): MediatorWithSubscribers;
 
-export declare function getRecentTraces(): Promise<Array<TraceInfo> | undefined>
+export declare function getRecentTraces(codetracerExe: string, isNixOS: boolean): Promise<Array<TraceInfo> | undefined>
 
-export declare function getRecentTransactions(): Promise<Array<TransactionInfo> | undefined>
+export declare function getRecentTransactions(codetracerExe: string, isNixOS: boolean): Promise<Array<TransactionInfo> | undefined>
 
-export declare function getTransactionTraceId(
-  txHash: string
+export declare function getTransactionTrace(
+  codetracerExe: string,
+  txHash: string,
+  isNixOS: boolean
 ): Promise<TraceInfo> | undefined
 
 export declare function newDapVsCodeApi(
