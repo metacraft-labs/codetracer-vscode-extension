@@ -28,6 +28,14 @@ export interface TraceInfo {
   program: string
 }
 
+export interface TransactionInfo {
+  txHash: string,
+  isSuccessful: boolean,
+  fromAddress: string,
+  toAddress: string,
+  time: string
+}
+
 export interface DapVsCodeApi {
   handlers: any[]; // handler functions, for now not typed here
   context: vscode.ExtensionContext;
@@ -45,6 +53,12 @@ export declare function setupVsCodeExtensionViewsApi(
 ): MediatorWithSubscribers;
 
 export declare function getRecentTraces(): Promise<Array<TraceInfo> | undefined>
+
+export declare function getRecentTransactions(): Promise<Array<TransactionInfo> | undefined>
+
+export declare function getTransactionTraceId(
+  txHash: string
+): Promise<TraceInfo> | undefined
 
 export declare function newDapVsCodeApi(
   vscode: any,

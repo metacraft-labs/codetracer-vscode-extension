@@ -37,8 +37,11 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
     webview.html = this.getHtml(darkCssUri, fontUri);
     webviewView.webview.onDidReceiveMessage((message) => {
       switch (message.command) {
-        case "toggleCT":
-          vscode.commands.executeCommand("ct-vscode.toggleCT");
+        case "loadRecentTraces":
+          vscode.commands.executeCommand("ct-vscode.loadRecentTraces");
+          break;
+        case "loadRecentTransactions":
+          vscode.commands.executeCommand("ct-vscode.loadRecentTransactions");
           break;
         case "openState":
           vscode.commands.executeCommand("ct-vscode.openState");
@@ -79,7 +82,8 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
           <body class="sidebar-menu-body">
             <div class="sidebar-menu-header">COMMAND MODULE</div>
             <div class="sidebar-menu-items">
-              <div class="sidebar-menu-item" id="toggleBtn">Toggle CT</div>
+              <div class="sidebar-menu-item" id="loadRecentTraces">Load Recent Traces</div>
+              <div class="sidebar-menu-item" id="loadRecentTransactions">Load Recent Transactions</div>
               <div class="sidebar-menu-item" id="sidebar-state">Open State</div>
               <div class="sidebar-menu-item" id="sidebar-scratchpad">Open Scratchpad</div>
               <div class="sidebar-menu-item" id="sidebar-calltrace">Open Calltrace</div>
@@ -90,8 +94,11 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
       
             <script>
               const vscode = acquireVsCodeApi();
-              document.getElementById('toggleBtn').addEventListener('click', () => {
-                vscode.postMessage({ command: 'toggleCT' });
+              document.getElementById('loadRecentTraces').addEventListener('click', () => {
+                vscode.postMessage({ command: 'loadRecentTraces' });
+              });
+              document.getElementById('loadRecentTransactions').addEventListener('click', () => {
+                vscode.postMessage({ command: 'loadRecentTransactions' });
               });
               document.getElementById('sidebar-state').addEventListener('click', () => {
                 vscode.postMessage({ command: 'openState' });
