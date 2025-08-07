@@ -87,7 +87,7 @@ export declare function ctSourceLineJump(
 ): void;
 
 export declare function ctAddToScratchpad(
-  dapApi: DapVsCodeApi,
+  viewsApi: MediatorWithSubscribers,
   expression: string
 ): void;
 

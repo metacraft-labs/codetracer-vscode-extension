@@ -17,6 +17,7 @@ import {
   getCurrentTrace,
   TraceInfo,
   TransactionInfo,
+  MediatorWithSubscribers,
 } from "./ct_vscode.js";
 
 let ctStarted = false;
@@ -133,7 +134,7 @@ async function pickTxFolder(codetracerExe: string, isNixOS: boolean): Promise<st
   return undefined;
 }
 
-async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi, codetracerExe: string, loadMode: LoadMode) {
+async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi, viewsApi: MediatorWithSubscribers, codetracerExe: string, loadMode: LoadMode) {
   if (ctStarted) {
     // Stop CT
     ctStarted = false;
@@ -177,13 +178,6 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
       return;
     }
 
-    const viewsApi = setupVsCodeExtensionViewsApi(
-      "vscode-extension-to-views"
-    );
-    (vscode.window as any).viewsApi = viewsApi; // easier debugging
-    
-    (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
-
     // Setup middleware
     setupMiddlewareApis(dapVsCodeApi, viewsApi);
 
@@ -219,6 +213,12 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
 
 export function activate(context: vscode.ExtensionContext) {
   const dapVsCodeApi = newDapVsCodeApi(vscode, context);
+  const viewsApi = setupVsCodeExtensionViewsApi(
+    "vscode-extension-to-views"
+  );
+  (vscode.window as any).viewsApi = viewsApi; // easier debugging
+  (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
+
   const config = vscode.workspace.getConfiguration("myExtension");
   let codetracerExe = config.get<string>("codetracerExe");
 
@@ -237,31 +237,31 @@ export function activate(context: vscode.ExtensionContext) {
   if (codetracerExe) {
     const toggleCT = vscode.commands.registerCommand(
       "ct-vscode.toggleCT",
-      async () => toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.File)
+      async () => toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.File)
     );
 
     context.subscriptions.push(toggleCT);
 
     context.subscriptions.push(vscode.commands.registerCommand(
       "ct-vscode.loadCurrentFile",
-      async () => toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.File)
+      async () => toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.File)
     ))
 
     context.subscriptions.push(vscode.commands.registerCommand(
       "ct-vscode.loadRecentTraces",
-      async () => toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.Trace)
+      async () => toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.Trace)
     ))
 
       context.subscriptions.push(vscode.commands.registerCommand(
         "ct-vscode.loadRecentTransactions",
-        async () => toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.Tx)
+        async () => toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.Tx)
       ))
 
       context.subscriptions.push(
         vscode.debug.onDidTerminateDebugSession(async (session) => {
           if (session.type === "codetracer-debug") {
             if (ctStarted) {
-              toggleCt(context, dapVsCodeApi, codetracerExe, LoadMode.None);
+              toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.None);
             }
           }
         })
@@ -327,7 +327,7 @@ export function activate(context: vscode.ExtensionContext) {
       const expression = wordRange ? editor.document.getText(wordRange) : '';
 
       vscode.window.showInformationMessage(`Trying to add the variable: ${expression} to the Scratchpad`);
-      ctAddToScratchpad(dapVsCodeApi, expression)
+      ctAddToScratchpad(viewsApi, expression)
     })
   )
 }
