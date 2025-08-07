@@ -203,7 +203,7 @@ function getCommonHtml(
                                 loadScripts = true
                         </script>
                         </head>
-                        <body class="component-container-body">
+                        <body class="component-container-body" id="ROOT">
                                 <div id="context-menu-container" style="display: none;"></div>
                                 <div id='${componentId}-0' class='component-container active-state'></div>
 
