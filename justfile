@@ -27,12 +27,9 @@ build:
         mkdir -p ./media/fonts
         ln -s $(pwd)/libs/codetracer/src/public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf
     fi;
+
     npm run compile
     cp ./media/ct_vscode.js out/ct_vscode.js
-
-    if [ ! -L ~/codetracer-data ] && [ ! -e ~/codetracer-data ]; then \
-        ln -s ~/.local/share/codetracer ~/codetracer-data;
-    fi
 
 build-npm:
     npm run compile
