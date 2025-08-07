@@ -133,3 +133,10 @@ export const enum CtJumpBehaviour {
   ForwardJump = 1,
   BackwardJump = 2
 }
+
+export const enum LoadMode {
+  Trace = "trace",
+  Tx = "tx",
+  File = "file",
+  None = "none"
+}

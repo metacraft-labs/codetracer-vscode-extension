@@ -11,6 +11,7 @@ import {
   ctSourceLineJump,
   ctAddToScratchpad,
   CtJumpBehaviour,
+  LoadMode,
   getRecentTraces,
   getRecentTransactions,
   getTransactionTrace,
@@ -21,13 +22,6 @@ import {
 } from "./ct_vscode.js";
 
 let ctStarted = false;
-
-enum LoadMode {
-  Trace = "trace",
-  Tx = "tx",
-  File = "file",
-  None = "none"
-}
 
 async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
   const trace: TraceInfo | undefined = await vscode.window.withProgress(
