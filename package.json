@@ -105,7 +105,7 @@
       },
       {
         "command": "ct-vscode.addToScratchpad",
-        "title": "Add current value to Scratchpad",
+        "title": "Add to Scratchpad",
         "category": "CodeTracer"
       }
     ],
@@ -134,11 +134,6 @@
       ]
     },
     "keybindings": [
-      {
-        "key": "enter",
-        "command": "ct-vscode.onEnter",
-        "when": "editorTextFocus"
-      }
     ],
     "viewsContainers": {
       "activitybar": [
