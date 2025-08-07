@@ -1,5 +1,6 @@
 // requires us to somehow include the `ct_vscode.js` from ct: for now copying it to extension's `out/ct_vscode.js` for development
 // maybe there is a more elegant way to include that directly in the source/build?
+import { ClusterSettings } from "cluster";
 import * as vscode from "vscode";
 
 // types exported only as types for type checking: no such named objects in actual ct_vscode.js
@@ -83,6 +84,11 @@ export declare function ctSourceLineJump(
   line: number,
   path: string,
   behaviour: number
+): void;
+
+export declare function ctAddToScratchpad(
+  dapApi: DapVsCodeApi,
+  expression: string
 ): void;
 
 export declare function setupEditorApi(

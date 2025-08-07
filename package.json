@@ -2,7 +2,7 @@
   "name": "ct-vscode",
   "displayName": "CodeTracer",
   "description": "",
-  "icon": "codetracer_vscode_logo.png",
+  "icon": "./public/extension/codetracer_marketplace_logo.png",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.92.0"
@@ -102,6 +102,11 @@
         "command": "ct-vscode.backwardSourceLineJump",
         "title": "Jump backward to line",
         "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.addToScratchpad",
+        "title": "Add current value to Scratchpad",
+        "category": "CodeTracer"
       }
     ],
     "menus": {
@@ -120,6 +125,11 @@
           "command": "ct-vscode.backwardSourceLineJump",
           "when": "codetracer:active",
           "group": "navigation"
+        },
+        {
+          "command": "ct-vscode.addToScratchpad",
+          "when": "codetracer:active",
+          "group": "codetracerSpecific"
         }
       ]
     },

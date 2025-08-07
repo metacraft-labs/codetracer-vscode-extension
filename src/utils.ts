@@ -285,7 +285,10 @@ export function getScratchpadWebviewContent(
     panel,
     context,
     "scratchpadComponent",
-    "makeScratchpadComponentForExtension"
+    "makeScratchpadComponentForExtension",
+    `let viewsApi = newVsCodeViewApi("terminal view api", vscode, window);
+    window.viewsApi = viewsApi; // for easier debugging
+    registerTerminalOutputComponent(window.component, viewsApi);`
   );
 }
 
