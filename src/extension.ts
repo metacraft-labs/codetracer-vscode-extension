@@ -1,8 +1,6 @@
 import * as vscode from "vscode";
-import { ChildProcess } from "child_process";
 import { initPanels, disposePanels, disposeCommands } from "./initPanels";
 import * as utils from "./utils";
-import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import {
@@ -11,6 +9,7 @@ import {
   newDapVsCodeApi,
   setupMiddlewareApis,
   ctSourceLineJump,
+  ctAddToScratchpad,
   CtJumpBehaviour,
   getRecentTraces,
   getRecentTransactions,
@@ -314,6 +313,23 @@ export function activate(context: vscode.ExtensionContext) {
       ctSourceLineJump(dapVsCodeApi, line, filePath, CtJumpBehaviour.BackwardJump)
     })
   );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("ct-vscode.addToScratchpad", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showErrorMessage("No active editor!");
+        return;
+      }
+
+      const position = editor.selection.active;
+      const wordRange = editor.document.getWordRangeAtPosition(position);
+      const expression = wordRange ? editor.document.getText(wordRange) : '';
+
+      vscode.window.showInformationMessage(`Trying to add the variable: ${expression} to the Scratchpad`);
+      ctAddToScratchpad(dapVsCodeApi, expression)
+    })
+  )
 }
 
 export function deactivate() {
