@@ -85,7 +85,7 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
           <body class="sidebar-menu-body">
             <div class="sidebar-menu-header">COMMAND MODULE</div>
             <div class="sidebar-menu-items">
-              <div class="sidebar-menu-item" id="loadCurrentFile">Record and run current file</div>
+              <div class="sidebar-menu-item" id="loadCurrentFile">Record and Run Current File</div>
               <div class="sidebar-menu-item" id="loadRecentTraces">Load Recent Traces</div>
               <div class="sidebar-menu-item" id="loadRecentTransactions">Load Recent Transactions</div>
               <div class="sidebar-menu-item" id="sidebar-state">Open State</div>
