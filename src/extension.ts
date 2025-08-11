@@ -155,7 +155,7 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
 
     // Trace selector
     let selectedFilePromise: Promise<string | undefined> | undefined
-    switch(loadMode) {
+    switch (loadMode) {
       case LoadMode.Trace:
         selectedFilePromise = pickTraceFolder(codetracerExe, isNixOS);
         break;
@@ -205,7 +205,25 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
   }
 }
 
-export function activate(context: vscode.ExtensionContext) {
+let commandDisposables: vscode.Disposable[] = [];
+let miscDisposables: vscode.Disposable[] = []; // e.g. listeners registered once
+
+function isExecutable(p?: string): boolean {
+  if (p?.endsWith(".AppImage")) return true;
+  return false
+}
+
+function disposeAll() {
+  for (const d of commandDisposables) d.dispose();
+  commandDisposables = [];
+}
+
+async function reinitCommands(context: vscode.ExtensionContext) {
+  disposeAll();
+
+  const cfg = vscode.workspace.getConfiguration('codetracer');
+  const codetracerExe = cfg.get<string>('appImagePath')?.trim();
+  const valid = isExecutable(codetracerExe);
   const dapVsCodeApi = newDapVsCodeApi(vscode, context);
   const viewsApi = setupVsCodeExtensionViewsApi(
     "vscode-extension-to-views"
@@ -213,117 +231,104 @@ export function activate(context: vscode.ExtensionContext) {
   (vscode.window as any).viewsApi = viewsApi; // easier debugging
   (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
 
-  const config = vscode.workspace.getConfiguration("myExtension");
-  let codetracerExe = config.get<string>("codetracerExe");
-
-  // Fallback to env var if user didn't set it
-  if (!codetracerExe) {
-    codetracerExe = process.env.CODETRACER_EXE;
-  }
-
-  // TODO: Look in the $PATH env if it still doesn't have it
-  if (!codetracerExe) {
-    vscode.window.showErrorMessage("CodeTracer executable path not set in config or $CODETRACER_EXE");
-  } else {
-    console.log("Using codetracer executable path:", codetracerExe);
-  }
-
-  if (codetracerExe) {
-    const toggleCT = vscode.commands.registerCommand(
-      "ct-vscode.toggleCT",
-      async () => toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.File)
+  if (!valid) {
+    const action = await vscode.window.showErrorMessage(
+      'CodeTracer AppImage path is not set or not executable.',
+      'Set Path…', 'Reload Window'
     );
-
-    context.subscriptions.push(toggleCT);
-
-    context.subscriptions.push(vscode.commands.registerCommand(
-      "ct-vscode.loadCurrentFile",
-      async () => toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.File)
-    ))
-
-    context.subscriptions.push(vscode.commands.registerCommand(
-      "ct-vscode.loadRecentTraces",
-      async () => toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.Trace)
-    ))
-
-      context.subscriptions.push(vscode.commands.registerCommand(
-        "ct-vscode.loadRecentTransactions",
-        async () => toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.Tx)
-      ))
-
-      context.subscriptions.push(
-        vscode.debug.onDidTerminateDebugSession(async (session) => {
-          if (session.type === "codetracer-debug") {
-            if (ctStarted) {
-              toggleCt(context, dapVsCodeApi, viewsApi, codetracerExe, LoadMode.None);
-            }
-          }
-        })
-      );
+    if (action === 'Set Path…') {
+      vscode.commands.executeCommand('workbench.action.openSettings', 'codetracer.appImagePath');
+    } else if (action === 'Reload Window') {
+      vscode.commands.executeCommand('workbench.action.reloadWindow');
+    }
   }
 
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      "codetracer-sidebar-panel",
-      new utils.CodeTracerViewProvider(context)
-    )
-  );
+  const register = (id: string, fn: (...a: any[]) => any) =>
+    commandDisposables.push(vscode.commands.registerCommand(id, fn));
 
-  // context menu functions setup
-  context.subscriptions.push(
-    vscode.commands.registerCommand("ct-vscode.smartSourceLineJump", () => {
-      const editor = vscode.window.activeTextEditor;
-
-      if (editor == null) return;
-
-      const line = editor.selection.active.line + 1;
-      const filePath = editor.document.uri.fsPath;
-
-      ctSourceLineJump(dapVsCodeApi, line, filePath, CtJumpBehaviour.SmartJump)
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("ct-vscode.forwardSourceLineJump", () => {
-      const editor = vscode.window.activeTextEditor;
-
-      if (!editor) return;
-
-      const line = editor.selection.active.line + 1;
-      const filePath = editor.document.uri.fsPath;
-
-      ctSourceLineJump(dapVsCodeApi, line, filePath, CtJumpBehaviour.ForwardJump);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("ct-vscode.backwardSourceLineJump", () => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor == null) return;
-
-      const line = editor.selection.active.line + 1;
-      const filePath = editor.document.uri.fsPath;
-
-      ctSourceLineJump(dapVsCodeApi, line, filePath, CtJumpBehaviour.BackwardJump)
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("ct-vscode.addToScratchpad", () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) {
-        vscode.window.showErrorMessage("No active editor!");
-        return;
+  const stub = (id: string) =>
+    register(id, async () => {
+      const action = await vscode.window.showErrorMessage(
+        'CodeTracer AppImage path is not set or not executable.',
+        'Set Path…', 'Reload Window'
+      );
+      if (action === 'Set Path…') {
+        vscode.commands.executeCommand('workbench.action.openSettings', 'codetracer.appImagePath');
+      } else if (action === 'Reload Window') {
+        vscode.commands.executeCommand('workbench.action.reloadWindow');
       }
+    });
 
-      const position = editor.selection.active;
-      const wordRange = editor.document.getWordRangeAtPosition(position);
-      const expression = wordRange ? editor.document.getText(wordRange) : '';
+  const exe = codetracerExe!;
+  const toggleCtReal = async (mode: LoadMode) =>
+    toggleCt(context, dapVsCodeApi, viewsApi, exe, mode);
 
-      vscode.window.showInformationMessage(`Trying to add the variable: ${expression} to the Scratchpad`);
-      ctAddToScratchpad(viewsApi, expression)
-    })
-  )
+  if (!valid) {
+    // ---- stub (“dunder”) registrations ----
+    stub('ct-vscode.toggleCT');
+    stub('ct-vscode.loadCurrentFile');
+    stub('ct-vscode.loadRecentTraces');
+    stub('ct-vscode.loadRecentTransactions');
+    stub('ct-vscode.smartSourceLineJump');
+    stub('ct-vscode.forwardSourceLineJump');
+    stub('ct-vscode.backwardSourceLineJump');
+    stub('ct-vscode.addToScratchpad');
+  } else {
+    // ---- real registrations ----
+    register('ct-vscode.toggleCT', async () => toggleCtReal(LoadMode.File));
+    register('ct-vscode.loadCurrentFile', async () => toggleCtReal(LoadMode.File));
+    register('ct-vscode.loadRecentTraces', async () => toggleCtReal(LoadMode.Trace));
+    register('ct-vscode.loadRecentTransactions', async () => toggleCtReal(LoadMode.Tx));
+
+    register('ct-vscode.smartSourceLineJump', () => {
+      const ed = vscode.window.activeTextEditor; if (!ed) return;
+      ctSourceLineJump(dapVsCodeApi, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.SmartJump);
+    });
+    register('ct-vscode.forwardSourceLineJump', () => {
+      const ed = vscode.window.activeTextEditor; if (!ed) return;
+      ctSourceLineJump(dapVsCodeApi, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.ForwardJump);
+    });
+    register('ct-vscode.backwardSourceLineJump', () => {
+      const ed = vscode.window.activeTextEditor; if (!ed) return;
+      ctSourceLineJump(dapVsCodeApi, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.BackwardJump);
+    });
+
+    register('ct-vscode.addToScratchpad', () => {
+      const ed = vscode.window.activeTextEditor;
+      if (!ed) { vscode.window.showErrorMessage('No active editor!'); return; }
+      const pos = ed.selection.active;
+      const word = ed.document.getWordRangeAtPosition(pos);
+      const expr = word ? ed.document.getText(word) : '';
+      vscode.window.showInformationMessage(`Trying to add the variable: ${expr} to the Scratchpad`);
+      ctAddToScratchpad(viewsApi, expr);
+    });
+
+  }
+
+  if (miscDisposables.length === 0) {
+    miscDisposables.push(
+      vscode.debug.onDidTerminateDebugSession(async (session) => {
+        if (session.type === 'codetracer-debug' && ctStarted) {
+          await toggleCtReal(LoadMode.None);
+        }
+      }),
+      vscode.window.registerWebviewViewProvider(
+        'codetracer-sidebar-panel',
+        new utils.CodeTracerViewProvider(context)
+      ),
+      vscode.workspace.onDidChangeConfiguration(async (e) => {
+        if (e.affectsConfiguration('codetracer.appImagePath')) {
+          await reinitCommands(context);
+        }
+      }),
+    );
+    context.subscriptions.push(...miscDisposables);
+  }
+}
+
+export async function activate(context: vscode.ExtensionContext) {
+  // initial (stub or real)
+  await reinitCommands(context);
 }
 
 export function deactivate() {

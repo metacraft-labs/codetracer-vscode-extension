@@ -12,7 +12,7 @@ vsc-extension-quickstart.md
 libs/codetracer
 public/dist
 nix/**
-db-backend/
+# db-backend/
 .direnv/**
 
 
@@ -49,3 +49,4 @@ direnv
 
 # Large or unnecessary 3rd party
 **/third_party/**
+**/third_party

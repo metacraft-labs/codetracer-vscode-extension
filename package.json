@@ -14,11 +14,11 @@
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
-      "title": "CodeTracer path",
+      "title": "CodeTracer",
       "properties": {
-        "myExtension.codetracerExe": {
+        "codetracer.appImagePath": {
           "type": "string",
-          "default": "" ,
+          "default": "",
           "description": "Path to the CodeTracer AppImage"
         }
       }
@@ -133,8 +133,7 @@
         }
       ]
     },
-    "keybindings": [
-    ],
+    "keybindings": [],
     "viewsContainers": {
       "activitybar": [
         {
@@ -155,7 +154,7 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "just build",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
