@@ -2,6 +2,7 @@ build:
     #!/usr/bin/env bash
     mkdir -p ./media
     mkdir -p ./backend
+    npm install
 
     pushd libs/codetracer && \
         nix develop \
