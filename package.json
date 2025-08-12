@@ -1,6 +1,13 @@
 {
   "name": "ct-vscode",
   "displayName": "CodeTracer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/metacraft-labs/codetracer-vscode-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/metacraft-labs/codetracer-vscode-extension/issues"
+  },
   "description": "",
   "icon": "./public/extension/codetracer_marketplace_logo.png",
   "version": "0.0.1",
@@ -16,7 +23,7 @@
     "configuration": {
       "title": "CodeTracer",
       "properties": {
-        "codetracer.appImagePath": {
+        "codetracer.runnablePath": {
           "type": "string",
           "default": "",
           "description": "Path to the CodeTracer AppImage"
