@@ -33,7 +33,7 @@ Here are some ways you can use this extension:
 2. **Find the origin of any value**  
    Right-click a line and jump to where a variable’s value was last modified.
 
-3. **Decorate your code with runtime information**  
+3. **Decorate your code with runtime information**  (Work in progress)
    The extension can highlight lines with tracepoints, errors, or important runtime events directly in the Monaco editor inside VS Code.
 
 4. **Step through execution history**  
