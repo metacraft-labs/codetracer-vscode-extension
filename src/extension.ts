@@ -146,12 +146,12 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
   } else {
     // Start CT
     const isNixOS = os.version().includes("NixOS");
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    // const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 
-    if (!workspaceFolder) {
-      vscode.window.showErrorMessage("No workspace folder is open.");
-      return;
-    }
+    // if (!workspaceFolder) {
+    //   vscode.window.showErrorMessage("No workspace folder is open.");
+    //   return;
+    // }
 
     // Trace selector
     let selectedFilePromise: Promise<string | undefined> | undefined
@@ -188,7 +188,7 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     };
 
     const started = await vscode.debug.startDebugging(
-      workspaceFolder,
+      undefined,
       debugConfig
     );
     if (!started) {
@@ -222,7 +222,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
   disposeAll();
 
   const cfg = vscode.workspace.getConfiguration('codetracer');
-  const codetracerExe = cfg.get<string>('appImagePath')?.trim();
+  const codetracerExe = cfg.get<string>('runnablePath')?.trim();
   const valid = isExecutable(codetracerExe);
   const dapVsCodeApi = newDapVsCodeApi(vscode, context);
   const viewsApi = setupVsCodeExtensionViewsApi(
@@ -237,7 +237,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       'Set Path…', 'Reload Window'
     );
     if (action === 'Set Path…') {
-      vscode.commands.executeCommand('workbench.action.openSettings', 'codetracer.appImagePath');
+      vscode.commands.executeCommand('workbench.action.openSettings', 'codetracer.runnablePath');
     } else if (action === 'Reload Window') {
       vscode.commands.executeCommand('workbench.action.reloadWindow');
     }
@@ -253,7 +253,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
         'Set Path…', 'Reload Window'
       );
       if (action === 'Set Path…') {
-        vscode.commands.executeCommand('workbench.action.openSettings', 'codetracer.appImagePath');
+        vscode.commands.executeCommand('workbench.action.openSettings', 'codetracer.runnablePath');
       } else if (action === 'Reload Window') {
         vscode.commands.executeCommand('workbench.action.reloadWindow');
       }
@@ -317,7 +317,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
         new utils.CodeTracerViewProvider(context)
       ),
       vscode.workspace.onDidChangeConfiguration(async (e) => {
-        if (e.affectsConfiguration('codetracer.appImagePath')) {
+        if (e.affectsConfiguration('codetracer.runnablePath')) {
           await reinitCommands(context);
         }
       }),
