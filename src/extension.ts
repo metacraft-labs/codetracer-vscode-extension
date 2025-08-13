@@ -146,12 +146,6 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
   } else {
     // Start CT
     const isNixOS = os.version().includes("NixOS");
-    // const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-
-    // if (!workspaceFolder) {
-    //   vscode.window.showErrorMessage("No workspace folder is open.");
-    //   return;
-    // }
 
     // Trace selector
     let selectedFilePromise: Promise<string | undefined> | undefined
@@ -275,7 +269,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
     stub('ct-vscode.addToScratchpad');
   } else {
     // ---- real registrations ----
-    register('ct-vscode.toggleCT', async () => toggleCtReal(LoadMode.File));
+    register('ct-vscode.toggleCT', async () => toggleCtReal(LoadMode.Trace));
     register('ct-vscode.loadCurrentFile', async () => toggleCtReal(LoadMode.File));
     register('ct-vscode.loadRecentTraces', async () => toggleCtReal(LoadMode.Trace));
     register('ct-vscode.loadRecentTransactions', async () => toggleCtReal(LoadMode.Tx));
