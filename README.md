@@ -2,8 +2,8 @@
 
 [![Discord](https://img.shields.io/discord/1326949714679038014?label=Discord&logo=discord&style=flat)](https://discord.gg/aH5WTMnKHT)
 
-> **Bring the power of CodeTracer’s time-travel debugging into your Visual Studio Code workflow.**  
-> This extension integrates the CodeTracer debugger directly into VS Code using the DAP integrated communication, so you can record, replay, and trace your code without leaving your IDE.
+**Bring the power of CodeTracer’s time-travel debugging into your Visual Studio Code workflow.**  
+This extension integrates the CodeTracer debugger directly into VS Code using the DAP integrated communication, so you can record, replay, and trace your code without leaving your IDE.
 
 ---
 
@@ -49,10 +49,14 @@ Here are some ways you can use this extension:
 1. Install the **CodeTracer VS Code Extension** from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/).
 2. Make sure you have the **CodeTracer executable** installed on your system.  
    Download it here:
-   - [Linux AppImage](https://downloads.codetracer.com/CodeTracer-25.07.1-amd64.AppImage)  
-   - [macOS dmg](https://downloads.codetracer.com/CodeTracer-25.07.1-arm64.dmg)  
-   - [PGP Key](https://downloads.codetracer.com/CodeTracer.pub.asc)
-3. Configure the path to the `codetracer` executable in the extension settings.
+   
+   [![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.07.1-amd64.AppImage)
+
+   [![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.07.1-arm64.dmg)
+4. Configure the path to the `codetracer` executable in the extension settings.
+
+> **Note:**  
+> If you are using NixOS you will need an `appimage-run` package in the environment of the running VsCode
 
 ---
 
