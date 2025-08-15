@@ -53,14 +53,22 @@ Here are some ways you can use this extension:
    [![Download AppImage](https://img.shields.io/badge/Download-Linux%20AppImage-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.07.1-amd64.AppImage)
 
    [![Download macOS](https://img.shields.io/badge/Download-macOS-blue?style=for-the-badge)](https://downloads.codetracer.com/CodeTracer-25.07.1-arm64.dmg)
-4. Configure the path to the `codetracer` executable in the extension settings.
+4. Configure the path to the `codetracer` executable in the extension settings with `runnablePath` setting.
 
 > **Note:**  
 > If you are using NixOS you will need an `appimage-run` package in the environment of the running VsCode
-
+> alternatively you can try to build a pure nix package from the developer env of CodeTracer with `just build-nix` and point to its `ct` binary
 ---
 
 ## 🛠 Usage
+
+You need to `Toggle CodeTracer` from the command pallette, or to use its commands from the CodeTracer view in the vscode sibder.
+
+Build/recording is usually done separately with the CodeTracer commands out of the extension, but in some cases one can record+replay the
+current file even from the extension.
+
+By default `Toggle CodeTracer` tries to show you available replays, and you can choose going through them, or through
+recorded stylus transactions from the sidebar; you can also do those actions:
 
 1. **Record and Run Current File** *(Ruby only)*  
    - Open a Ruby file and run the **Record and Run Current File** command from the Command Palette.
