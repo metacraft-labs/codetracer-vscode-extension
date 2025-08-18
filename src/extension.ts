@@ -3,6 +3,7 @@ import { initPanels, disposePanels, disposeCommands } from "./initPanels";
 import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
+import { access, lstat } from "fs/promises";
 import {
   DapVsCodeApi,
   setupVsCodeExtensionViewsApi,
@@ -202,9 +203,19 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
 let commandDisposables: vscode.Disposable[] = [];
 let miscDisposables: vscode.Disposable[] = []; // e.g. listeners registered once
 
-function isExecutable(p?: string): boolean {
-  if (p?.endsWith(".AppImage")) return true;
-  return false
+export async function isExecutable(p?: string): Promise<boolean> {
+  if (!p) return false;
+  try {
+    const stat = await lstat(p);
+    if (!stat.isFile()) {
+      return false;
+    } else if (p.endsWith(".AppImage")) {
+      return true;
+    }
+    await access(p, fs.constants.X_OK);
+    return true;
+  }
+  catch { return false; }
 }
 
 function disposeAll() {
@@ -217,7 +228,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
 
   const cfg = vscode.workspace.getConfiguration('codetracer');
   const codetracerExe = cfg.get<string>('runnablePath')?.trim();
-  const valid = isExecutable(codetracerExe);
+  const valid = await isExecutable(codetracerExe);
   const dapVsCodeApi = newDapVsCodeApi(vscode, context);
   const viewsApi = setupVsCodeExtensionViewsApi(
     "vscode-extension-to-views"
