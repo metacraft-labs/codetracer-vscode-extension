@@ -34,8 +34,10 @@
       {
         "type": "codetracer-debug",
         "label": "Codetracer Debugger",
-        "program": "./backend/db-backend",
+        "program": "/home/nedy/codetracer-vscode-extension/libs/codetracer/result/bin/ct",
         "args": [
+          "start_backend",
+          "db",
           "--stdio"
         ],
         "configurationAttributes": {

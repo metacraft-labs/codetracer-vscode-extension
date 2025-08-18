@@ -178,6 +178,7 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
       type: "codetracer-debug",
       request: "launch",
       name: "Launch Codetracer",
+      program: codetracerExe,
       cwd: "",
       traceFolder: selectedFile
     };
