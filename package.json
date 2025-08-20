@@ -26,7 +26,7 @@
         "codetracer.runnablePath": {
           "type": "string",
           "default": "",
-          "description": "Path to the CodeTracer AppImage"
+          "description": "Path to the CodeTracer binary"
         }
       }
     },
@@ -34,19 +34,18 @@
       {
         "type": "codetracer-debug",
         "label": "Codetracer Debugger",
-        "program": "/home/nedy/codetracer-vscode-extension/libs/codetracer/result/bin/ct",
-        "args": [
-          "start_backend",
-          "db",
-          "--stdio"
-        ],
         "configurationAttributes": {
           "launch": {
             "required": [
-              "program"
+              "program",
+              "traceFolder"
             ],
             "properties": {
               "program": {
+                "type": "string",
+                "description": "Path to executable"
+              },
+              "traceFolder": {
                 "type": "string",
                 "description": "Path to the trace folder containing .json files"
               }

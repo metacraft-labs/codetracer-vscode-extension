@@ -178,7 +178,6 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
       type: "codetracer-debug",
       request: "launch",
       name: "Launch Codetracer",
-      program: codetracerExe,
       cwd: "",
       traceFolder: selectedFile
     };
@@ -248,6 +247,21 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       vscode.commands.executeCommand('workbench.action.reloadWindow');
     }
   }
+
+  // Set the codetracer executable and the args
+  context.subscriptions.push(
+    vscode.debug.registerDebugAdapterDescriptorFactory(
+      "codetracer-debug",
+      new (class implements vscode.DebugAdapterDescriptorFactory {
+        async createDebugAdapterDescriptor(session: vscode.DebugSession) {
+          if (codetracerExe) {
+            const args = ["start_backend", "db", "--stdio"];
+            return new vscode.DebugAdapterExecutable(codetracerExe, args, {});
+          }
+        }
+      })
+    )
+  );
 
   const register = (id: string, fn: (...a: any[]) => any) =>
     commandDisposables.push(vscode.commands.registerCommand(id, fn));
