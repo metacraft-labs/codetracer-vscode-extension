@@ -130,28 +130,28 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
 }
 
 function getUiJs(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext
 ): vscode.Uri {
-  return panel.webview.asWebviewUri(
+  return webview.asWebviewUri(
     vscode.Uri.joinPath(context.extensionUri, "media", "ui.js")
   );
 }
 
 function getFrontendBundle(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext
 ): vscode.Uri {
-  return panel.webview.asWebviewUri(
+  return webview.asWebviewUri(
     vscode.Uri.joinPath(context.extensionUri, "media", "frontend_bundle.js")
   );
 }
 
 function getThirdParty(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext
 ): vscode.Uri {
-  return panel.webview.asWebviewUri(
+  return webview.asWebviewUri(
     vscode.Uri.joinPath(
       context.extensionUri,
       "media",
@@ -162,10 +162,10 @@ function getThirdParty(
 }
 
 function getDarkTheme(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext
 ): vscode.Uri {
-  return panel.webview.asWebviewUri(
+  return webview.asWebviewUri(
     vscode.Uri.joinPath(
       context.extensionUri,
       "media",
@@ -176,20 +176,51 @@ function getDarkTheme(
 }
 
 function getCommonHtml(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext,
   componentId: string,
   componentFactory: string,
-  messageHandler?: string
+  messageHandler?: string,
+  fileLine?: number,
+  fileName?: string,
+  traceId?: number
 ): string {
-  const uiJs = getUiJs(panel, context);
-  const frontendBundle = getFrontendBundle(panel, context);
-  const thirdParty = getThirdParty(panel, context);
-  const defaultDarkTheme = getDarkTheme(panel, context);
-
+  const uiJs = getUiJs(webview, context);
+  const frontendBundle = getFrontendBundle(webview, context);
+  const thirdParty = getThirdParty(webview, context);
+  const defaultDarkTheme = getDarkTheme(webview, context);
   const messageHandlerScript = messageHandler
-    ? `\n        ${messageHandler}`
-    : "";
+  ? `\n        ${messageHandler}`
+  : "";
+
+  let script: string;
+  let id = traceId ? traceId : 0;
+
+  if (Number.isFinite(fileLine)) {
+    script = `
+      <script>
+        let component = null
+      window.addEventListener('DOMContentLoaded', () => {
+        window.component = ${componentFactory} ('${componentId}-${traceId}', ${fileLine}, '${fileName}', ${traceId});
+        // for now the message handler/api setup code depends on
+        // window.component/component being initialized
+        ${messageHandlerScript}
+      });
+      </script>
+    `
+  } else {
+    script = `
+      <script>
+        let component = null
+      window.addEventListener('DOMContentLoaded', () => {
+        window.component = ${componentFactory} ('${componentId}-0');
+        // for now the message handler/api setup code depends on
+        // window.component/component being initialized
+        ${messageHandlerScript}
+      });
+      </script>
+    `
+  }
 
   return `
                 <!doctype html>
@@ -205,7 +236,7 @@ function getCommonHtml(
                         </head>
                         <body class="component-container-body" id="ROOT">
                                 <div id="context-menu-container" style="display: none;"></div>
-                                <div id='${componentId}-0' class='component-container active-state'></div>
+                                <div id='${componentId}-${id}' class='component-container active-state'></div>
 
                                 <footer>
                                         <div id='search-results'>
@@ -217,15 +248,7 @@ function getCommonHtml(
                                 <script src="${frontendBundle}" type="text/javascript"> </script>
                                 <script src='${thirdParty}' type='text/javascript'></script>
                                 <script src='${uiJs}'></script>
-                                <script>
-                                        let component = null
-                                        window.addEventListener('DOMContentLoaded', () => {
-                                            window.component = ${componentFactory}('${componentId}-0');
-                                            // for now the message handler/api setup code depends on
-                                            // window.component/component being initialized
-                                            ${messageHandlerScript}
-                                        });
-                                </script>
+                                ${script}
                         </body>
                 </html>
 
@@ -233,11 +256,11 @@ function getCommonHtml(
 }
 
 export function getStateWebviewContent(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext
 ): string {
   return getCommonHtml(
-    panel,
+    webview,
     context,
     "stateComponent",
     "makeStateComponentForExtension",
@@ -248,11 +271,11 @@ export function getStateWebviewContent(
 }
 
 export function getCalltraceWebviewContent(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext
 ): string {
   return getCommonHtml(
-    panel,
+    webview,
     context,
     "calltraceComponent",
     "makeCalltraceComponentForExtension",
@@ -263,11 +286,11 @@ export function getCalltraceWebviewContent(
 }
 
 export function getEventLogWebviewContent(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext
 ): string {
   return getCommonHtml(
-    panel,
+    webview,
     context,
     "eventLogComponent",
     "makeEventLogComponentForExtension",
@@ -278,26 +301,26 @@ export function getEventLogWebviewContent(
 }
 
 export function getScratchpadWebviewContent(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext
 ): string {
   return getCommonHtml(
-    panel,
+    webview,
     context,
     "scratchpadComponent",
     "makeScratchpadComponentForExtension",
     `let viewsApi = newVsCodeViewApi("terminal view api", vscode, window);
     window.viewsApi = viewsApi; // for easier debugging
-    registerTerminalOutputComponent(window.component, viewsApi);`
+    registerScratchpadComponent(window.component, viewsApi);`
   );
 }
 
 export function getTerminalOutputWebviewContent(
-  panel: vscode.WebviewPanel,
+  webview: vscode.Webview,
   context: vscode.ExtensionContext
 ): string {
   return getCommonHtml(
-    panel,
+    webview,
     context,
     "terminalOutputComponent",
     "makeTerminalOutputComponentForExtension",
@@ -305,4 +328,25 @@ export function getTerminalOutputWebviewContent(
      window.viewsApi = viewsApi; // for easier debugging
      registerTerminalOutputComponent(window.component, viewsApi);`
   );
+}
+
+export function getTracepointWebviewContent(
+  webview: vscode.Webview,
+  context: vscode.ExtensionContext,
+  traceLine: number,
+  traceName: string,
+  traceId: number
+): string {
+  return getCommonHtml(
+    webview,
+    context,
+    "tracepointComponent",
+    "makeTracepointComponentForExtension",
+    `let viewsApi = newVsCodeViewApi("tracepoint view api", vscode, window);
+     window.viewsApi = viewsApi; // for easier debugging
+     registerTracepointComponent(window.component, viewsApi);`,
+    traceLine,
+    traceName,
+    traceId
+  )
 }

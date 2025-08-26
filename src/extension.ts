@@ -1,5 +1,6 @@
+/// <reference path="../vscode.proposed.editorInsets.d.ts" />
 import * as vscode from "vscode";
-import { initPanels, disposePanels, disposeCommands } from "./initPanels";
+import { initPanels, disposePanels, disposeCommands, addTracepoint } from "./initPanels";
 import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
@@ -22,7 +23,9 @@ import {
   MediatorWithSubscribers,
 } from "./ct_vscode.js";
 
+const insets = new Map<number, vscode.WebviewEditorInset>();
 let ctStarted = false;
+let adapterFactoryDisposable: vscode.Disposable | undefined;
 
 async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
   const trace: TraceInfo | undefined = await vscode.window.withProgress(
@@ -137,6 +140,14 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     disposePanels();
     disposeCommands();
 
+    for (const [line, inset] of insets) {
+      inset.dispose();
+      insets.delete(line);
+    }
+
+    adapterFactoryDisposable?.dispose();
+    adapterFactoryDisposable = undefined;
+
     if (vscode.debug.activeDebugSession?.type === "codetracer-debug") {
       await vscode.commands.executeCommand("workbench.action.debug.stop");
     }
@@ -173,6 +184,7 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     // Initialize panels
     const panels = initPanels(context, viewsApi);
     (vscode.window as any).panels = panels; // easier debugging
+
 
     const debugConfig = {
       type: "codetracer-debug",
@@ -249,8 +261,8 @@ async function reinitCommands(context: vscode.ExtensionContext) {
   }
 
   // Set the codetracer executable and the args
-  context.subscriptions.push(
-    vscode.debug.registerDebugAdapterDescriptorFactory(
+  if (!adapterFactoryDisposable) {
+    adapterFactoryDisposable = vscode.debug.registerDebugAdapterDescriptorFactory(
       "codetracer-debug",
       new (class implements vscode.DebugAdapterDescriptorFactory {
         async createDebugAdapterDescriptor(session: vscode.DebugSession) {
@@ -261,7 +273,9 @@ async function reinitCommands(context: vscode.ExtensionContext) {
         }
       })
     )
-  );
+  }
+
+  context.subscriptions.push(adapterFactoryDisposable);
 
   const register = (id: string, fn: (...a: any[]) => any) =>
     commandDisposables.push(vscode.commands.registerCommand(id, fn));
@@ -293,6 +307,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
     stub('ct-vscode.forwardSourceLineJump');
     stub('ct-vscode.backwardSourceLineJump');
     stub('ct-vscode.addToScratchpad');
+    stub('ct-vscode.addTracepoint');
   } else {
     // ---- real registrations ----
     register('ct-vscode.toggleCT', async () => toggleCtReal(LoadMode.Trace));
@@ -323,6 +338,17 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       ctAddToScratchpad(viewsApi, expr);
     });
 
+    register("ct-vscode.addTracepoint", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showInformationMessage("Open a text file first.");
+        return;
+      }
+
+      const line = editor.selection.active.line;
+      const inset = addTracepoint(context, viewsApi, editor, line)
+      insets.set(line, inset);
+    })
   }
 
   if (miscDisposables.length === 0) {
@@ -354,4 +380,6 @@ export async function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
   disposePanels();
   disposeCommands();
+  adapterFactoryDisposable?.dispose();
+  adapterFactoryDisposable = undefined;
 }
