@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getOrCreatePanel } from "./panelManager";
+import { getOrCreatePanel, createTracepointPanel } from "./panelManager";
 import * as utils from "./utils";
 import { receive, newWebviewSubscriber } from "./ct_vscode";
 
@@ -60,7 +60,7 @@ function dapRedirect(
   panel: any
 ) { }
 
-function createStatePanel(
+export function createStatePanel(
   context: vscode.ExtensionContext,
   viewsApi: any
 ): vscode.WebviewPanel {
@@ -153,6 +153,25 @@ function createTerminalPanel(
       receive(viewsApi, message.kind, message.value, webviewSubscriber);
     }
   );
+}
+
+export function addTracepoint(context: vscode.ExtensionContext, viewsApi: any, editor: vscode.TextEditor, line: number): vscode.WebviewEditorInset {
+  const inset = createTracepointPanel(
+    {
+      id: "tracepointComponent",
+      title: "tracepoint",
+      getTraceContent: utils.getTracepointWebviewContent,
+    },
+    editor,
+    line,
+    context,
+    (message: CtMessage, panel: any) => {
+      console.log("received from webview: ", message);
+      let webviewSubscriber = newWebviewSubscriber(panel.webview);
+      receive(viewsApi, message.kind, message.value, webviewSubscriber);
+    }
+  )
+  return inset;
 }
 
 export function initPanels(
