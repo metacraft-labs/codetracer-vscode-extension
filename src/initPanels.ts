@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getOrCreatePanel, createTracepointPanel } from "./panelManager";
+import { getOrCreatePanel, createTracepointPanel, createFlowPanel } from "./panelManager";
 import * as utils from "./utils";
 import { receive, newWebviewSubscriber } from "./ct_vscode";
 
@@ -9,6 +9,7 @@ export interface CodeTracerPanels {
   scratchpad: vscode.WebviewPanel;
   eventLog: vscode.WebviewPanel;
   terminalOutput: vscode.WebviewPanel;
+  flow: vscode.WebviewPanel;
 }
 
 interface CodeTracerPanelCommands {
@@ -17,6 +18,7 @@ interface CodeTracerPanelCommands {
   scratchpad: vscode.Disposable;
   eventLog: vscode.Disposable;
   terminalOutput: vscode.Disposable;
+  flow: vscode.Disposable;
 }
 
 const idToPanelKey: Record<string, keyof CodeTracerPanels> = {
@@ -155,6 +157,25 @@ function createTerminalPanel(
   );
 }
 
+export function addLoopPosition(context: vscode.ExtensionContext, viewsApi: any, editor: vscode.TextEditor, line: number): vscode.WebviewEditorInset {
+  const inset = createFlowPanel(
+    {
+      id: "flowComponent",
+      title: "flow",
+      getContent: utils.getFlowComponent,
+    },
+    editor,
+    line,
+    context,
+    (message: CtMessage, panel: any) => {
+      console.log("received from webview: ", message);
+      let webviewSubscriber = newWebviewSubscriber(panel.webview);
+      receive(viewsApi, message.kind, message.value, webviewSubscriber);
+    }
+  )
+  return inset;
+}
+
 export function addTracepoint(context: vscode.ExtensionContext, viewsApi: any, editor: vscode.TextEditor, line: number): vscode.WebviewEditorInset {
   const inset = createTracepointPanel(
     {
@@ -201,6 +222,8 @@ export function initPanels(
     context,
     () => createEventLogPanel(context, viewsApi)
   );
+
+  const flow = (panelMap.flow)
 
   const terminalOutput = (panelMap.terminalOutput =
     createTerminalPanel(context, viewsApi));

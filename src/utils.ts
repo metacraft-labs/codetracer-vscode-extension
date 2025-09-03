@@ -190,8 +190,8 @@ function getCommonHtml(
   const thirdParty = getThirdParty(webview, context);
   const defaultDarkTheme = getDarkTheme(webview, context);
   const messageHandlerScript = messageHandler
-  ? `\n        ${messageHandler}`
-  : "";
+    ? `\n        ${messageHandler}`
+    : "";
 
   let script: string;
   let id = traceId ? traceId : 0;
@@ -200,59 +200,59 @@ function getCommonHtml(
     script = `
       <script>
         let component = null
-      window.addEventListener('DOMContentLoaded', () => {
-        window.component = ${componentFactory} ('${componentId}-${traceId}', ${fileLine}, '${fileName}', ${traceId});
-        // for now the message handler/api setup code depends on
-        // window.component/component being initialized
-        ${messageHandlerScript}
-      });
+        window.addEventListener('DOMContentLoaded', () => {
+          window.component = ${componentFactory} ('${componentId}-${traceId}', ${fileLine}, '${fileName}', ${traceId});
+          // for now the message handler/api setup code depends on
+          // window.component/component being initialized
+          ${messageHandlerScript}
+        });
       </script>
     `
   } else {
     script = `
       <script>
         let component = null
-      window.addEventListener('DOMContentLoaded', () => {
-        window.component = ${componentFactory} ('${componentId}-0');
-        // for now the message handler/api setup code depends on
-        // window.component/component being initialized
-        ${messageHandlerScript}
-      });
+        window.addEventListener('DOMContentLoaded', () => {
+          window.component = ${componentFactory} ('${componentId}-0');
+          // for now the message handler/api setup code depends on
+          // window.component/component being initialized
+          ${messageHandlerScript}
+        });
       </script>
     `
   }
 
   return `
-                <!doctype html>
-                <html class="component-container-html">
-                        <head>
-                                <meta charset='utf-8'>
-                                <title>CodeTracer</title>
-                                <link id='theme' rel='stylesheet' href='${defaultDarkTheme}'>
-                        <script>
-                                inElectron = false
-                                loadScripts = true
-                        </script>
-                        </head>
-                        <body class="component-container-body" id="ROOT">
-                                <div id="context-menu-container" style="display: none;"></div>
-                                <div id='${componentId}-${id}' class='component-container active-state'></div>
+    <!doctype html>
+    <html class="component-container-html">
+            <head>
+                    <meta charset='utf-8'>
+                    <title>CodeTracer</title>
+                    <link id='theme' rel='stylesheet' href='${defaultDarkTheme}'>
+            <script>
+                    inElectron = false
+                    loadScripts = true
+            </script>
+            </head>
+            <body class="component-container-body" id="ROOT">
+                    <div id="context-menu-container" style="display: none;"></div>
+                    <div id='${componentId}-${id}' class='component-container active-state'></div>
 
-                                <footer>
-                                        <div id='search-results'>
-                                        </div>
-                                        <div id='status'>
-                                        </div>
-                                </footer>
-                                </div>
-                                <script src="${frontendBundle}" type="text/javascript"> </script>
-                                <script src='${thirdParty}' type='text/javascript'></script>
-                                <script src='${uiJs}'></script>
-                                ${script}
-                        </body>
-                </html>
+                    <footer>
+                            <div id='search-results'>
+                            </div>
+                            <div id='status'>
+                            </div>
+                    </footer>
+                    </div>
+                    <script src="${frontendBundle}" type="text/javascript"> </script>
+                    <script src='${thirdParty}' type='text/javascript'></script>
+                    <script src='${uiJs}'></script>
+                    ${script}
+            </body>
+    </html>
 
-        `;
+  `;
 }
 
 export function getStateWebviewContent(
@@ -295,8 +295,8 @@ export function getEventLogWebviewContent(
     "eventLogComponent",
     "makeEventLogComponentForExtension",
     `let viewsApi = newVsCodeViewApi("eventLog view api", vscode, window);
-     window.viewsApi = viewsApi; // for easier debugging
-     registerEventLogComponent(window.component, viewsApi);`
+    window.viewsApi = viewsApi; // for easier debugging
+    registerEventLogComponent(window.component, viewsApi);`
   );
 }
 
@@ -325,8 +325,8 @@ export function getTerminalOutputWebviewContent(
     "terminalOutputComponent",
     "makeTerminalOutputComponentForExtension",
     `let viewsApi = newVsCodeViewApi("terminal view api", vscode, window);
-     window.viewsApi = viewsApi; // for easier debugging
-     registerTerminalOutputComponent(window.component, viewsApi);`
+    window.viewsApi = viewsApi; // for easier debugging
+    registerTerminalOutputComponent(window.component, viewsApi);`
   );
 }
 
@@ -343,10 +343,25 @@ export function getTracepointWebviewContent(
     "tracepointComponent",
     "makeTracepointComponentForExtension",
     `let viewsApi = newVsCodeViewApi("tracepoint view api", vscode, window);
-     window.viewsApi = viewsApi; // for easier debugging
-     registerTracepointComponent(window.component, viewsApi);`,
+    window.viewsApi = viewsApi; // for easier debugging
+    registerTracepointComponent(window.component, viewsApi);`,
     traceLine,
     traceName,
     traceId
   )
+}
+
+export function getFlowComponent(
+  webview: vscode.Webview,
+  context: vscode.ExtensionContext
+): string {
+  return getCommonHtml(
+    webview,
+    context,
+    "flowComponent",
+    "makeFlowComponentForExtension",
+    `let viewsApi = newVsCodeViewApi("flow view api", vscode, window);
+    window.viewsApi = viewsApi; // for easier debugging
+    registerFlowComponent(window.component, viewsApi);`
+  );
 }

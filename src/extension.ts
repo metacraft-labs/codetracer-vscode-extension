@@ -1,6 +1,6 @@
 /// <reference path="../vscode.proposed.editorInsets.d.ts" />
 import * as vscode from "vscode";
-import { initPanels, disposePanels, disposeCommands, addTracepoint } from "./initPanels";
+import { initPanels, disposePanels, disposeCommands, addTracepoint, addLoopPosition } from "./initPanels";
 import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
@@ -23,7 +23,8 @@ import {
   MediatorWithSubscribers,
 } from "./ct_vscode.js";
 
-const insets = new Map<number, vscode.WebviewEditorInset>();
+const tracepointInsets = new Map<number, vscode.WebviewEditorInset>();
+const flowInsets = new Map<number, vscode.WebviewEditorInset>();
 let ctStarted = false;
 let adapterFactoryDisposable: vscode.Disposable | undefined;
 
@@ -140,9 +141,14 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     disposePanels();
     disposeCommands();
 
-    for (const [line, inset] of insets) {
+    for (const [line, inset] of tracepointInsets) {
       inset.dispose();
-      insets.delete(line);
+      tracepointInsets.delete(line);
+    }
+
+    for (const [line, inset] of flowInsets) {
+      inset.dispose();
+      flowInsets.delete(line);
     }
 
     adapterFactoryDisposable?.dispose();
@@ -184,6 +190,16 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     // Initialize panels
     const panels = initPanels(context, viewsApi);
     (vscode.window as any).panels = panels; // easier debugging
+
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showInformationMessage("Open a text file first.");
+      return;
+    }
+
+    const line = editor.selection.active.line;
+    const inset = addLoopPosition(context, viewsApi, editor, line - 1)
+    flowInsets.set(line, inset);
 
 
     const debugConfig = {
@@ -347,7 +363,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
 
       const line = editor.selection.active.line;
       const inset = addTracepoint(context, viewsApi, editor, line)
-      insets.set(line, inset);
+      tracepointInsets.set(line, inset);
     })
   }
 

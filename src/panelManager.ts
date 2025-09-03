@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-type PanelId = 'stateComponent' | 'calltraceComponent' | 'scratchpadComponent' | 'eventLogComponent' | 'terminalOutputComponent' | 'tracepointComponent';
+type PanelId = 'stateComponent' | 'calltraceComponent' | 'scratchpadComponent' | 'eventLogComponent' | 'terminalOutputComponent' | 'flowComponent' | 'tracepointComponent';
 
 export interface PanelConfig {
     id: PanelId;
@@ -11,6 +11,38 @@ export interface PanelConfig {
 
 const panels: Map<PanelId, vscode.WebviewPanel> = new Map();
 let traceId = 0;
+
+export function createFlowPanel(
+    config: PanelConfig,
+    editor: vscode.TextEditor,
+    line: number,
+    context: vscode.ExtensionContext,
+    onMessage?: (msg: any, panel: vscode.WebviewEditorInset) => void
+): vscode.WebviewEditorInset {
+    const inset = vscode.window.createWebviewTextEditorInset(
+        editor,
+        line,
+        1,
+        {
+            enableScripts: true,
+            localResourceRoots: [
+                vscode.Uri.joinPath(context.extensionUri, "media"),
+                vscode.Uri.joinPath(context.extensionUri, "public")
+            ],
+        }
+    );
+    if (onMessage) {
+        inset.webview.onDidReceiveMessage(
+            message => onMessage(message, inset),
+            undefined,
+            context.subscriptions
+        );
+    }
+
+    inset.webview.html = config.getContent ? config.getContent(inset.webview, context) : "";
+
+    return inset;
+}
 
 export function createTracepointPanel(
     config: PanelConfig,
