@@ -63,6 +63,8 @@ export declare function getCurrentTrace(
   isNixOS: boolean
 ): Promise<TraceInfo | undefined>
 
+export declare function getFlowList(): Promise<undefined>
+
 export declare function getTransactionTrace(
   codetracerExe: string,
   txHash: string,
