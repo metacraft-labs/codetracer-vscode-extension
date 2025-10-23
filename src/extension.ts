@@ -18,6 +18,7 @@ import {
   getRecentTransactions,
   getTransactionTrace,
   getCurrentTrace,
+  getFlowList,
   TraceInfo,
   TransactionInfo,
   MediatorWithSubscribers,
@@ -47,6 +48,10 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
   );
 
   return trace?.outputFolder
+}
+
+async function loadFlow() {
+
 }
 
 async function pickTraceFolder(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
@@ -198,7 +203,7 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     }
 
     const line = editor.selection.active.line;
-    const inset = addLoopPosition(context, viewsApi, editor, line - 1)
+    const inset = addLoopPosition(context, viewsApi, editor, line - 1);
     flowInsets.set(line, inset);
 
 
