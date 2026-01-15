@@ -25,7 +25,7 @@ import {
 } from "./ct_vscode.js";
 
 const tracepointInsets = new Map<number, vscode.WebviewEditorInset>();
-const flowInsets = new Map<number, vscode.WebviewEditorInset>();
+// const flowInsets = new Map<number, vscode.WebviewEditorInset>();
 let ctStarted = false;
 let adapterFactoryDisposable: vscode.Disposable | undefined;
 
@@ -151,10 +151,10 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
       tracepointInsets.delete(line);
     }
 
-    for (const [line, inset] of flowInsets) {
-      inset.dispose();
-      flowInsets.delete(line);
-    }
+    // for (const [line, inset] of flowInsets) {
+    //   inset.dispose();
+    //   flowInsets.delete(line);
+    // }
 
     adapterFactoryDisposable?.dispose();
     adapterFactoryDisposable = undefined;
@@ -190,11 +190,14 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     }
 
     // Setup middleware
+    // console.log("-------------------- KUR1");
     setupMiddlewareApis(dapVsCodeApi, viewsApi);
+    // console.log("-------------------- KUR2");
 
     // Initialize panels
     const panels = initPanels(context, viewsApi);
     (vscode.window as any).panels = panels; // easier debugging
+    // console.log("-------------------- KUR3");
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
@@ -202,9 +205,9 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
       return;
     }
 
-    const line = editor.selection.active.line;
-    const inset = addLoopPosition(context, viewsApi, editor, line - 1);
-    flowInsets.set(line, inset);
+    // const line = editor.selection.active.line;
+    // const inset = addLoopPosition(context, viewsApi, editor, line - 1);
+    // flowInsets.set(line, inset);
 
 
     const debugConfig = {
@@ -288,7 +291,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       new (class implements vscode.DebugAdapterDescriptorFactory {
         async createDebugAdapterDescriptor(session: vscode.DebugSession) {
           if (codetracerExe) {
-            const args = ["start_backend", "db", "--stdio"];
+            const args = ["start_backend", "db-backend", "--stdio"];
             return new vscode.DebugAdapterExecutable(codetracerExe, args, {});
           }
         }
