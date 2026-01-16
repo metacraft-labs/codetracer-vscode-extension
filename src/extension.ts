@@ -5,6 +5,7 @@ import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
 import { access, lstat } from "fs/promises";
+import * as path from 'path';
 import {
   DapVsCodeApi,
   setupVsCodeExtensionViewsApi,
@@ -28,6 +29,36 @@ const tracepointInsets = new Map<number, vscode.WebviewEditorInset>();
 // const flowInsets = new Map<number, vscode.WebviewEditorInset>();
 let ctStarted = false;
 let adapterFactoryDisposable: vscode.Disposable | undefined;
+
+function getBackendBinPath(context: vscode.ExtensionContext): string {
+  return path.join(
+    context.extensionPath,
+    'libs',
+    'codetracer',
+    'src',
+    'build-debug',
+    'bin'
+  );
+}
+
+function makeEnvWithBackend(context: vscode.ExtensionContext): NodeJS.ProcessEnv {
+  const backendBin = getBackendBinPath(context);
+
+  return {
+    ...process.env,
+    PATH: `${backendBin}:${process.env.PATH ?? ''}`,
+  };
+}
+
+function normalizeEnv(env: NodeJS.ProcessEnv): { [key: string]: string } {
+  const out: { [key: string]: string } = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
 
 async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
   const trace: TraceInfo | undefined = await vscode.window.withProgress(
@@ -286,17 +317,30 @@ async function reinitCommands(context: vscode.ExtensionContext) {
 
   // Set the codetracer executable and the args
   if (!adapterFactoryDisposable) {
-    adapterFactoryDisposable = vscode.debug.registerDebugAdapterDescriptorFactory(
-      "codetracer-debug",
-      new (class implements vscode.DebugAdapterDescriptorFactory {
-        async createDebugAdapterDescriptor(session: vscode.DebugSession) {
-          if (codetracerExe) {
-            const args = ["start_backend", "db-backend", "--stdio"];
-            return new vscode.DebugAdapterExecutable(codetracerExe, args, {});
+    adapterFactoryDisposable =
+      vscode.debug.registerDebugAdapterDescriptorFactory(
+        "codetracer-debug",
+        new (class implements vscode.DebugAdapterDescriptorFactory {
+          async createDebugAdapterDescriptor(
+            session: vscode.DebugSession
+          ): Promise<vscode.DebugAdapterDescriptor | undefined> {
+  
+            if (!codetracerExe) {
+              return undefined;
+            }
+  
+            const args = ["dap-server", "--stdio"];
+  
+            const env = normalizeEnv(makeEnvWithBackend(context));
+  
+            return new vscode.DebugAdapterExecutable(
+              "db-backend",   // resolves via injected PATH
+              args,
+              { env }
+            );
           }
-        }
-      })
-    )
+        })()
+      );
   }
 
   context.subscriptions.push(adapterFactoryDisposable);
