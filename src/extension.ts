@@ -84,6 +84,82 @@ function findNargoRoot(startDir: string, stopDir?: string): string | undefined {
   }
 }
 
+function findRubyProjectRoot(startDir: string, stopDir?: string): string | undefined {
+  let current = path.resolve(startDir);
+  const stop = stopDir ? path.resolve(stopDir) : undefined;
+  while (true) {
+    if (fs.existsSync(path.join(current, "Gemfile"))) {
+      return current;
+    }
+    if (fs.existsSync(path.join(current, "Rakefile"))) {
+      return current;
+    }
+    if (fs.existsSync(path.join(current, "config.ru"))) {
+      return current;
+    }
+    const gemspecs = fs.readdirSync(current).filter((entry) => entry.endsWith(".gemspec"));
+    if (gemspecs.length > 0) {
+      return current;
+    }
+    if (stop && current === stop) {
+      return undefined;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return undefined;
+    }
+    current = parent;
+  }
+}
+
+function isRubySourceFile(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) {
+    return false;
+  }
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  if (filePath.endsWith(".rb")) {
+    return true;
+  }
+
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    const firstLine = content.split(/\r?\n/, 1)[0] ?? "";
+    return firstLine.includes("ruby");
+  } catch {
+    return false;
+  }
+}
+
+function findRubyEntryPoint(startDir: string, stopDir: string | undefined, fallbackFile: string): string {
+  const root = findRubyProjectRoot(startDir, stopDir) ?? startDir;
+  const projectName = path.basename(root);
+  const candidates = [
+    path.join(root, "bin", "rails"),
+    path.join(root, "config.ru"),
+    path.join(root, "bin", projectName),
+    path.join(root, "main.rb"),
+    path.join(root, "app.rb"),
+    path.join(root, "lib", `${projectName}.rb`),
+  ];
+
+  // Prefer conventional Ruby entrypoints that point to Ruby source.
+  for (const candidate of candidates) {
+    if (isRubySourceFile(candidate)) {
+      return candidate;
+    }
+  }
+
+  return isRubySourceFile(fallbackFile) ? fallbackFile : fallbackFile;
+}
+
 async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
   const trace: TraceInfo | undefined = await vscode.window.withProgress(
     {
@@ -96,8 +172,15 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
         const editor = vscode.window.activeTextEditor;
         const filePath = editor.document.uri.fsPath;
         const isNoirFile = editor.document.languageId === "noir" || filePath.endsWith(".nr");
+        const isRubyFile = editor.document.languageId === "ruby" || filePath.endsWith(".rb");
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
         const workspaceRoot = workspaceFolder?.uri.fsPath;
+
+        if (isRubyFile) {
+          const startDir = path.dirname(filePath);
+          const entryPoint = findRubyEntryPoint(startDir, workspaceRoot, filePath);
+          return await getCurrentTrace(codetracerExe, entryPoint, isNixOS);
+        }
 
         if (!isNoirFile) {
           const rootPath = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath;
