@@ -38,6 +38,10 @@
       {
         "type": "codetracer-debug",
         "label": "Codetracer Debugger",
+        "languages": [
+          "noir",
+          "ruby"
+        ],
         "configurationAttributes": {
           "launch": {
             "required": [
