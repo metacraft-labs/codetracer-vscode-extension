@@ -29,6 +29,8 @@ const tracepointInsets = new Map<number, vscode.WebviewEditorInset>();
 // const flowInsets = new Map<number, vscode.WebviewEditorInset>();
 let ctStarted = false;
 let adapterFactoryDisposable: vscode.Disposable | undefined;
+let pendingLaunchPanels = false;
+let panelsInitialized = false;
 
 function getBackendBinPath(context: vscode.ExtensionContext): string {
   return path.join(
@@ -69,8 +71,12 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
     },
     async () => {
       if (vscode.window.activeTextEditor) {
-        let workDir = vscode.window.activeTextEditor.document.uri.fsPath
-        return await getCurrentTrace(codetracerExe, workDir, isNixOS);
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+
+        const rootPath = workspaceFolders?.[0].uri.fsPath;
+        if (rootPath) {
+          return await getCurrentTrace(codetracerExe, rootPath, isNixOS);
+        }
       }
       else {
         vscode.window.showErrorMessage("No active text editor!")
@@ -79,6 +85,33 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
   );
 
   return trace?.outputFolder
+}
+
+async function recordTraceForWorkdir(
+  codetracerExe: string,
+  workDir: string,
+  isNixOS: boolean,
+  progressTitle: string
+): Promise<TraceInfo | undefined> {
+  return await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: progressTitle,
+      cancellable: false,
+    },
+    async () => {
+      return await getCurrentTrace(codetracerExe, workDir, isNixOS);
+    }
+  );
+}
+
+function initPanelsIfNeeded(context: vscode.ExtensionContext, viewsApi: MediatorWithSubscribers): void {
+  if (panelsInitialized) {
+    return;
+  }
+  const panels = initPanels(context, viewsApi);
+  (vscode.window as any).panels = panels; // easier debugging
+  panelsInitialized = true;
 }
 
 async function loadFlow() {
@@ -176,6 +209,7 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
 
     disposePanels();
     disposeCommands();
+    panelsInitialized = false;
 
     for (const [line, inset] of tracepointInsets) {
       inset.dispose();
@@ -290,6 +324,19 @@ function disposeAll() {
   commandDisposables = [];
 }
 
+async function promptForExecutablePath(): Promise<void> {
+  // Guide the user to fix the Codetracer path when auto-start is invoked.
+  const action = await vscode.window.showErrorMessage(
+    'CodeTracer AppImage path is not set or not executable.',
+    'Set Path…', 'Reload Window'
+  );
+  if (action === 'Set Path…') {
+    vscode.commands.executeCommand('workbench.action.openSettings', 'codetracer.runnablePath');
+  } else if (action === 'Reload Window') {
+    vscode.commands.executeCommand('workbench.action.reloadWindow');
+  }
+}
+
 async function reinitCommands(context: vscode.ExtensionContext) {
   disposeAll();
 
@@ -304,15 +351,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
   (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
 
   if (!valid) {
-    const action = await vscode.window.showErrorMessage(
-      'CodeTracer AppImage path is not set or not executable.',
-      'Set Path…', 'Reload Window'
-    );
-    if (action === 'Set Path…') {
-      vscode.commands.executeCommand('workbench.action.openSettings', 'codetracer.runnablePath');
-    } else if (action === 'Reload Window') {
-      vscode.commands.executeCommand('workbench.action.reloadWindow');
-    }
+    await promptForExecutablePath();
   }
 
   // Set the codetracer executable and the args
@@ -350,20 +389,19 @@ async function reinitCommands(context: vscode.ExtensionContext) {
 
   const stub = (id: string) =>
     register(id, async () => {
-      const action = await vscode.window.showErrorMessage(
-        'CodeTracer AppImage path is not set or not executable.',
-        'Set Path…', 'Reload Window'
-      );
-      if (action === 'Set Path…') {
-        vscode.commands.executeCommand('workbench.action.openSettings', 'codetracer.runnablePath');
-      } else if (action === 'Reload Window') {
-        vscode.commands.executeCommand('workbench.action.reloadWindow');
-      }
+      await promptForExecutablePath();
     });
 
   const exe = codetracerExe!;
   const toggleCtReal = async (mode: LoadMode) =>
     toggleCt(context, dapVsCodeApi, viewsApi, exe, mode);
+  const maybeToggleCt = async (mode: LoadMode) => {
+    if (!valid) {
+      await promptForExecutablePath();
+      return;
+    }
+    await toggleCtReal(mode);
+  };
 
   if (!valid) {
     // ---- stub (“dunder”) registrations ----
@@ -421,6 +459,27 @@ async function reinitCommands(context: vscode.ExtensionContext) {
 
   if (miscDisposables.length === 0) {
     miscDisposables.push(
+      vscode.debug.onDidStartDebugSession(async (session) => {
+        // When users hit Run | Debug, auto-start Codetracer against the active file.
+        if (session.type === 'codetracer-debug') {
+          if (pendingLaunchPanels && !ctStarted) {
+            await reinitCommands(context);
+            const viewsApi = (vscode.window as any).viewsApi as MediatorWithSubscribers | undefined;
+            const dapVsCodeApi = (vscode.window as any).dapVsCodeApi as DapVsCodeApi | undefined;
+            if (viewsApi && dapVsCodeApi) {
+              setupMiddlewareApis(dapVsCodeApi, viewsApi);
+              initPanelsIfNeeded(context, viewsApi);
+            }
+            pendingLaunchPanels = false;
+            ctStarted = true;
+          }
+          return;
+        }
+        if (ctStarted) {
+          return;
+        }
+        await maybeToggleCt(LoadMode.File);
+      }),
       vscode.debug.onDidTerminateDebugSession(async (session) => {
         if (session.type === 'codetracer-debug' && ctStarted) {
           await toggleCtReal(LoadMode.None);
@@ -443,6 +502,29 @@ async function reinitCommands(context: vscode.ExtensionContext) {
 export async function activate(context: vscode.ExtensionContext) {
   // initial (stub or real)
   await reinitCommands(context);
+  context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('codetracer-debug', {
+    provideDebugConfigurations(_folder) {
+      return [{
+        type: "codetracer-debug",
+        request: "launch",
+        name: "Launch Codetracer",
+        cwd: "",
+        traceFolder: ""
+      }];
+    },
+    resolveDebugConfiguration(_folder, config) {
+      const normalizedTraceFolder = typeof config.traceFolder === "string"
+        ? config.traceFolder.trim()
+        : "";
+      if (normalizedTraceFolder.length > 0 || config.traceFile || config.pid) {
+        return config;
+      }
+
+      // Mirror the "Record and Run Current File" sidebar action.
+      void vscode.commands.executeCommand("ct-vscode.loadCurrentFile");
+      return undefined;
+    }
+  }));
 }
 
 export function deactivate() {
