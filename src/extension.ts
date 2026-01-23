@@ -62,6 +62,28 @@ function normalizeEnv(env: NodeJS.ProcessEnv): { [key: string]: string } {
   return out;
 }
 
+function hasNargoToml(dirPath: string): boolean {
+  return fs.existsSync(path.join(dirPath, "Nargo.toml"));
+}
+
+function findNargoRoot(startDir: string, stopDir?: string): string | undefined {
+  let current = path.resolve(startDir);
+  const stop = stopDir ? path.resolve(stopDir) : undefined;
+  while (true) {
+    if (hasNargoToml(current)) {
+      return current;
+    }
+    if (stop && current === stop) {
+      return undefined;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return undefined;
+    }
+    current = parent;
+  }
+}
+
 async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
   const trace: TraceInfo | undefined = await vscode.window.withProgress(
     {
@@ -71,12 +93,43 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
     },
     async () => {
       if (vscode.window.activeTextEditor) {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
+        const editor = vscode.window.activeTextEditor;
+        const filePath = editor.document.uri.fsPath;
+        const isNoirFile = editor.document.languageId === "noir" || filePath.endsWith(".nr");
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+        const workspaceRoot = workspaceFolder?.uri.fsPath;
 
-        const rootPath = workspaceFolders?.[0].uri.fsPath;
-        if (rootPath) {
-          return await getCurrentTrace(codetracerExe, rootPath, isNixOS);
+        if (!isNoirFile) {
+          const rootPath = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+          if (rootPath) {
+            return await getCurrentTrace(codetracerExe, rootPath, isNixOS);
+          }
+          vscode.window.showErrorMessage("No workspace found for the active file.");
+          return;
         }
+
+        const startDir = path.dirname(filePath);
+
+        if (hasNargoToml(startDir)) {
+          return await getCurrentTrace(codetracerExe, startDir, isNixOS);
+        }
+
+        const action = await vscode.window.showWarningMessage(
+          "No Nargo.toml found in the current file's folder. Search parent folders?",
+          "Search Upwards", "Cancel"
+        );
+        if (action !== "Search Upwards") {
+          vscode.window.showInformationMessage("Select a Noir file and try again.");
+          return;
+        }
+
+        const nargoRoot = findNargoRoot(startDir, workspaceRoot);
+        if (!nargoRoot) {
+          vscode.window.showErrorMessage("No Nargo.toml found in parent folders.");
+          return;
+        }
+
+        return await getCurrentTrace(codetracerExe, nargoRoot, isNixOS);
       }
       else {
         vscode.window.showErrorMessage("No active text editor!")
