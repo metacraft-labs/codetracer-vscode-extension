@@ -4,7 +4,7 @@ import { initPanels, disposePanels, disposeCommands, addTracepoint, addLoopPosit
 import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
-import { access, lstat } from "fs/promises";
+import { access, lstat, readFile, readdir } from "fs/promises";
 import * as path from 'path';
 import {
   DapVsCodeApi,
@@ -32,6 +32,12 @@ let adapterFactoryDisposable: vscode.Disposable | undefined;
 let pendingLaunchPanels = false;
 let panelsInitialized = false;
 
+interface TraceMetadata {
+  workdir?: string;
+  program?: string;
+  args?: string[];
+}
+
 function getBackendBinPath(context: vscode.ExtensionContext): string {
   return path.join(
     context.extensionPath,
@@ -45,9 +51,11 @@ function getBackendBinPath(context: vscode.ExtensionContext): string {
 
 function makeEnvWithBackend(context: vscode.ExtensionContext): NodeJS.ProcessEnv {
   const backendBin = getBackendBinPath(context);
+  const rrEnv = resolveRrEnvironment();
 
   return {
     ...process.env,
+    ...rrEnv,
     PATH: `${backendBin}:${process.env.PATH ?? ''}`,
   };
 }
@@ -60,6 +68,50 @@ function normalizeEnv(env: NodeJS.ProcessEnv): { [key: string]: string } {
     }
   }
   return out;
+}
+
+function findExecutableInPath(binaryName: string): string | undefined {
+  const pathVar = process.env.PATH ?? "";
+  const segments = pathVar.split(path.delimiter).filter(Boolean);
+  for (const segment of segments) {
+    const candidate = path.join(segment, binaryName);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // continue
+    }
+  }
+  return undefined;
+}
+
+function resolveRrEnvironment(): NodeJS.ProcessEnv {
+  const cfg = vscode.workspace.getConfiguration('codetracer');
+  const rrWorkerPath = cfg.get<string>('rrWorkerPath')?.trim() ?? "";
+  const rrExePath = cfg.get<string>('rrExePath')?.trim() ?? "";
+  const env: NodeJS.ProcessEnv = {};
+
+  if (rrWorkerPath) {
+    const rrSupportDir = path.dirname(rrWorkerPath);
+    if (!process.env.CT_RR_SUPPORT_BINARIES_PATH) {
+      env.CT_RR_SUPPORT_BINARIES_PATH = rrSupportDir;
+    }
+    if (!rrExePath) {
+      const siblingRr = path.join(rrSupportDir, "rr");
+      try {
+        fs.accessSync(siblingRr, fs.constants.X_OK);
+        env.CT_RR_EXE = siblingRr;
+      } catch {
+        // ignore; will fall back to PATH
+      }
+    }
+  }
+
+  if (rrExePath) {
+    env.CT_RR_EXE = rrExePath;
+  }
+
+  return env;
 }
 
 function hasNargoToml(dirPath: string): boolean {
@@ -138,6 +190,18 @@ function isRubySourceFile(filePath: string): boolean {
   }
 }
 
+function isRrSourceFile(filePath: string, languageId: string): boolean {
+  if (["c", "cpp", "rust", "nim"].includes(languageId)) {
+    return true;
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  return [".c", ".cc", ".cpp", ".cxx", ".rs", ".nim"].includes(ext);
+}
+
+function isRrTraceFolder(traceFolder: string): boolean {
+  return fs.existsSync(path.join(traceFolder, "rr"));
+}
+
 function findRubyEntryPoint(startDir: string, stopDir: string | undefined, fallbackFile: string): string {
   const root = findRubyProjectRoot(startDir, stopDir) ?? startDir;
   const projectName = path.basename(root);
@@ -173,6 +237,7 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
         const filePath = editor.document.uri.fsPath;
         const isNoirFile = editor.document.languageId === "noir" || filePath.endsWith(".nr");
         const isRubyFile = editor.document.languageId === "ruby" || filePath.endsWith(".rb");
+        const isRrFile = isRrSourceFile(filePath, editor.document.languageId);
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
         const workspaceRoot = workspaceFolder?.uri.fsPath;
 
@@ -183,6 +248,10 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
         }
 
         if (!isNoirFile) {
+          if (isRrFile) {
+            // RR-based recordings need the full source file path.
+            return await getCurrentTrace(codetracerExe, filePath, isNixOS);
+          }
           const rootPath = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath;
           if (rootPath) {
             return await getCurrentTrace(codetracerExe, rootPath, isNixOS);
@@ -252,6 +321,123 @@ function initPanelsIfNeeded(context: vscode.ExtensionContext, viewsApi: Mediator
 
 async function loadFlow() {
 
+}
+
+function resolveTraceFileCopyPath(traceFolder: string, originalPath: string): string {
+  const filesRoot = path.join(traceFolder, "files");
+  if (path.isAbsolute(originalPath)) {
+    const strippedRoot = path.relative(path.parse(originalPath).root, originalPath);
+    return path.join(filesRoot, strippedRoot);
+  }
+  return path.join(filesRoot, originalPath);
+}
+
+async function readTraceMetadata(traceFolder: string): Promise<TraceMetadata | undefined> {
+  // Trace metadata format: https://github.com/metacraft-labs/CodeTracer/blob/main/libs/runtime_tracing/docs/trace_json_spec.md
+  const metadataPath = path.join(traceFolder, "trace_metadata.json");
+  try {
+    const raw = await readFile(metadataPath, "utf8");
+    const parsed = JSON.parse(raw) as TraceMetadata;
+    return parsed ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readTracePaths(traceFolder: string): Promise<string[]> {
+  // Trace paths format: https://github.com/metacraft-labs/CodeTracer/blob/main/libs/runtime_tracing/docs/trace_json_spec.md
+  const pathsFile = path.join(traceFolder, "trace_paths.json");
+  try {
+    const raw = await readFile(pathsFile, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+async function findFirstTraceSourceFile(traceFolder: string): Promise<string | undefined> {
+  // Prefer explicit program paths, then trace paths, then any bundled file copy.
+  const candidates: string[] = [];
+  const metadata = await readTraceMetadata(traceFolder);
+  if (metadata?.program) {
+    const programPath = metadata.workdir && !path.isAbsolute(metadata.program)
+      ? path.join(metadata.workdir, metadata.program)
+      : metadata.program;
+    candidates.push(programPath);
+  }
+
+  const tracePaths = await readTracePaths(traceFolder);
+  candidates.push(...tracePaths);
+
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (!candidate || seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    try {
+      const stat = fs.statSync(candidate);
+      if (stat.isFile()) {
+        return candidate;
+      }
+    } catch {
+      // ignore missing files on disk
+    }
+
+    const traceCopy = resolveTraceFileCopyPath(traceFolder, candidate);
+    try {
+      const stat = fs.statSync(traceCopy);
+      if (stat.isFile()) {
+        return traceCopy;
+      }
+    } catch {
+      // ignore missing trace copies
+    }
+  }
+
+  // Fall back to any file in the trace bundle if no direct path resolves.
+  const filesRoot = path.join(traceFolder, "files");
+  const pending: string[] = [filesRoot];
+  let visited = 0;
+  while (pending.length > 0 && visited < 5000) {
+    const current = pending.shift();
+    if (!current) {
+      continue;
+    }
+    visited += 1;
+    try {
+      const entries = await readdir(current, { withFileTypes: true });
+      for (const entry of entries) {
+        const entryPath = path.join(current, entry.name);
+        if (entry.isFile()) {
+          return entryPath;
+        }
+        if (entry.isDirectory()) {
+          pending.push(entryPath);
+        }
+      }
+    } catch {
+      // ignore unreadable directories
+    }
+  }
+
+  return undefined;
+}
+
+async function openTraceSourceFile(traceFolder: string): Promise<boolean> {
+  // Ensure "Load recent trace" brings up a source file even if no editor is open.
+  const candidate = await findFirstTraceSourceFile(traceFolder);
+  if (!candidate) {
+    return false;
+  }
+  try {
+    const document = await vscode.workspace.openTextDocument(candidate);
+    await vscode.window.showTextDocument(document, { preview: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function pickTraceFolder(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
@@ -391,19 +577,18 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     }
 
     // Setup middleware
-    // console.log("-------------------- KUR1");
     setupMiddlewareApis(dapVsCodeApi, viewsApi);
-    // console.log("-------------------- KUR2");
 
     // Initialize panels
     const panels = initPanels(context, viewsApi);
     (vscode.window as any).panels = panels; // easier debugging
-    // console.log("-------------------- KUR3");
 
     const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-      vscode.window.showInformationMessage("Open a text file first.");
-      return;
+    if (!editor && (loadMode === LoadMode.Trace || loadMode === LoadMode.Tx)) {
+      const opened = await openTraceSourceFile(selectedFile);
+      if (!opened) {
+        vscode.window.showWarningMessage("No trace source file found to open automatically.");
+      }
     }
 
     // const line = editor.selection.active.line;
@@ -418,6 +603,46 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
       cwd: "",
       traceFolder: selectedFile
     };
+
+    if (isRrTraceFolder(selectedFile)) {
+      const cfg = vscode.workspace.getConfiguration('codetracer');
+      const rrWorkerPath = cfg.get<string>('rrWorkerPath')?.trim() ?? "";
+      const rrExePath = cfg.get<string>('rrExePath')?.trim() ?? "";
+      if (!rrWorkerPath) {
+        vscode.window.showErrorMessage(
+          "RR trace requires ct-rr-support. Set 'codetracer.rrWorkerPath' to the ct-rr-support executable."
+        );
+        return;
+      }
+      const rrWorkerExecutable = await isExecutable(rrWorkerPath);
+      if (!rrWorkerExecutable) {
+        vscode.window.showErrorMessage(
+          "Configured ct-rr-support path is not executable. Update 'codetracer.rrWorkerPath' to a valid ct-rr-support binary."
+        );
+        return;
+      }
+      if (!rrExePath) {
+        const rrSupportDir = path.dirname(rrWorkerPath);
+        const siblingRr = path.join(rrSupportDir, "rr");
+        let rrResolved = false;
+        try {
+          fs.accessSync(siblingRr, fs.constants.X_OK);
+          rrResolved = true;
+        } catch {
+          const pathRr = findExecutableInPath("rr");
+          rrResolved = Boolean(pathRr);
+        }
+        if (!rrResolved) {
+          vscode.window.showErrorMessage(
+            "RR trace requires 'rr' executable. Set 'codetracer.rrExePath' or add rr to PATH."
+          );
+          return;
+        }
+      }
+      (debugConfig as any).ctRRWorkerExe = rrWorkerPath;
+      (debugConfig as any).rawDiffIndex = null;
+      (debugConfig as any).restoreLocation = null;
+    }
 
     const started = await vscode.debug.startDebugging(
       undefined,
