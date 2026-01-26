@@ -284,12 +284,12 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
         return await getCurrentTrace(codetracerExe, nargoRoot, isNixOS);
       }
       else {
-        vscode.window.showErrorMessage("No active text editor!")
+        vscode.window.showErrorMessage("No active text editor!");
       }
     }
   );
 
-  return trace?.outputFolder
+  return trace?.outputFolder;
 }
 
 async function recordTraceForWorkdir(
@@ -558,7 +558,7 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     const isNixOS = os.version().includes("NixOS");
 
     // Trace selector
-    let selectedFilePromise: Promise<string | undefined> | undefined
+    let selectedFilePromise: Promise<string | undefined> | undefined;
     switch (loadMode) {
       case LoadMode.Trace:
         selectedFilePromise = pickTraceFolder(codetracerExe, isNixOS);
@@ -666,7 +666,9 @@ let commandDisposables: vscode.Disposable[] = [];
 let miscDisposables: vscode.Disposable[] = []; // e.g. listeners registered once
 
 export async function isExecutable(p?: string): Promise<boolean> {
-  if (!p) return false;
+  if (!p) {
+    return false;
+  }
   try {
     const stat = await lstat(p);
     if (!stat.isFile()) {
@@ -681,7 +683,9 @@ export async function isExecutable(p?: string): Promise<boolean> {
 }
 
 function disposeAll() {
-  for (const d of commandDisposables) d.dispose();
+  for (const d of commandDisposables) {
+    d.dispose();
+  }
   commandDisposables = [];
 }
 
@@ -783,15 +787,24 @@ async function reinitCommands(context: vscode.ExtensionContext) {
     register('ct-vscode.loadRecentTransactions', async () => toggleCtReal(LoadMode.Tx));
 
     register('ct-vscode.smartSourceLineJump', () => {
-      const ed = vscode.window.activeTextEditor; if (!ed) return;
+      const ed = vscode.window.activeTextEditor;
+      if (!ed) {
+        return;
+      }
       ctSourceLineJump(dapVsCodeApi, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.SmartJump);
     });
     register('ct-vscode.forwardSourceLineJump', () => {
-      const ed = vscode.window.activeTextEditor; if (!ed) return;
+      const ed = vscode.window.activeTextEditor;
+      if (!ed) {
+        return;
+      }
       ctSourceLineJump(dapVsCodeApi, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.ForwardJump);
     });
     register('ct-vscode.backwardSourceLineJump', () => {
-      const ed = vscode.window.activeTextEditor; if (!ed) return;
+      const ed = vscode.window.activeTextEditor;
+      if (!ed) {
+        return;
+      }
       ctSourceLineJump(dapVsCodeApi, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.BackwardJump);
     });
 
@@ -813,9 +826,9 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       }
 
       const line = editor.selection.active.line;
-      const inset = addTracepoint(context, viewsApi, editor, line)
+      const inset = addTracepoint(context, viewsApi, editor, line);
       tracepointInsets.set(line, inset);
-    })
+    });
   }
 
   if (miscDisposables.length === 0) {
