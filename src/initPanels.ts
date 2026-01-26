@@ -172,7 +172,7 @@ export function addLoopPosition(context: vscode.ExtensionContext, viewsApi: any,
       let webviewSubscriber = newWebviewSubscriber(panel.webview);
       receive(viewsApi, message.kind, message.value, webviewSubscriber);
     }
-  )
+  );
   return inset;
 }
 
@@ -191,7 +191,7 @@ export function addTracepoint(context: vscode.ExtensionContext, viewsApi: any, e
       let webviewSubscriber = newWebviewSubscriber(panel.webview);
       receive(viewsApi, message.kind, message.value, webviewSubscriber);
     }
-  )
+  );
   return inset;
 }
 
@@ -223,7 +223,7 @@ export function initPanels(
     () => createEventLogPanel(context, viewsApi)
   );
 
-  const flow = (panelMap.flow)
+  const flow = (panelMap.flow);
 
   const terminalOutput = (panelMap.terminalOutput =
     createTerminalPanel(context, viewsApi));

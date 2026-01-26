@@ -207,7 +207,7 @@ function getCommonHtml(
           ${messageHandlerScript}
         });
       </script>
-    `
+    `;
   } else {
     script = `
       <script>
@@ -219,7 +219,7 @@ function getCommonHtml(
           ${messageHandlerScript}
         });
       </script>
-    `
+    `;
   }
 
   return `
@@ -348,7 +348,7 @@ export function getTracepointWebviewContent(
     traceLine,
     traceName,
     traceId
-  )
+  );
 }
 
 export function getFlowComponent(
