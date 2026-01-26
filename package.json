@@ -31,6 +31,16 @@
           "type": "string",
           "default": "",
           "description": "Path to the CodeTracer binary"
+        },
+        "codetracer.rrWorkerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the ct-rr-support (RR worker) executable used for rr-based traces"
+        },
+        "codetracer.rrExePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the rr executable used by ct-rr-support (optional; falls back to PATH or bundled rr)"
         }
       }
     },
@@ -40,7 +50,8 @@
         "label": "Codetracer Debugger",
         "languages": [
           "noir",
-          "ruby"
+          "ruby",
+          "rust"
         ],
         "configurationAttributes": {
           "launch": {
