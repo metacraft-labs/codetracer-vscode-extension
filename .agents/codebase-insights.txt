@@ -1,0 +1,1 @@
+- CtEventKind numeric values are defined in libs/codetracer/src/common/ct_event.nim; ct_vscode.js does not export them. We currently rely on CtCompleteMove=8 and CtUpdatedFlow=57 for VSCode-side flow decorations.
