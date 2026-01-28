@@ -20,6 +20,7 @@ import {
   getTransactionTrace,
   getCurrentTrace,
   getFlowList,
+  receive,
   TraceInfo,
   TransactionInfo,
   MediatorWithSubscribers,
@@ -32,10 +33,316 @@ let adapterFactoryDisposable: vscode.Disposable | undefined;
 let pendingLaunchPanels = false;
 let panelsInitialized = false;
 
+// CtEventKind values are defined in libs/codetracer/src/common/ct_event.nim.
+const enum CtEventKind {
+  CtCompleteMove = 8,
+  CtLoadFlow = 56,
+  CtUpdatedFlow = 57,
+}
+
+const enum CtFlowMode {
+  Call = 0,
+  Diff = 1,
+}
+
+const FLOW_DECORATION_MAX_VALUES_PER_LINE = 10;
+const FLOW_DECORATION_MAX_TEXT_LENGTH = 180;
+
+type FlowValueMap = Record<string, any>;
+type FlowLineValue = { line: number; text: string };
+
+interface FlowStep {
+  position?: number;
+  stepCount?: number;
+  exprOrder?: string[];
+  beforeValues?: FlowValueMap;
+  afterValues?: FlowValueMap;
+}
+
+interface FlowViewUpdate {
+  location?: { highLevelPath?: string; path?: string };
+  steps?: FlowStep[];
+}
+
+interface FlowUpdate {
+  location?: { highLevelPath?: string; path?: string };
+  viewUpdates?: Array<FlowViewUpdate | null | undefined> | Record<string, FlowViewUpdate | null | undefined>;
+  error?: boolean;
+}
+
+interface CtLoadFlowArguments {
+  flowMode: CtFlowMode;
+  location: unknown;
+}
+
+let flowDecorationType: vscode.TextEditorDecorationType | undefined;
+const flowLineValuesByPath = new Map<string, FlowLineValue[]>();
+
 interface TraceMetadata {
   workdir?: string;
   program?: string;
   args?: string[];
+}
+
+function ensureFlowDecorationType(): vscode.TextEditorDecorationType {
+  if (!flowDecorationType) {
+    flowDecorationType = vscode.window.createTextEditorDecorationType({
+      after: {
+        margin: "0 0 0 1rem",
+        color: new vscode.ThemeColor("editorCodeLens.foreground"),
+        fontStyle: "italic",
+        backgroundColor: "rgba(128, 128, 128, 0.25)",
+      },
+    });
+  }
+  return flowDecorationType;
+}
+
+function normalizeFlowPath(rawPath?: string): string | undefined {
+  if (!rawPath) {
+    return undefined;
+  }
+  if (rawPath.startsWith("file://")) {
+    return vscode.Uri.parse(rawPath).fsPath;
+  }
+  return path.normalize(rawPath);
+}
+
+function formatFlowValue(value: any): string {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const candidates = [
+    value.text,
+    value.cText,
+    value.f,
+    value.i,
+    value.r,
+    value.c,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" || typeof candidate === "number") {
+      return String(candidate);
+    }
+  }
+  if (typeof value.b === "boolean") {
+    return value.b ? "true" : "false";
+  }
+  return "";
+}
+
+function sanitizeDecorationText(text: string): string {
+  const trimmed = text.replace(/\s+/g, " ").trim();
+  if (trimmed.length <= FLOW_DECORATION_MAX_TEXT_LENGTH) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, FLOW_DECORATION_MAX_TEXT_LENGTH - 3)}...`;
+}
+
+function resolveFlowViewUpdates(update: FlowUpdate): FlowViewUpdate[] {
+  const viewUpdates = update.viewUpdates;
+  if (Array.isArray(viewUpdates)) {
+    return viewUpdates.filter((item): item is FlowViewUpdate => Boolean(item));
+  }
+  if (viewUpdates && typeof viewUpdates === "object") {
+    const values = Object.values(viewUpdates);
+    return values.filter((item): item is FlowViewUpdate => Boolean(item));
+  }
+  return [];
+}
+
+function buildFlowLineValuesFromSteps(steps: FlowStep[], maxValuesPerLine: number): FlowLineValue[] {
+  const perLine = new Map<number, { stepCount: number; texts: string[] }>();
+
+  for (const step of steps) {
+    const position = step.position;
+    if (typeof position !== "number" || !Number.isFinite(position)) {
+      continue;
+    }
+    const stepCount = typeof step.stepCount === "number" ? step.stepCount : 0;
+    // Prefer the latest step per line to avoid stale loop iterations.
+    const existing = perLine.get(position);
+    if (existing && stepCount < existing.stepCount) {
+      continue;
+    }
+
+    const beforeValues = step.beforeValues;
+    const afterValues = step.afterValues;
+    const expressions = Array.isArray(step.exprOrder)
+      ? step.exprOrder
+      : Array.from(
+          new Set([
+            ...Object.keys(beforeValues ?? {}),
+            ...Object.keys(afterValues ?? {}),
+          ])
+        );
+    if (expressions.length === 0) {
+      continue;
+    }
+
+    const texts: string[] = [];
+    for (const expression of expressions) {
+      const beforeText = formatFlowValue(beforeValues?.[expression]);
+      const afterText = formatFlowValue(afterValues?.[expression]);
+      let formatted = "";
+      if (beforeText && afterText) {
+        formatted = `${expression}: ${beforeText} => ${afterText}`;
+      } else if (afterText) {
+        formatted = `${expression}: ${afterText}`;
+      } else if (beforeText) {
+        formatted = `${expression}: ${beforeText}`;
+      }
+      if (!formatted) {
+        continue;
+      }
+      texts.push(formatted);
+      if (texts.length >= maxValuesPerLine) {
+        break;
+      }
+    }
+
+    if (texts.length > 0) {
+      perLine.set(position, { stepCount, texts });
+    }
+  }
+
+  return Array.from(perLine.entries())
+    .sort(([left], [right]) => left - right)
+    .map(([line, data]) => ({
+      line,
+      text: data.texts.join(", "),
+    }));
+}
+
+function collectFlowSteps(viewUpdates: FlowViewUpdate[]): FlowStep[] {
+  const steps: FlowStep[] = [];
+  for (const viewUpdate of viewUpdates) {
+    if (Array.isArray(viewUpdate.steps)) {
+      steps.push(...viewUpdate.steps);
+    }
+  }
+  return steps;
+}
+
+function updateFlowValuesCache(update: FlowUpdate): void {
+  if (!update || update.error) {
+    return;
+  }
+
+  const viewUpdates = resolveFlowViewUpdates(update);
+  if (viewUpdates.length === 0) {
+    return;
+  }
+
+  const mergedSteps = collectFlowSteps(viewUpdates);
+  if (mergedSteps.length === 0) {
+    return;
+  }
+
+  const pathKey = normalizeFlowPath(
+    viewUpdates[0]?.location?.highLevelPath ??
+    viewUpdates[0]?.location?.path ??
+    update.location?.highLevelPath ??
+    update.location?.path
+  );
+  if (!pathKey) {
+    return;
+  }
+
+  const lineValues = buildFlowLineValuesFromSteps(mergedSteps, FLOW_DECORATION_MAX_VALUES_PER_LINE);
+  if (lineValues.length === 0) {
+    flowLineValuesByPath.delete(pathKey);
+    return;
+  }
+
+  flowLineValuesByPath.set(pathKey, lineValues);
+}
+
+function applyFlowDecorationsForEditor(editor: vscode.TextEditor | undefined): void {
+  if (!editor) {
+    return;
+  }
+
+  const pathKey = normalizeFlowPath(editor.document.uri.fsPath);
+  if (!pathKey) {
+    return;
+  }
+
+  const lineValues = flowLineValuesByPath.get(pathKey);
+  const decorationType = ensureFlowDecorationType();
+  if (!lineValues || lineValues.length === 0) {
+    editor.setDecorations(decorationType, []);
+    return;
+  }
+
+  const lineCount = editor.document.lineCount;
+  const decorations: vscode.DecorationOptions[] = [];
+  for (const entry of lineValues) {
+    const lineIndex = entry.line - 1; // Flow uses 1-based line numbers.
+    if (lineIndex < 0 || lineIndex >= lineCount) {
+      continue;
+    }
+    const text = sanitizeDecorationText(entry.text);
+    if (!text) {
+      continue;
+    }
+    const lineEnd = editor.document.lineAt(lineIndex).range.end;
+    decorations.push({
+      range: new vscode.Range(lineEnd, lineEnd),
+      renderOptions: {
+        after: {
+          contentText: `  ${text}`,
+        },
+      },
+    });
+  }
+
+  editor.setDecorations(decorationType, decorations);
+}
+
+function clearFlowDecorations(editor?: vscode.TextEditor): void {
+  if (!flowDecorationType) {
+    flowLineValuesByPath.clear();
+    return;
+  }
+  if (editor) {
+    editor.setDecorations(flowDecorationType, []);
+  } else {
+    for (const visibleEditor of vscode.window.visibleTextEditors) {
+      visibleEditor.setDecorations(flowDecorationType, []);
+    }
+  }
+  flowLineValuesByPath.clear();
+}
+
+function emitCtLoadFlow(viewsApi: MediatorWithSubscribers, location: unknown): void {
+  const args: CtLoadFlowArguments = {
+    flowMode: CtFlowMode.Call,
+    location,
+  };
+  receive(viewsApi, CtEventKind.CtLoadFlow, args, viewsApi.asSubscriber);
+}
+
+function registerFlowDecorationHandlers(dapApi: DapVsCodeApi, viewsApi: MediatorWithSubscribers): void {
+  if (!Array.isArray(dapApi.handlers)) {
+    return;
+  }
+  if (!dapApi.handlers[CtEventKind.CtUpdatedFlow] || !dapApi.handlers[CtEventKind.CtCompleteMove]) {
+    return;
+  }
+
+  // Track flow updates as they arrive from the DAP so we can decorate immediately.
+  dapApi.handlers[CtEventKind.CtUpdatedFlow].push((_kind: number, update: FlowUpdate, _sub: any) => {
+    updateFlowValuesCache(update);
+    applyFlowDecorationsForEditor(vscode.window.activeTextEditor);
+  });
+
+  // Emit a flow refresh request on each completed move.
+  dapApi.handlers[CtEventKind.CtCompleteMove].push((_kind: number, response: { location?: unknown }) => {
+    if (response?.location) {
+      emitCtLoadFlow(viewsApi, response.location);
+    }
+  });
 }
 
 function getBackendBinPath(context: vscode.ExtensionContext): string {
@@ -538,6 +845,8 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
       tracepointInsets.delete(line);
     }
 
+    clearFlowDecorations();
+
     // for (const [line, inset] of flowInsets) {
     //   inset.dispose();
     //   flowInsets.delete(line);
@@ -714,6 +1023,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
   );
   (vscode.window as any).viewsApi = viewsApi; // easier debugging
   (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
+  registerFlowDecorationHandlers(dapVsCodeApi, viewsApi);
 
   if (!valid) {
     await promptForExecutablePath();
@@ -863,6 +1173,9 @@ async function reinitCommands(context: vscode.ExtensionContext) {
         'codetracer-sidebar-panel',
         new utils.CodeTracerViewProvider(context)
       ),
+      vscode.window.onDidChangeActiveTextEditor((editor) => {
+        applyFlowDecorationsForEditor(editor);
+      }),
       vscode.workspace.onDidChangeConfiguration(async (e) => {
         if (e.affectsConfiguration('codetracer.runnablePath')) {
           await reinitCommands(context);
@@ -906,4 +1219,7 @@ export function deactivate() {
   disposeCommands();
   adapterFactoryDisposable?.dispose();
   adapterFactoryDisposable = undefined;
+  clearFlowDecorations();
+  flowDecorationType?.dispose();
+  flowDecorationType = undefined;
 }
