@@ -59,9 +59,19 @@ interface FlowStep {
   afterValues?: FlowValueMap;
 }
 
+interface FlowRenderValue {
+  line?: number;
+  column?: number;
+  loopId?: number;
+  iteration?: number;
+  rrTicks?: number;
+  text?: string;
+}
+
 interface FlowViewUpdate {
   location?: { highLevelPath?: string; path?: string };
   steps?: FlowStep[];
+  renderValueGroups?: FlowRenderValue[][];
 }
 
 interface FlowUpdate {
@@ -108,29 +118,6 @@ function normalizeFlowPath(rawPath?: string): string | undefined {
   return path.normalize(rawPath);
 }
 
-function formatFlowValue(value: any): string {
-  if (!value || typeof value !== "object") {
-    return "";
-  }
-  const candidates = [
-    value.text,
-    value.cText,
-    value.f,
-    value.i,
-    value.r,
-    value.c,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" || typeof candidate === "number") {
-      return String(candidate);
-    }
-  }
-  if (typeof value.b === "boolean") {
-    return value.b ? "true" : "false";
-  }
-  return "";
-}
-
 function sanitizeDecorationText(text: string): string {
   const trimmed = text.replace(/\s+/g, " ").trim();
   if (trimmed.length <= FLOW_DECORATION_MAX_TEXT_LENGTH) {
@@ -151,77 +138,40 @@ function resolveFlowViewUpdates(update: FlowUpdate): FlowViewUpdate[] {
   return [];
 }
 
-function buildFlowLineValuesFromSteps(steps: FlowStep[], maxValuesPerLine: number): FlowLineValue[] {
-  const perLine = new Map<number, { stepCount: number; texts: string[] }>();
+function buildFlowLineValuesFromRenderGroups(
+  renderValueGroups: FlowRenderValue[][],
+  maxValuesPerLine: number,
+  _activeRRTicks?: number
+): FlowLineValue[] {
+  const perLine = new Map<number, Array<{ text: string; column: number }>>();
 
-  for (const step of steps) {
-    const position = step.position;
-    if (typeof position !== "number" || !Number.isFinite(position)) {
-      continue;
-    }
-    const stepCount = typeof step.stepCount === "number" ? step.stepCount : 0;
-    // Prefer the latest step per line to avoid stale loop iterations.
-    const existing = perLine.get(position);
-    if (existing && stepCount < existing.stepCount) {
-      continue;
-    }
-
-    const beforeValues = step.beforeValues;
-    const afterValues = step.afterValues;
-    const expressions = Array.isArray(step.exprOrder)
-      ? step.exprOrder
-      : Array.from(
-          new Set([
-            ...Object.keys(beforeValues ?? {}),
-            ...Object.keys(afterValues ?? {}),
-          ])
-        );
-    if (expressions.length === 0) {
-      continue;
-    }
-
-    const texts: string[] = [];
-    for (const expression of expressions) {
-      const beforeText = formatFlowValue(beforeValues?.[expression]);
-      const afterText = formatFlowValue(afterValues?.[expression]);
-      let formatted = "";
-      if (beforeText && afterText) {
-        formatted = `${expression}: ${beforeText} => ${afterText}`;
-      } else if (afterText) {
-        formatted = `${expression}: ${afterText}`;
-      } else if (beforeText) {
-        formatted = `${expression}: ${beforeText}`;
-      }
-      if (!formatted) {
+  for (const group of renderValueGroups) {
+    for (const value of group) {
+      const line = value.line;
+      const text = value.text;
+      if (typeof line !== "number" || !Number.isFinite(line) || !text) {
         continue;
       }
-      texts.push(formatted);
-      if (texts.length >= maxValuesPerLine) {
-        break;
-      }
-    }
 
-    if (texts.length > 0) {
-      perLine.set(position, { stepCount, texts });
+      const column = typeof value.column === "number" && Number.isFinite(value.column)
+        ? value.column
+        : Number.MAX_SAFE_INTEGER;
+      const existing = perLine.get(line) ?? [];
+      existing.push({ text, column });
+      perLine.set(line, existing);
     }
   }
 
   return Array.from(perLine.entries())
     .sort(([left], [right]) => left - right)
-    .map(([line, data]) => ({
-      line,
-      text: data.texts.join(", "),
-    }));
-}
-
-function collectFlowSteps(viewUpdates: FlowViewUpdate[]): FlowStep[] {
-  const steps: FlowStep[] = [];
-  for (const viewUpdate of viewUpdates) {
-    if (Array.isArray(viewUpdate.steps)) {
-      steps.push(...viewUpdate.steps);
-    }
-  }
-  return steps;
+    .map(([line, entries]) => {
+      entries.sort((left, right) => left.column - right.column);
+      const texts = entries.slice(0, maxValuesPerLine).map((entry) => entry.text);
+      return {
+        line,
+        text: texts.join(", "),
+      };
+    });
 }
 
 function updateFlowValuesCache(update: FlowUpdate): void {
@@ -229,19 +179,19 @@ function updateFlowValuesCache(update: FlowUpdate): void {
     return;
   }
 
-  const viewUpdates = resolveFlowViewUpdates(update);
-  if (viewUpdates.length === 0) {
+  const viewUpdate = resolveFlowViewUpdates(update)[0];
+  if (!viewUpdate) {
     return;
   }
 
-  const mergedSteps = collectFlowSteps(viewUpdates);
-  if (mergedSteps.length === 0) {
+  const renderValueGroups = viewUpdate.renderValueGroups;
+  if (!Array.isArray(renderValueGroups) || renderValueGroups.length === 0) {
     return;
   }
 
   const pathKey = normalizeFlowPath(
-    viewUpdates[0]?.location?.highLevelPath ??
-    viewUpdates[0]?.location?.path ??
+    viewUpdate.location?.highLevelPath ??
+    viewUpdate.location?.path ??
     update.location?.highLevelPath ??
     update.location?.path
   );
@@ -249,7 +199,10 @@ function updateFlowValuesCache(update: FlowUpdate): void {
     return;
   }
 
-  const lineValues = buildFlowLineValuesFromSteps(mergedSteps, FLOW_DECORATION_MAX_VALUES_PER_LINE);
+  const lineValues = buildFlowLineValuesFromRenderGroups(
+    renderValueGroups,
+    FLOW_DECORATION_MAX_VALUES_PER_LINE
+  );
   if (lineValues.length === 0) {
     flowLineValuesByPath.delete(pathKey);
     return;
@@ -316,6 +269,11 @@ function clearFlowDecorations(editor?: vscode.TextEditor): void {
 }
 
 function emitCtLoadFlow(viewsApi: MediatorWithSubscribers, location: unknown): void {
+  // Avoid sending when the debug session is not ready (prevents customRequest undefined).
+  const session = vscode.debug.activeDebugSession;
+  if (!session || session.type !== "codetracer-debug" || typeof session.customRequest !== "function") {
+    return;
+  }
   const args: CtLoadFlowArguments = {
     flowMode: CtFlowMode.Call,
     location,
@@ -339,6 +297,7 @@ function registerFlowDecorationHandlers(dapApi: DapVsCodeApi, viewsApi: Mediator
 
   // Emit a flow refresh request on each completed move.
   dapApi.handlers[CtEventKind.CtCompleteMove].push((_kind: number, response: { location?: unknown }) => {
+    const location = response?.location as { rrTicks?: number; line?: number } | undefined;
     if (response?.location) {
       emitCtLoadFlow(viewsApi, response.location);
     }
