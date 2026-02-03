@@ -119,6 +119,11 @@ export declare function completeMove(
   dapApi: DapVsCodeApi
 ): void;
 
+export declare function computeRenderValueGroups(
+  update: any,
+  sourceLines: string[]
+): any;
+
 export declare function receive(
   api: MediatorWithSubscribers,
   kind: any, // ct event kind

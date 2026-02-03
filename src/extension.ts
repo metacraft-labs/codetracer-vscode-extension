@@ -21,6 +21,7 @@ import {
   getCurrentTrace,
   getFlowList,
   receive,
+  computeRenderValueGroups,
   TraceInfo,
   TransactionInfo,
   MediatorWithSubscribers,
@@ -63,8 +64,6 @@ interface FlowRenderValue {
   line?: number;
   column?: number;
   loopId?: number;
-  iteration?: number;
-  rrTicks?: number;
   text?: string;
 }
 
@@ -138,28 +137,25 @@ function resolveFlowViewUpdates(update: FlowUpdate): FlowViewUpdate[] {
   return [];
 }
 
-function buildFlowLineValuesFromRenderGroups(
-  renderValueGroups: FlowRenderValue[][],
-  maxValuesPerLine: number,
-  _activeRRTicks?: number
+function buildFlowLineValuesFromRenderValues(
+  renderValues: FlowRenderValue[],
+  maxValuesPerLine: number
 ): FlowLineValue[] {
   const perLine = new Map<number, Array<{ text: string; column: number }>>();
 
-  for (const group of renderValueGroups) {
-    for (const value of group) {
-      const line = value.line;
-      const text = value.text;
-      if (typeof line !== "number" || !Number.isFinite(line) || !text) {
-        continue;
-      }
-
-      const column = typeof value.column === "number" && Number.isFinite(value.column)
-        ? value.column
-        : Number.MAX_SAFE_INTEGER;
-      const existing = perLine.get(line) ?? [];
-      existing.push({ text, column });
-      perLine.set(line, existing);
+  for (const value of renderValues) {
+    const line = value.line;
+    const text = value.text;
+    if (typeof line !== "number" || !Number.isFinite(line) || !text) {
+      continue;
     }
+
+    const column = typeof value.column === "number" && Number.isFinite(value.column)
+      ? value.column
+      : Number.MAX_SAFE_INTEGER;
+    const existing = perLine.get(line) ?? [];
+    existing.push({ text, column });
+    perLine.set(line, existing);
   }
 
   return Array.from(perLine.entries())
@@ -184,11 +180,6 @@ function updateFlowValuesCache(update: FlowUpdate): void {
     return;
   }
 
-  const renderValueGroups = viewUpdate.renderValueGroups;
-  if (!Array.isArray(renderValueGroups) || renderValueGroups.length === 0) {
-    return;
-  }
-
   const pathKey = normalizeFlowPath(
     viewUpdate.location?.highLevelPath ??
     viewUpdate.location?.path ??
@@ -199,8 +190,20 @@ function updateFlowValuesCache(update: FlowUpdate): void {
     return;
   }
 
-  const lineValues = buildFlowLineValuesFromRenderGroups(
-    renderValueGroups,
+  let sourceLines: string[] = [];
+  try {
+    sourceLines = fs.readFileSync(pathKey, "utf8").split(/\r?\n/);
+  } catch {
+    return;
+  }
+
+  const renderValues = computeRenderValueGroups(update, sourceLines) as FlowRenderValue[] | undefined;
+  if (!Array.isArray(renderValues) || renderValues.length === 0) {
+    return;
+  }
+
+  const lineValues = buildFlowLineValuesFromRenderValues(
+    renderValues,
     FLOW_DECORATION_MAX_VALUES_PER_LINE
   );
   if (lineValues.length === 0) {
