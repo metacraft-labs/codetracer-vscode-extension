@@ -340,7 +340,7 @@ export function getTracepointWebviewContent(
   return getCommonHtml(
     webview,
     context,
-    "tracepointComponent",
+    "trace",
     "makeTracepointComponentForExtension",
     `let viewsApi = newVsCodeViewApi("tracepoint view api", vscode, window);
     window.viewsApi = viewsApi; // for easier debugging
