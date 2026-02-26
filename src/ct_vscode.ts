@@ -124,6 +124,22 @@ export declare function computeRenderValueGroups(
   sourceLines: string[]
 ): any;
 
+export declare function computeFlowLineValues(
+  update: any,
+  sourceLines: string[],
+  maxValuesPerLine?: number
+): any;
+
+export declare function computeFlowLoopSliders(
+  update: any
+): any;
+
+export declare function computeFlowInsetData(
+  update: any,
+  sourceLines: string[],
+  maxValuesPerLine?: number
+): any;
+
 export declare function receive(
   api: MediatorWithSubscribers,
   kind: any, // ct event kind

@@ -353,7 +353,9 @@ export function getTracepointWebviewContent(
 
 export function getFlowComponent(
   webview: vscode.Webview,
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
+  flowLine: number,
+  flowName: string
 ): string {
   return getCommonHtml(
     webview,
@@ -362,6 +364,9 @@ export function getFlowComponent(
     "makeFlowComponentForExtension",
     `let viewsApi = newVsCodeViewApi("flow view api", vscode, window);
     window.viewsApi = viewsApi; // for easier debugging
-    registerFlowComponent(window.component, viewsApi);`
+    registerFlowComponent(window.component, viewsApi);`,
+    flowLine,
+    flowName,
+    0
   );
 }

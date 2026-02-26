@@ -162,7 +162,7 @@ export function addLoopPosition(context: vscode.ExtensionContext, viewsApi: any,
     {
       id: "flowComponent",
       title: "flow",
-      getContent: utils.getFlowComponent,
+      getFlowContent: utils.getFlowComponent,
     },
     editor,
     line,

@@ -6,11 +6,19 @@ export interface PanelConfig {
     id: PanelId;
     title: string;
     getContent?: (panel: vscode.Webview, context: vscode.ExtensionContext) => string;
+    getFlowContent?: (panel: vscode.Webview, context: vscode.ExtensionContext, flowLine: number, flowFile: string) => string;
     getTraceContent?: (panel: vscode.Webview, context: vscode.ExtensionContext, traceLine: number, traceFile: string, traceId: number) => string;
 }
 
 const panels: Map<PanelId, vscode.WebviewPanel> = new Map();
 let traceId = 0;
+
+function setInsetHtmlAsync(inset: vscode.WebviewEditorInset, html: string): void {
+    // Defer initial HTML attachment until the inset has been mounted by VS Code.
+    setTimeout(() => {
+        inset.webview.html = html;
+    }, 0);
+}
 
 export function createFlowPanel(
     config: PanelConfig,
@@ -39,7 +47,10 @@ export function createFlowPanel(
         );
     }
 
-    inset.webview.html = config.getContent ? config.getContent(inset.webview, context) : "";
+    const html = config.getFlowContent
+        ? config.getFlowContent(inset.webview, context, line + 1, editor.document.fileName)
+        : (config.getContent ? config.getContent(inset.webview, context) : "");
+    setInsetHtmlAsync(inset, html);
 
     return inset;
 }
@@ -71,7 +82,8 @@ export function createTracepointPanel(
         );
     }
 
-    inset.webview.html = config.getTraceContent ? config.getTraceContent(inset.webview, context, line + 1, editor.document.fileName, traceId) : "";
+    const html = config.getTraceContent ? config.getTraceContent(inset.webview, context, line + 1, editor.document.fileName, traceId) : "";
+    setInsetHtmlAsync(inset, html);
     traceId += 1;
     return inset;
 }

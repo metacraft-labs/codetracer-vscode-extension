@@ -21,14 +21,16 @@ import {
   getCurrentTrace,
   getFlowList,
   receive,
-  computeRenderValueGroups,
+  computeFlowInsetData,
   TraceInfo,
   TransactionInfo,
   MediatorWithSubscribers,
 } from "./ct_vscode.js";
 
 const tracepointInsets = new Map<number, vscode.WebviewEditorInset>();
-// const flowInsets = new Map<number, vscode.WebviewEditorInset>();
+let flowInsetPath: string | undefined;
+const flowInsets = new Map<number, vscode.WebviewEditorInset>();
+let lastFlowLocation: unknown | undefined;
 let ctStarted = false;
 let adapterFactoryDisposable: vscode.Disposable | undefined;
 let pendingLaunchPanels = false;
@@ -39,6 +41,7 @@ const enum CtEventKind {
   CtCompleteMove = 8,
   CtLoadFlow = 56,
   CtUpdatedFlow = 57,
+  InternalLastCompleteMove = 64,
 }
 
 const enum CtFlowMode {
@@ -51,6 +54,16 @@ const FLOW_DECORATION_MAX_TEXT_LENGTH = 180;
 
 type FlowValueMap = Record<string, any>;
 type FlowLineValue = { line: number; text: string };
+type FlowLoopSlider = {
+  line: number;
+  loopId: number;
+  activeIteration: number;
+  locationInside?: boolean;
+};
+type FlowInsetData = {
+  lineValues?: FlowLineValue[];
+  loopSliders?: FlowLoopSlider[];
+};
 
 interface FlowStep {
   position?: number;
@@ -60,17 +73,10 @@ interface FlowStep {
   afterValues?: FlowValueMap;
 }
 
-interface FlowRenderValue {
-  line?: number;
-  column?: number;
-  loopId?: number;
-  text?: string;
-}
-
 interface FlowViewUpdate {
   location?: { highLevelPath?: string; path?: string };
   steps?: FlowStep[];
-  renderValueGroups?: FlowRenderValue[][];
+  renderValueGroups?: any[][];
 }
 
 interface FlowUpdate {
@@ -86,6 +92,8 @@ interface CtLoadFlowArguments {
 
 let flowDecorationType: vscode.TextEditorDecorationType | undefined;
 const flowLineValuesByPath = new Map<string, FlowLineValue[]>();
+const flowLoopSlidersByPath = new Map<string, FlowLoopSlider[]>();
+let internalLastCompleteMoveHandlerRegistered = false;
 
 interface TraceMetadata {
   workdir?: string;
@@ -137,39 +145,6 @@ function resolveFlowViewUpdates(update: FlowUpdate): FlowViewUpdate[] {
   return [];
 }
 
-function buildFlowLineValuesFromRenderValues(
-  renderValues: FlowRenderValue[],
-  maxValuesPerLine: number
-): FlowLineValue[] {
-  const perLine = new Map<number, Array<{ text: string; column: number }>>();
-
-  for (const value of renderValues) {
-    const line = value.line;
-    const text = value.text;
-    if (typeof line !== "number" || !Number.isFinite(line) || !text) {
-      continue;
-    }
-
-    const column = typeof value.column === "number" && Number.isFinite(value.column)
-      ? value.column
-      : Number.MAX_SAFE_INTEGER;
-    const existing = perLine.get(line) ?? [];
-    existing.push({ text, column });
-    perLine.set(line, existing);
-  }
-
-  return Array.from(perLine.entries())
-    .sort(([left], [right]) => left - right)
-    .map(([line, entries]) => {
-      entries.sort((left, right) => left.column - right.column);
-      const texts = entries.slice(0, maxValuesPerLine).map((entry) => entry.text);
-      return {
-        line,
-        text: texts.join(", "),
-      };
-    });
-}
-
 function updateFlowValuesCache(update: FlowUpdate): void {
   if (!update || update.error) {
     return;
@@ -197,21 +172,24 @@ function updateFlowValuesCache(update: FlowUpdate): void {
     return;
   }
 
-  const renderValues = computeRenderValueGroups(update, sourceLines) as FlowRenderValue[] | undefined;
-  if (!Array.isArray(renderValues) || renderValues.length === 0) {
-    return;
-  }
-
-  const lineValues = buildFlowLineValuesFromRenderValues(
-    renderValues,
+  const insetData = computeFlowInsetData(
+    update,
+    sourceLines,
     FLOW_DECORATION_MAX_VALUES_PER_LINE
-  );
-  if (lineValues.length === 0) {
+  ) as FlowInsetData | undefined;
+  const lineValues = insetData?.lineValues;
+  if (!Array.isArray(lineValues) || lineValues.length === 0) {
     flowLineValuesByPath.delete(pathKey);
-    return;
+  } else {
+    flowLineValuesByPath.set(pathKey, lineValues);
   }
 
-  flowLineValuesByPath.set(pathKey, lineValues);
+  const loopSliders = insetData?.loopSliders;
+  if (!Array.isArray(loopSliders) || loopSliders.length === 0) {
+    flowLoopSlidersByPath.delete(pathKey);
+  } else {
+    flowLoopSlidersByPath.set(pathKey, loopSliders);
+  }
 }
 
 function applyFlowDecorationsForEditor(editor: vscode.TextEditor | undefined): void {
@@ -259,6 +237,7 @@ function applyFlowDecorationsForEditor(editor: vscode.TextEditor | undefined): v
 function clearFlowDecorations(editor?: vscode.TextEditor): void {
   if (!flowDecorationType) {
     flowLineValuesByPath.clear();
+    flowLoopSlidersByPath.clear();
     return;
   }
   if (editor) {
@@ -269,6 +248,65 @@ function clearFlowDecorations(editor?: vscode.TextEditor): void {
     }
   }
   flowLineValuesByPath.clear();
+  flowLoopSlidersByPath.clear();
+}
+
+function clearFlowInset(): void {
+  for (const [, inset] of flowInsets) {
+    inset.dispose();
+  }
+  flowInsets.clear();
+  flowInsetPath = undefined;
+}
+
+function syncFlowInsetForEditor(
+  context: vscode.ExtensionContext,
+  viewsApi: MediatorWithSubscribers,
+  editor: vscode.TextEditor | undefined
+): void {
+  if (!editor) {
+    clearFlowInset();
+    return;
+  }
+
+  const pathKey = normalizeFlowPath(editor.document.uri.fsPath);
+  if (!pathKey) {
+    clearFlowInset();
+    return;
+  }
+
+  if (flowInsetPath && flowInsetPath !== pathKey) {
+    clearFlowInset();
+  }
+
+  const sliders = flowLoopSlidersByPath.get(pathKey);
+  if (!Array.isArray(sliders) || sliders.length === 0) {
+    if (flowInsetPath === pathKey) {
+      clearFlowInset();
+    }
+    return;
+  }
+
+  // Pin inset to the active loop line from shared loop metadata.
+  const targetSlider = sliders.find((slider) => slider.locationInside) ?? sliders[0];
+  const line = Math.max(0, targetSlider.line);
+  const targetLine = Math.max(0, line - 1);
+
+  if (flowInsets.has(line) && flowInsetPath === pathKey) {
+    return;
+  }
+
+  clearFlowInset();
+  const inset = addLoopPosition(context, viewsApi, editor, targetLine);
+  flowInsets.set(line, inset);
+  flowInsetPath = pathKey;
+
+  // A new inset can miss the latest flow event while the webview initializes.
+  // Re-request flow from the last known debugger location right after inset creation.
+  if (lastFlowLocation) {
+    setTimeout(() => emitCtLoadFlow(viewsApi, lastFlowLocation), 0);
+    setTimeout(() => emitCtLoadFlow(viewsApi, lastFlowLocation), 60);
+  }
 }
 
 function emitCtLoadFlow(viewsApi: MediatorWithSubscribers, location: unknown): void {
@@ -284,7 +322,11 @@ function emitCtLoadFlow(viewsApi: MediatorWithSubscribers, location: unknown): v
   receive(viewsApi, CtEventKind.CtLoadFlow, args, viewsApi.asSubscriber);
 }
 
-function registerFlowDecorationHandlers(dapApi: DapVsCodeApi, viewsApi: MediatorWithSubscribers): void {
+function registerFlowDecorationHandlers(
+  context: vscode.ExtensionContext,
+  dapApi: DapVsCodeApi,
+  viewsApi: MediatorWithSubscribers
+): void {
   if (!Array.isArray(dapApi.handlers)) {
     return;
   }
@@ -292,16 +334,33 @@ function registerFlowDecorationHandlers(dapApi: DapVsCodeApi, viewsApi: Mediator
     return;
   }
 
+  if (
+    !internalLastCompleteMoveHandlerRegistered &&
+    Array.isArray(viewsApi.handlers) &&
+    Array.isArray(viewsApi.handlers[CtEventKind.InternalLastCompleteMove])
+  ) {
+    viewsApi.handlers[CtEventKind.InternalLastCompleteMove].push((_kind: number, _value: unknown, _sub: unknown) => {
+      if (!lastFlowLocation) {
+        return;
+      }
+      emitCtLoadFlow(viewsApi, lastFlowLocation);
+      setTimeout(() => emitCtLoadFlow(viewsApi, lastFlowLocation), 50);
+    });
+    internalLastCompleteMoveHandlerRegistered = true;
+  }
+
   // Track flow updates as they arrive from the DAP so we can decorate immediately.
   dapApi.handlers[CtEventKind.CtUpdatedFlow].push((_kind: number, update: FlowUpdate, _sub: any) => {
     updateFlowValuesCache(update);
-    applyFlowDecorationsForEditor(vscode.window.activeTextEditor);
+    const activeEditor = vscode.window.activeTextEditor;
+    applyFlowDecorationsForEditor(activeEditor);
+    syncFlowInsetForEditor(context, viewsApi, activeEditor);
   });
 
   // Emit a flow refresh request on each completed move.
   dapApi.handlers[CtEventKind.CtCompleteMove].push((_kind: number, response: { location?: unknown }) => {
-    const location = response?.location as { rrTicks?: number; line?: number } | undefined;
     if (response?.location) {
+      lastFlowLocation = response.location;
       emitCtLoadFlow(viewsApi, response.location);
     }
   });
@@ -418,7 +477,7 @@ function findRubyProjectRoot(startDir: string, stopDir?: string): string | undef
     if (fs.existsSync(path.join(current, "config.ru"))) {
       return current;
     }
-    const gemspecs = fs.readdirSync(current).filter((entry) => entry.endsWith(".gemspec"));
+    const gemspecs = fs.readdirSync(current).filter((entry: string) => entry.endsWith(".gemspec"));
     if (gemspecs.length > 0) {
       return current;
     }
@@ -808,11 +867,9 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     }
 
     clearFlowDecorations();
-
-    // for (const [line, inset] of flowInsets) {
-    //   inset.dispose();
-    //   flowInsets.delete(line);
-    // }
+    clearFlowInset();
+    lastFlowLocation = undefined;
+    internalLastCompleteMoveHandlerRegistered = false;
 
     adapterFactoryDisposable?.dispose();
     adapterFactoryDisposable = undefined;
@@ -861,11 +918,6 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
         vscode.window.showWarningMessage("No trace source file found to open automatically.");
       }
     }
-
-    // const line = editor.selection.active.line;
-    // const inset = addLoopPosition(context, viewsApi, editor, line - 1);
-    // flowInsets.set(line, inset);
-
 
     const debugConfig = {
       type: "codetracer-debug",
@@ -985,7 +1037,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
   );
   (vscode.window as any).viewsApi = viewsApi; // easier debugging
   (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
-  registerFlowDecorationHandlers(dapVsCodeApi, viewsApi);
+  registerFlowDecorationHandlers(context, dapVsCodeApi, viewsApi);
 
   if (!valid) {
     await promptForExecutablePath();
@@ -1098,6 +1150,11 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       }
 
       const line = editor.selection.active.line;
+      const existingInset = tracepointInsets.get(line);
+      if (existingInset) {
+        existingInset.dispose();
+        tracepointInsets.delete(line);
+      }
       const inset = addTracepoint(context, viewsApi, editor, line);
       tracepointInsets.set(line, inset);
     });
@@ -1137,6 +1194,10 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       ),
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         applyFlowDecorationsForEditor(editor);
+        const viewsApi = (vscode.window as any).viewsApi as MediatorWithSubscribers | undefined;
+        if (viewsApi) {
+          syncFlowInsetForEditor(context, viewsApi, editor);
+        }
       }),
       vscode.workspace.onDidChangeConfiguration(async (e) => {
         if (e.affectsConfiguration('codetracer.runnablePath')) {
@@ -1182,6 +1243,9 @@ export function deactivate() {
   adapterFactoryDisposable?.dispose();
   adapterFactoryDisposable = undefined;
   clearFlowDecorations();
+  clearFlowInset();
+  lastFlowLocation = undefined;
+  internalLastCompleteMoveHandlerRegistered = false;
   flowDecorationType?.dispose();
   flowDecorationType = undefined;
 }
