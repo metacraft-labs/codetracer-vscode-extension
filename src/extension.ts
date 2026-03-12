@@ -94,6 +94,7 @@ let flowDecorationType: vscode.TextEditorDecorationType | undefined;
 const flowLineValuesByPath = new Map<string, FlowLineValue[]>();
 const flowLoopSlidersByPath = new Map<string, FlowLoopSlider[]>();
 let internalLastCompleteMoveHandlerRegistered = false;
+let lastFlowLocationKey: string | undefined;
 
 interface TraceMetadata {
   workdir?: string;
@@ -123,6 +124,15 @@ function normalizeFlowPath(rawPath?: string): string | undefined {
     return vscode.Uri.parse(rawPath).fsPath;
   }
   return path.normalize(rawPath);
+}
+
+function getFlowLocationKey(location: unknown): string | undefined {
+  if (!location || typeof location !== "object") {
+    return undefined;
+  }
+
+  const key = (location as { key?: unknown }).key;
+  return typeof key === "string" && key.length > 0 ? key : undefined;
 }
 
 function sanitizeDecorationText(text: string): string {
@@ -351,17 +361,29 @@ function registerFlowDecorationHandlers(
 
   // Track flow updates as they arrive from the DAP so we can decorate immediately.
   dapApi.handlers[CtEventKind.CtUpdatedFlow].push((_kind: number, update: FlowUpdate, _sub: any) => {
+    lastFlowLocationKey = getFlowLocationKey(update?.location) ?? lastFlowLocationKey;
     updateFlowValuesCache(update);
     const activeEditor = vscode.window.activeTextEditor;
     applyFlowDecorationsForEditor(activeEditor);
     syncFlowInsetForEditor(context, viewsApi, activeEditor);
   });
 
-  // Emit a flow refresh request on each completed move.
+  // Same-function moves should reuse the current flow shape; reloading on every step
+  // shrinks loop iteration metadata to the current position and resets the slider.
   dapApi.handlers[CtEventKind.CtCompleteMove].push((_kind: number, response: { location?: unknown }) => {
     if (response?.location) {
+      const nextLocationKey = getFlowLocationKey(response.location);
+      const shouldReloadFlow =
+        !nextLocationKey ||
+        !lastFlowLocationKey ||
+        nextLocationKey !== lastFlowLocationKey;
+
       lastFlowLocation = response.location;
-      emitCtLoadFlow(viewsApi, response.location);
+      lastFlowLocationKey = nextLocationKey ?? lastFlowLocationKey;
+
+      if (shouldReloadFlow) {
+        emitCtLoadFlow(viewsApi, response.location);
+      }
     }
   });
 }
