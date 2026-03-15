@@ -22,6 +22,7 @@
             nodePackages.typescript
             nodePackages.eslint
             vsce
+            # TODO: Use codetracer-toolchains Nim instead of uncontrolled pkgs.nim
             pkgs.nim
           ];
 
