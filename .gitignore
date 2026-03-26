@@ -28,6 +28,16 @@ yarn-error.log*
 .nix-gc-roots/
 *.vsix
 
+# WDIO test artifacts
+.wdio-vscode-service/
+out-wdio/
+# Stylus trace fixture (generated, not committed — regenerate with scripts/prepare-stylus-fixture.sh)
+test/fixtures/stylus-fund-trace/trace.json
+test/fixtures/stylus-fund-trace/trace.bin
+test/fixtures/stylus-fund-trace/trace_metadata.json
+test/fixtures/stylus-fund-trace/trace_paths.json
+test/fixtures/stylus-fund-trace/files/
+
 # macOS
 .DS_Store
 
