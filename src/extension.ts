@@ -389,6 +389,14 @@ function registerFlowDecorationHandlers(
 }
 
 function getBackendBinPath(context: vscode.ExtensionContext): string {
+  // If runnablePath is set (e.g. /path/to/codetracer/src/build-debug/bin/ct),
+  // derive the backend bin directory from it — db-backend lives in the same dir.
+  const cfg = vscode.workspace.getConfiguration('codetracer');
+  const runnablePath = cfg.get<string>('runnablePath')?.trim();
+  if (runnablePath) {
+    return path.dirname(runnablePath);
+  }
+  // Fallback: bundled layout (extension ships with libs/codetracer/)
   return path.join(
     context.extensionPath,
     'libs',
@@ -1053,16 +1061,36 @@ async function reinitCommands(context: vscode.ExtensionContext) {
   const cfg = vscode.workspace.getConfiguration('codetracer');
   const codetracerExe = cfg.get<string>('runnablePath')?.trim();
   const valid = await isExecutable(codetracerExe);
-  const dapVsCodeApi = newDapVsCodeApi(vscode, context);
-  const viewsApi = setupVsCodeExtensionViewsApi(
-    "vscode-extension-to-views"
-  );
-  (vscode.window as any).viewsApi = viewsApi; // easier debugging
-  (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
-  registerFlowDecorationHandlers(context, dapVsCodeApi, viewsApi);
+
+  // The Nim-compiled ct_vscode.js may not be available in development/test
+  // environments that only run `npm run compile` (TypeScript-only build).
+  // Gracefully degrade so that stub commands are still registered.
+  let dapVsCodeApi: DapVsCodeApi | undefined;
+  let viewsApi: MediatorWithSubscribers | undefined;
+  let nimBackendAvailable = false;
+  try {
+    dapVsCodeApi = newDapVsCodeApi(vscode, context);
+    viewsApi = setupVsCodeExtensionViewsApi(
+      "vscode-extension-to-views"
+    );
+    nimBackendAvailable = true;
+  } catch {
+    console.warn('[CodeTracer] Nim backend (ct_vscode.js) not available — running in stub mode');
+  }
+  if (dapVsCodeApi) {
+    (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
+  }
+  if (viewsApi) {
+    (vscode.window as any).viewsApi = viewsApi;
+  }
+  if (nimBackendAvailable && dapVsCodeApi && viewsApi) {
+    registerFlowDecorationHandlers(context, dapVsCodeApi, viewsApi);
+  }
 
   if (!valid) {
-    await promptForExecutablePath();
+    // Show the prompt asynchronously (fire-and-forget) so it doesn't block
+    // extension activation. The stub commands below will also prompt when invoked.
+    void promptForExecutablePath();
   }
 
   // Set the codetracer executable and the args
@@ -1074,17 +1102,32 @@ async function reinitCommands(context: vscode.ExtensionContext) {
           async createDebugAdapterDescriptor(
             session: vscode.DebugSession
           ): Promise<vscode.DebugAdapterDescriptor | undefined> {
-  
-            if (!codetracerExe) {
+            // Read the config at invocation time (not closure-capture time)
+            // so that workspace settings loaded after extension activation
+            // are picked up.
+            const exe = vscode.workspace
+              .getConfiguration('codetracer')
+              .get<string>('runnablePath')
+              ?.trim();
+
+            console.log('[CodeTracer] createDebugAdapterDescriptor: runnablePath =', JSON.stringify(exe));
+
+            if (!exe) {
+              console.error('[CodeTracer] runnablePath is not set — cannot create debug adapter');
               return undefined;
             }
-  
+
             const args = ["dap-server", "--stdio"];
-  
+
             const env = normalizeEnv(makeEnvWithBackend(context));
-  
+            const binDir = getBackendBinPath(context);
+            const dbBackendPath = path.join(binDir, "db-backend");
+
+            console.log('[CodeTracer] debug adapter: dbBackendPath =', dbBackendPath);
+            console.log('[CodeTracer] debug adapter: PATH includes binDir =', env['PATH']?.includes(binDir));
+
             return new vscode.DebugAdapterExecutable(
-              "db-backend",   // resolves via injected PATH
+              dbBackendPath,
               args,
               { env }
             );
@@ -1105,7 +1148,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
 
   const exe = codetracerExe!;
   const toggleCtReal = async (mode: LoadMode) =>
-    toggleCt(context, dapVsCodeApi, viewsApi, exe, mode);
+    toggleCt(context, dapVsCodeApi!, viewsApi!, exe, mode);
   const maybeToggleCt = async (mode: LoadMode) => {
     if (!valid) {
       await promptForExecutablePath();
@@ -1114,7 +1157,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
     await toggleCtReal(mode);
   };
 
-  if (!valid) {
+  if (!valid || !nimBackendAvailable) {
     // ---- stub (“dunder”) registrations ----
     stub('ct-vscode.toggleCT');
     stub('ct-vscode.loadCurrentFile');
@@ -1137,21 +1180,21 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       if (!ed) {
         return;
       }
-      ctSourceLineJump(dapVsCodeApi, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.SmartJump);
+      ctSourceLineJump(dapVsCodeApi!, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.SmartJump);
     });
     register('ct-vscode.forwardSourceLineJump', () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed) {
         return;
       }
-      ctSourceLineJump(dapVsCodeApi, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.ForwardJump);
+      ctSourceLineJump(dapVsCodeApi!, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.ForwardJump);
     });
     register('ct-vscode.backwardSourceLineJump', () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed) {
         return;
       }
-      ctSourceLineJump(dapVsCodeApi, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.BackwardJump);
+      ctSourceLineJump(dapVsCodeApi!, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.BackwardJump);
     });
 
     register('ct-vscode.addToScratchpad', () => {
@@ -1161,7 +1204,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       const word = ed.document.getWordRangeAtPosition(pos);
       const expr = word ? ed.document.getText(word) : '';
       vscode.window.showInformationMessage(`Trying to add the variable: ${expr} to the Scratchpad`);
-      ctAddToScratchpad(viewsApi, expr);
+      ctAddToScratchpad(viewsApi!, expr);
     });
 
     register("ct-vscode.addTracepoint", async () => {
@@ -1185,18 +1228,40 @@ async function reinitCommands(context: vscode.ExtensionContext) {
   if (miscDisposables.length === 0) {
     miscDisposables.push(
       vscode.debug.onDidStartDebugSession(async (session) => {
+        console.log('[CodeTracer] onDidStartDebugSession:', session.type, session.name);
+        console.log('[CodeTracer] pendingLaunchPanels=', pendingLaunchPanels, 'ctStarted=', ctStarted);
         // When users hit Run | Debug, auto-start Codetracer against the active file.
         if (session.type === 'codetracer-debug') {
           if (pendingLaunchPanels && !ctStarted) {
+            console.log('[CodeTracer] Initializing panels for launch...');
             await reinitCommands(context);
             const viewsApi = (vscode.window as any).viewsApi as MediatorWithSubscribers | undefined;
             const dapVsCodeApi = (vscode.window as any).dapVsCodeApi as DapVsCodeApi | undefined;
+            console.log('[CodeTracer] viewsApi=', !!viewsApi, 'dapVsCodeApi=', !!dapVsCodeApi);
             if (viewsApi && dapVsCodeApi) {
               setupMiddlewareApis(dapVsCodeApi, viewsApi);
               initPanelsIfNeeded(context, viewsApi);
+
+              // Open a source file from the trace so the editor isn't empty
+              const traceFolder = session.configuration?.traceFolder as string | undefined;
+              if (traceFolder) {
+                const opened = await openTraceSourceFile(traceFolder);
+                if (!opened) {
+                  console.warn('[CodeTracer] No trace source file found to open automatically');
+                }
+              }
+
+              // Enable CodeTracer context menu items
+              vscode.commands.executeCommand('setContext', 'codetracer:active', true);
+
+              console.log('[CodeTracer] Panels initialized successfully');
+            } else {
+              console.error('[CodeTracer] Cannot init panels: viewsApi or dapVsCodeApi missing');
             }
             pendingLaunchPanels = false;
             ctStarted = true;
+          } else {
+            console.log('[CodeTracer] Skipping panel init: pendingLaunchPanels=', pendingLaunchPanels, 'ctStarted=', ctStarted);
           }
           return;
         }
@@ -1245,10 +1310,14 @@ export async function activate(context: vscode.ExtensionContext) {
       }];
     },
     resolveDebugConfiguration(_folder, config) {
+      console.log('[CodeTracer] resolveDebugConfiguration:', JSON.stringify(config));
       const normalizedTraceFolder = typeof config.traceFolder === "string"
         ? config.traceFolder.trim()
         : "";
       if (normalizedTraceFolder.length > 0 || config.traceFile || config.pid) {
+        // Signal the onDidStartDebugSession handler to set up panels
+        pendingLaunchPanels = true;
+        console.log('[CodeTracer] resolveDebugConfiguration: pendingLaunchPanels set to true');
         return config;
       }
 
