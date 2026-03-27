@@ -102,3 +102,68 @@ jobs:
           name: wdio-diagnostics
           path: test/wdio/diagnostics/
           retention-days: 7
+
+  # Per-language smoke tests — requires sibling repos for trace recording.
+  # Runs on self-hosted NixOS runners with workspace sibling restoration.
+  wdio-integration:
+    runs-on: [self-hosted, nixos]
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Restore sibling repos
+        env:
+          GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+        run: |
+          # Clone required sibling repos for trace recording
+          cd ..
+          for repo in codetracer codetracer-python-recorder codetracer-ruby-recorder; do
+            if [ ! -d "$repo" ]; then
+              git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${repo}.git"
+            fi
+          done
+
+      - name: Build codetracer (for ct binary)
+        run: |
+          cd ../codetracer
+          nix build -L
+
+      - name: Install dependencies
+        run: nix develop -c just install
+
+      - name: Compile TypeScript
+        run: nix develop -c just compile-ts
+
+      - name: Restore Nim-compiled ct_vscode.js
+        run: |
+          if [ -f media/ct_vscode.js ]; then
+            cp media/ct_vscode.js out/ct_vscode.js
+          fi
+
+      - name: Record test traces
+        run: nix develop -c just record-test-traces
+
+      - name: Run per-language smoke tests
+        run: nix develop -c just test-wdio-smoke-langs
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wdio-integration-diagnostics
+          path: test/wdio/diagnostics/
+          retention-days: 7
