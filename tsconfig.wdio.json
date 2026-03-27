@@ -1,0 +1,16 @@
+{
+	"include": ["test/wdio/**/*", "wdio.conf.ts"],
+	"compilerOptions": {
+		"module": "Node16",
+		"target": "ES2022",
+		"outDir": "out-wdio",
+		"lib": ["ES2022", "DOM"],
+		"sourceMap": true,
+		"strict": false,
+		"noImplicitAny": false,
+		"esModuleInterop": true,
+		"moduleResolution": "Node16",
+		"resolveJsonModule": true,
+		"skipLibCheck": true
+	}
+}
