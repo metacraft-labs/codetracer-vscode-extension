@@ -38,6 +38,41 @@
             pname = "vscode-insiders";
             name = "${pname}-${version}";
           });
+        # Chromedriver pinned to match VS Code Insiders' Electron (Chrome 138).
+        # The system chromedriver from nixpkgs tracks latest Chromium and won't
+        # match the pinned VS Code Insiders Electron version.
+        chromedriver-138 = pkgs.stdenv.mkDerivation rec {
+          pname = "chromedriver";
+          version = "138.0.7204.94";
+          src =
+            if pkgs.stdenv.hostPlatform.system == "x86_64-linux" then
+              pkgs.fetchurl {
+                url = "https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chromedriver-linux64.zip";
+                sha256 = "sha256-WdtqWZR/b2I81mxWzmUy35axTz6DUBRKOiRvm1H/wow=";
+              }
+            else if pkgs.stdenv.hostPlatform.system == "aarch64-linux" then
+              pkgs.fetchurl {
+                url = "https://storage.googleapis.com/chrome-for-testing-public/${version}/linux-arm64/chromedriver-linux-arm64.zip";
+                sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # TODO: fill in for arm64
+              }
+            else if pkgs.stdenv.isDarwin then
+              pkgs.fetchurl {
+                url = "https://storage.googleapis.com/chrome-for-testing-public/${version}/mac-x64/chromedriver-mac-x64.zip";
+                sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # TODO: fill in for macOS
+              }
+            else throw "Unsupported platform for chromedriver-138";
+
+          nativeBuildInputs = [ pkgs.unzip pkgs.autoPatchelfHook ];
+          buildInputs = [ pkgs.glib pkgs.nss pkgs.xorg.libX11 ];
+
+          unpackPhase = "unzip $src";
+          installPhase = ''
+            mkdir -p $out/bin
+            cp chromedriver-*/chromedriver $out/bin/
+            chmod +x $out/bin/chromedriver
+          '';
+        };
+
         # Libraries needed by Chromium/Electron at runtime (for WDIO + chromedriver).
         chromiumLibs = with pkgs; [
           glib
@@ -72,6 +107,7 @@
             vsce
             # WebdriverIO testing dependencies
             chromium
+            chromedriver-138     # must match VS Code Insiders' Electron (Chrome 138)
             xorg.xorgserver      # provides Xvfb for headless VS Code on Linux
             vscodeInsiders
           ] ++ chromiumLibs;
@@ -81,7 +117,9 @@
             export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath chromiumLibs}:''${LD_LIBRARY_PATH:-}
             # Point WDIO at the nix-provided VS Code Insiders binary
             export VSCODE_INSIDERS_PATH="${vscodeInsiders}/bin/code-insiders"
-            # Use nix chromium's chromedriver-compatible binary for WDIO
+            # Use nix-provided chromedriver for WDIO (npm binary won't run on NixOS).
+            # Must match the Chrome version embedded in VS Code Insiders' Electron.
+            export CHROMEDRIVER_PATH="${chromedriver-138}/bin/chromedriver"
             export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
           '';
