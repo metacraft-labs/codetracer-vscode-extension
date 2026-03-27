@@ -57,3 +57,60 @@ jobs:
       - name: Verify compiled output exists
         run: if not exist out\extension.js exit 1
         shell: cmd
+
+  wdio-smoke:
+    runs-on: [self-hosted, nixos]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          cachix-cache: ${{ vars.CACHIX_CACHE }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+
+      - name: Install npm dependencies
+        run: nix develop -c npm ci
+
+      - name: Compile TypeScript
+        run: nix develop -c npm run compile:ts
+
+      - name: Restore Nim-compiled ct_vscode.js
+        run: |
+          if [ -f media/ct_vscode.js ]; then
+            cp media/ct_vscode.js out/ct_vscode.js
+            echo "Restored Nim-compiled ct_vscode.js to out/"
+          else
+            echo "WARNING: media/ct_vscode.js not found — Nim backend will not be available"
+          fi
+
+      - name: Run WDIO smoke tests
+        run: |
+          # Start Xvfb for headless VS Code
+          DISPLAY_NUM=99
+          while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
+            DISPLAY_NUM=$((DISPLAY_NUM + 1))
+          done
+          Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
+          XVFB_PID=$!
+          trap "kill $XVFB_PID 2>/dev/null || true" EXIT
+          sleep 1
+          export DISPLAY=":${DISPLAY_NUM}"
+
+          nix develop -c npx wdio run wdio.conf.ts \
+            --spec test/wdio/specs/hello-vscode.e2e.ts
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wdio-diagnostics
+          path: test/wdio/diagnostics/
+          retention-days: 7
