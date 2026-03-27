@@ -103,7 +103,15 @@ export const config: any = {
         'disable-telemetry': true,
         'disable-extensions': false,
         'enable-proposed-api': 'metacraft-labs.ct-vscode',
-      }
+        // Chromium sandbox workaround for NixOS CI runners.
+        // wdio-vscode-service already passes --no-sandbox, but on runners
+        // without user namespace support the zygote still fails to fork
+        // renderers. --no-zygote skips the zygote entirely.
+        'no-zygote': true,
+        'disable-gpu': true,
+        'disable-gpu-compositing': true,
+        'disable-dev-shm-usage': true,
+      },
     } as any)
   } as any],
 

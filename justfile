@@ -67,12 +67,22 @@ _xvfb-run +CMD:
     trap "kill $XVFB_PID 2>/dev/null || true" EXIT
     sleep 1
     export DISPLAY=":${DISPLAY_NUM}"
-    # Chromium sandbox flags for NixOS CI runners where unprivileged user
-    # namespaces are unavailable and the chrome-sandbox binary lacks the
-    # SUID bit. Passed via ELECTRON_EXTRA_LAUNCH_ARGS to bypass VS Code's
-    # arg parser (which treats --no-sandbox as boolean negation of sandbox).
-    export ELECTRON_DISABLE_SANDBOX=1
-    export ELECTRON_EXTRA_LAUNCH_ARGS="--no-sandbox --disable-gpu --disable-gpu-compositing"
+    # Chromium sandbox workarounds for NixOS CI runners where the
+    # chrome-sandbox binary lacks the SUID bit and unprivileged user
+    # namespaces may be disabled.
+    #
+    # CHROME_DEVEL_SANDBOX="" tells Chromium to skip the setuid sandbox
+    # helper entirely (it normally expects a SUID chrome-sandbox binary).
+    #
+    # --no-zygote tells Chromium to skip the zygote process and fork
+    # renderer processes directly without namespace sandboxing. Without
+    # this, the zygote attempts clone(CLONE_NEWPID) which fails on
+    # runners without user namespace support, causing immediate crash.
+    #
+    # The wdio-vscode-service already passes --no-sandbox via its FAKE
+    # binary, but that alone is insufficient when user namespaces are
+    # unavailable.
+    export CHROME_DEVEL_SANDBOX=""
     {{CMD}}
 
 # Run WDIO hello-world smoke test (no sibling repos needed)
