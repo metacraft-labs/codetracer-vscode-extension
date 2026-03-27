@@ -6,6 +6,7 @@
  * Its primary purpose is generating diagnostic artifacts for debugging —
  * it's the WDIO equivalent of running the Playwright tests with full tracing.
  */
+import path from 'path'
 import { browser } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
 import { getPanelStatus, inspectWebviews } from '../../page-objects/panels'
@@ -16,6 +17,9 @@ import {
   captureBrowserLogs,
   captureExtHostLog,
 } from '../../helpers/diagnostics'
+import { resolveFixturePath } from '../../helpers/trace-utils'
+
+const FIXTURE_DIR = resolveFixturePath('stylus-fund-trace')
 
 const ext = new ExtensionState()
 const session = new DebugSession()
@@ -45,17 +49,17 @@ describe('CodeTracer Debug - Full Diagnostics', () => {
 
     // ===== PHASE 2: Start debug =====
     console.log('===== PHASE 2: Start debug =====')
-    const startOk = await browser.executeWorkbench(async (vscode) => {
+    const startOk = await browser.executeWorkbench(async (vscode, traceFolder: string) => {
       return vscode.debug.startDebugging(
         vscode.workspace.workspaceFolders?.[0],
         {
           type: 'codetracer-debug',
           request: 'launch',
           name: 'Stylus Fund Trace',
-          traceFolder: '/home/zahary/metacraft/stylus-trace-manual',
+          traceFolder,
         }
       )
-    })
+    }, FIXTURE_DIR)
     console.log('startDebugging:', startOk)
     await browser.pause(3000)
     await screenshot('02-debug-started')
