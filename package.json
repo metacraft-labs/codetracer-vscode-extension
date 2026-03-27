@@ -191,9 +191,10 @@
   },
   "scripts": {
     "vscode:prepublish": "just build",
-    "compile": "tsc -p ./",
+    "compile": "echo 'ERROR: npm run compile only compiles TypeScript and produces an incomplete build.' && echo 'Use `just build` for a full build (Nim + Rust + TypeScript).' && echo 'Use `npm run compile:ts` if you only need TypeScript type-checking.' && exit 1",
+    "compile:ts": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
+    "pretest": "npm run compile:ts && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
     "test:wdio": "npx wdio run wdio.conf.ts",
