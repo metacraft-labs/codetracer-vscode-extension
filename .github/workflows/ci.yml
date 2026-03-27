@@ -105,9 +105,10 @@ jobs:
 
   # Per-language smoke tests — requires sibling repos for trace recording.
   # Runs on self-hosted NixOS runners with workspace sibling restoration.
+  # Runs by default; add the 'skip-integration' label to a PR to skip.
   wdio-integration:
     runs-on: [self-hosted, nixos]
-    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    if: github.event_name == 'push' || !contains(github.event.pull_request.labels.*.name, 'skip-integration')
 
     steps:
       - name: Checkout
