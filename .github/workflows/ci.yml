@@ -146,7 +146,7 @@ jobs:
       - name: Build codetracer (for ct binary)
         run: |
           cd ../codetracer
-          nix build -L
+          nix build -L '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
 
       - name: Install dependencies
         run: nix develop -c just install
