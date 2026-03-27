@@ -52,11 +52,12 @@ compile-ts:
     npm run compile:ts
     test -f out/extension.js
 
-# Run WDIO smoke tests (requires Xvfb on Linux)
-test-wdio-smoke:
+# Helper: start Xvfb and run a command with DISPLAY set.
+# Usage: just _xvfb-run "npx wdio run wdio.conf.ts --spec ..."
+[private]
+_xvfb-run +CMD:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Start Xvfb for headless VS Code
     DISPLAY_NUM=99
     while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
         DISPLAY_NUM=$((DISPLAY_NUM + 1))
@@ -66,34 +67,30 @@ test-wdio-smoke:
     trap "kill $XVFB_PID 2>/dev/null || true" EXIT
     sleep 1
     export DISPLAY=":${DISPLAY_NUM}"
-    npx wdio run wdio.conf.ts --spec test/wdio/specs/hello-vscode.e2e.ts
+    {{CMD}}
+
+# Run WDIO hello-world smoke test (no sibling repos needed)
+test-wdio-smoke:
+    just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/hello-vscode.e2e.ts"
+
+# Record test traces from sibling repos (idempotent, skips existing)
+record-test-traces *LANGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bash scripts/record-test-traces.sh {{LANGS}}
+
+# Run per-language smoke tests (requires sibling repos + recorded traces)
+test-wdio-smoke-langs: record-test-traces
+    just _xvfb-run "npx wdio run wdio.conf.ts --spec 'test/wdio/specs/smoke/*.e2e.ts'"
 
 # Run WDIO Stylus trace tests (requires fixture + Xvfb)
 test-wdio-stylus:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    DISPLAY_NUM=99
-    while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-    done
-    Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-    XVFB_PID=$!
-    trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-    sleep 1
-    export DISPLAY=":${DISPLAY_NUM}"
-    npx wdio run wdio.conf.ts --spec test/wdio/specs/stylus-trace-load.e2e.ts
+    just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/stylus-trace-load.e2e.ts"
+
+# Run WDIO deep tests (requires traces + Xvfb)
+test-wdio-deep:
+    just _xvfb-run "npx wdio run wdio.conf.ts --spec 'test/wdio/specs/deep/*.e2e.ts'"
 
 # Run all WDIO tests
 test-wdio:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    DISPLAY_NUM=99
-    while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
-    done
-    Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-    XVFB_PID=$!
-    trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-    sleep 1
-    export DISPLAY=":${DISPLAY_NUM}"
-    npx wdio run wdio.conf.ts
+    just _xvfb-run "npx wdio run wdio.conf.ts"
