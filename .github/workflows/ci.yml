@@ -20,17 +20,17 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Install just
+        uses: extractions/setup-just@v2
+
       - name: Install dependencies
-        run: npm ci
+        run: just install
 
       - name: Lint
-        run: npm run lint
+        run: just lint
 
       - name: Compile TypeScript
-        run: npm run compile:ts
-
-      - name: Verify compiled output exists
-        run: test -f out/extension.js
+        run: just compile-ts
 
   windows-build:
     runs-on: windows-latest
@@ -45,11 +45,14 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Install just
+        uses: extractions/setup-just@v2
+
       - name: Install dependencies
-        run: npm ci
+        run: just install
 
       - name: Lint
-        run: npm run lint
+        run: just lint
 
       - name: Compile TypeScript
         run: npm run compile:ts
@@ -64,8 +67,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install Nix
         uses: ./.github/actions/setup-nix
@@ -76,11 +77,11 @@ jobs:
           substituters: ${{ vars.SUBSTITUTERS }}
           gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
 
-      - name: Install npm dependencies
-        run: nix develop -c npm ci
+      - name: Install dependencies
+        run: nix develop -c just install
 
       - name: Compile TypeScript
-        run: nix develop -c npm run compile:ts
+        run: nix develop -c just compile-ts
 
       - name: Restore Nim-compiled ct_vscode.js
         run: |
@@ -92,20 +93,7 @@ jobs:
           fi
 
       - name: Run WDIO smoke tests
-        run: |
-          # Start Xvfb for headless VS Code
-          DISPLAY_NUM=99
-          while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-            DISPLAY_NUM=$((DISPLAY_NUM + 1))
-          done
-          Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-          XVFB_PID=$!
-          trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-          sleep 1
-          export DISPLAY=":${DISPLAY_NUM}"
-
-          nix develop -c npx wdio run wdio.conf.ts \
-            --spec test/wdio/specs/hello-vscode.e2e.ts
+        run: nix develop -c just test-wdio-smoke
 
       - name: Upload diagnostics on failure
         if: failure()
