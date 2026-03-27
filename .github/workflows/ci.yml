@@ -130,14 +130,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
         run: |
-          # Clone required sibling repos for trace recording.
-          # codetracer needs --recurse-submodules for nix build (libs/tree-sitter-nim).
+          # Clone all sibling repos needed for trace recording and test execution.
           cd ..
+
+          # codetracer needs --recurse-submodules for nix build (libs/tree-sitter-nim).
           if [ ! -d codetracer ]; then
             git clone --depth 1 --recurse-submodules --shallow-submodules \
               "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/codetracer.git"
           fi
-          for repo in codetracer-python-recorder codetracer-ruby-recorder; do
+
+          # Recorder repos, native test programs, and RR backend.
+          for repo in \
+            codetracer-python-recorder \
+            codetracer-ruby-recorder \
+            codetracer-native-test-programs \
+            codetracer-rr-backend \
+          ; do
             if [ ! -d "$repo" ]; then
               git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${repo}.git"
             fi
