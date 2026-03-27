@@ -29,8 +29,9 @@ build:
         ln -s $(pwd)/libs/codetracer/src/public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf
     fi;
 
-    npm run compile
+    npm run compile:ts
     cp ./media/ct_vscode.js out/ct_vscode.js
 
 build-npm:
-    npm run compile
+    npm run compile:ts
+    cp ./media/ct_vscode.js out/ct_vscode.js
