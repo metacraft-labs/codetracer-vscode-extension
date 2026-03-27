@@ -103,12 +103,6 @@ export const config: any = {
         'disable-telemetry': true,
         'disable-extensions': false,
         'enable-proposed-api': 'metacraft-labs.ct-vscode',
-        // Chromium sandbox flags required for NixOS CI runners where the
-        // chrome-sandbox binary in the Nix store lacks the SUID bit.
-        // Must match the flags used in the codetracer repo (CODETRACER_ELECTRON_ARGS).
-        'no-sandbox': true,
-        'disable-gpu': true,
-        'disable-gpu-compositing': true,
       }
     } as any)
   } as any],

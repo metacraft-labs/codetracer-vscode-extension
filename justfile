@@ -67,10 +67,12 @@ _xvfb-run +CMD:
     trap "kill $XVFB_PID 2>/dev/null || true" EXIT
     sleep 1
     export DISPLAY=":${DISPLAY_NUM}"
-    # Disable Electron's sandbox early (before fork) — required on NixOS CI
-    # runners where unprivileged user namespaces are unavailable and the
-    # chrome-sandbox binary lacks the SUID bit.
+    # Chromium sandbox flags for NixOS CI runners where unprivileged user
+    # namespaces are unavailable and the chrome-sandbox binary lacks the
+    # SUID bit. Passed via ELECTRON_EXTRA_LAUNCH_ARGS to bypass VS Code's
+    # arg parser (which treats --no-sandbox as boolean negation of sandbox).
     export ELECTRON_DISABLE_SANDBOX=1
+    export ELECTRON_EXTRA_LAUNCH_ARGS="--no-sandbox --disable-gpu --disable-gpu-compositing"
     {{CMD}}
 
 # Run WDIO hello-world smoke test (no sibling repos needed)
