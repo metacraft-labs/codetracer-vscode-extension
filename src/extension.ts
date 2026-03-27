@@ -5,6 +5,7 @@ import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
 import { access, lstat, readFile, readdir } from "fs/promises";
+import { execFileSync } from "child_process";
 import * as path from 'path';
 import {
   DapVsCodeApi,
@@ -388,6 +389,21 @@ function registerFlowDecorationHandlers(
   });
 }
 
+/// Locate a binary by name in the system PATH.
+/// Returns the absolute path if found, or undefined otherwise.
+function findInPath(binaryName: string): string | undefined {
+  try {
+    // Use `command -v` (POSIX) which works in both bash and zsh.
+    const result = execFileSync('/bin/sh', ['-c', `command -v ${binaryName}`], {
+      encoding: 'utf8',
+      timeout: 5000,
+    }).trim();
+    return result || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function getBackendBinPath(context: vscode.ExtensionContext): string {
   // If runnablePath is set (e.g. /path/to/codetracer/src/build-debug/bin/ct),
   // derive the backend bin directory from it — db-backend lives in the same dir.
@@ -395,6 +411,15 @@ function getBackendBinPath(context: vscode.ExtensionContext): string {
   const runnablePath = cfg.get<string>('runnablePath')?.trim();
   if (runnablePath) {
     return path.dirname(runnablePath);
+  }
+  // Try to find db-backend or ct in PATH (set up by direnv / nix dev shells).
+  const dbBackendInPath = findInPath('db-backend');
+  if (dbBackendInPath) {
+    return path.dirname(dbBackendInPath);
+  }
+  const ctInPath = findInPath('ct');
+  if (ctInPath) {
+    return path.dirname(ctInPath);
   }
   // Fallback: bundled layout (extension ships with libs/codetracer/)
   return path.join(
@@ -1059,8 +1084,19 @@ async function reinitCommands(context: vscode.ExtensionContext) {
   disposeAll();
 
   const cfg = vscode.workspace.getConfiguration('codetracer');
-  const codetracerExe = cfg.get<string>('runnablePath')?.trim();
-  const valid = await isExecutable(codetracerExe);
+  let codetracerExe = cfg.get<string>('runnablePath')?.trim();
+  let valid = await isExecutable(codetracerExe);
+
+  // If runnablePath is not configured, try to discover ct from the system PATH.
+  // The Nix dev shell / direnv environment places ct and db-backend on PATH.
+  if (!valid) {
+    const ctFromPath = findInPath('ct');
+    if (ctFromPath && await isExecutable(ctFromPath)) {
+      codetracerExe = ctFromPath;
+      valid = true;
+      console.log('[CodeTracer] Discovered ct binary from PATH:', ctFromPath);
+    }
+  }
 
   // The Nim-compiled ct_vscode.js may not be available in development/test
   // environments that only run `npm run compile` (TypeScript-only build).
@@ -1102,21 +1138,6 @@ async function reinitCommands(context: vscode.ExtensionContext) {
           async createDebugAdapterDescriptor(
             session: vscode.DebugSession
           ): Promise<vscode.DebugAdapterDescriptor | undefined> {
-            // Read the config at invocation time (not closure-capture time)
-            // so that workspace settings loaded after extension activation
-            // are picked up.
-            const exe = vscode.workspace
-              .getConfiguration('codetracer')
-              .get<string>('runnablePath')
-              ?.trim();
-
-            console.log('[CodeTracer] createDebugAdapterDescriptor: runnablePath =', JSON.stringify(exe));
-
-            if (!exe) {
-              console.error('[CodeTracer] runnablePath is not set — cannot create debug adapter');
-              return undefined;
-            }
-
             const args = ["dap-server", "--stdio"];
 
             const env = normalizeEnv(makeEnvWithBackend(context));
@@ -1124,7 +1145,6 @@ async function reinitCommands(context: vscode.ExtensionContext) {
             const dbBackendPath = path.join(binDir, "db-backend");
 
             console.log('[CodeTracer] debug adapter: dbBackendPath =', dbBackendPath);
-            console.log('[CodeTracer] debug adapter: PATH includes binDir =', env['PATH']?.includes(binDir));
 
             return new vscode.DebugAdapterExecutable(
               dbBackendPath,

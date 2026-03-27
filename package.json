@@ -8,6 +8,7 @@
   "bugs": {
     "url": "https://github.com/metacraft-labs/codetracer-vscode-extension/issues"
   },
+  "publisher": "metacraft-labs",
   "description": "",
   "icon": "./public/extension/codetracer_marketplace_logo.png",
   "version": "0.0.1",
@@ -21,7 +22,12 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onDebugResolve:codetracer-debug",
+    "onCommand:ct-vscode.toggleCT",
+    "onCommand:ct-vscode.loadCurrentFile",
+    "onCommand:ct-vscode.loadRecentTraces"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
