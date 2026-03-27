@@ -67,6 +67,10 @@ _xvfb-run +CMD:
     trap "kill $XVFB_PID 2>/dev/null || true" EXIT
     sleep 1
     export DISPLAY=":${DISPLAY_NUM}"
+    # Disable Electron's sandbox early (before fork) — required on NixOS CI
+    # runners where unprivileged user namespaces are unavailable and the
+    # chrome-sandbox binary lacks the SUID bit.
+    export ELECTRON_DISABLE_SANDBOX=1
     {{CMD}}
 
 # Run WDIO hello-world smoke test (no sibling repos needed)
