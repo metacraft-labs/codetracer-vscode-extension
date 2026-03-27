@@ -12,14 +12,14 @@
 import path from 'path'
 import fs from 'fs'
 import { browser, expect } from '@wdio/globals'
-import { DebugSession, EditorPane, ExtensionState } from '../page-objects'
-import { getPanelStatus, inspectWebviews } from '../page-objects/panels'
-import { captureFullDiagnostics, screenshot, writeDiag } from '../helpers/diagnostics'
-import * as dap from '../helpers/dap-client'
+import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
+import { getPanelStatus, inspectWebviews } from '../../page-objects/panels'
+import { captureFullDiagnostics, screenshot, writeDiag } from '../../helpers/diagnostics'
+import * as dap from '../../helpers/dap-client'
 
 // ---- Fixture path resolution ----
 
-const FIXTURE_DIR = path.resolve(__dirname, '..', '..', 'fixtures', 'stylus-fund-trace')
+const FIXTURE_DIR = path.resolve(__dirname, '..', '..', '..', 'fixtures', 'stylus-fund-trace')
 
 function fixtureExists(): boolean {
   const traceJson = path.join(FIXTURE_DIR, 'trace.json')

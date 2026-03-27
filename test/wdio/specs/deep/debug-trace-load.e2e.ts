@@ -7,15 +7,15 @@
  * it's the WDIO equivalent of running the Playwright tests with full tracing.
  */
 import { browser } from '@wdio/globals'
-import { DebugSession, EditorPane, ExtensionState } from '../page-objects'
-import { getPanelStatus, inspectWebviews } from '../page-objects/panels'
+import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
+import { getPanelStatus, inspectWebviews } from '../../page-objects/panels'
 import {
   captureFullDiagnostics,
   screenshot,
   writeDiag,
   captureBrowserLogs,
   captureExtHostLog,
-} from '../helpers/diagnostics'
+} from '../../helpers/diagnostics'
 
 const ext = new ExtensionState()
 const session = new DebugSession()
