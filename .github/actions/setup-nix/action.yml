@@ -1,0 +1,32 @@
+name: Setup Nix Environment
+description: Common steps for setting up the Nix environment
+
+inputs:
+  cachix-cache:
+    description: The name of the cachix cache to use
+    required: true
+  cachix-auth-token:
+    description: Cachix auth token
+    required: true
+  trusted-public-keys:
+    description: Trusted public keys
+    required: false
+    default: ""
+  substituters:
+    description: Substituters
+    required: false
+    default: ""
+  gh-token:
+    description: GitHub token for accessing private repos
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - uses: metacraft-labs/metacraft-github-actions/setup-nix@main
+      with:
+        gh-token: ${{inputs.gh-token}}
+        cachix-cache: ${{inputs.cachix-cache}}
+        cachix-auth-token: ${{inputs.cachix-auth-token}}
+        substituters: ${{inputs.substituters}}
+        trusted-public-keys: ${{inputs.trusted-public-keys}}
