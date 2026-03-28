@@ -26,7 +26,8 @@
     "onDebugResolve:codetracer-debug",
     "onCommand:ct-vscode.toggleCT",
     "onCommand:ct-vscode.loadCurrentFile",
-    "onCommand:ct-vscode.loadRecentTraces"
+    "onCommand:ct-vscode.loadRecentTraces",
+    "onLanguage:solidity"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -57,7 +58,9 @@
         "languages": [
           "noir",
           "ruby",
-          "rust"
+          "rust",
+          "solidity",
+          "vyper"
         ],
         "configurationAttributes": {
           "launch": {
@@ -205,7 +208,9 @@
     "test": "vscode-test",
     "test:wdio": "npx wdio run wdio.conf.ts",
     "test:wdio:hello": "npx wdio run wdio.conf.ts --spec test/wdio/specs/hello-vscode.e2e.ts",
-    "test:wdio:stylus": "npx wdio run wdio.conf.ts --spec test/wdio/specs/stylus-trace-load.e2e.ts"
+    "test:wdio:stylus": "npx wdio run wdio.conf.ts --spec test/wdio/specs/stylus-trace-load.e2e.ts",
+    "test:wdio:solidity": "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/solidity.e2e.ts",
+    "test:wdio:solidity:deep": "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/solidity-storage.e2e.ts"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
