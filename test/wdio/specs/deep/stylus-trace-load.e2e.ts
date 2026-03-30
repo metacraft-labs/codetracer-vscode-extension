@@ -48,10 +48,13 @@ const KNOWN_EVM_EVENTS = ['read_args', 'storage_load', 'storage_cache', 'native_
 describe('CodeTracer Extension - Stylus Trace Loading', () => {
   before(function () {
     if (!fixtureExists()) {
-      console.warn(
-        `SKIPPING Stylus trace tests: fixture not found at ${FIXTURE_DIR}\n` +
+      const message =
+        `Stylus trace tests: fixture not found at ${FIXTURE_DIR}\n` +
         'Run scripts/prepare-stylus-fixture.sh to generate it.'
-      )
+      if (process.env.CI === 'true' || !!process.env.GITHUB_ACTIONS) {
+        throw new Error(message)
+      }
+      console.warn(`SKIPPING ${message}`)
       this.skip()
     }
   })

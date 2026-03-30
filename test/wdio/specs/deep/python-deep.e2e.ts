@@ -20,10 +20,13 @@ describe('CodeTracer Extension - Python Deep Test', () => {
   before(function () {
     traceDir = resolveTracePath('python-sudoku')
     if (!traceExists('python-sudoku')) {
-      console.warn(
-        `SKIPPING Python deep tests: trace not found at ${traceDir}\n` +
-        'Run scripts/record-test-traces.sh to generate it.',
-      )
+      const message =
+        `Python deep tests: trace not found at ${traceDir}\n` +
+        'Run scripts/record-test-traces.sh to generate it.'
+      if (process.env.CI === 'true' || !!process.env.GITHUB_ACTIONS) {
+        throw new Error(message)
+      }
+      console.warn(`SKIPPING ${message}`)
       this.skip()
     }
   })
