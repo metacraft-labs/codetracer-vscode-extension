@@ -101,12 +101,12 @@ export async function assertEventsPopulated(
   session: DebugSession,
 ): Promise<void> {
   const result = await session.loadEvents()
-  // Events may load asynchronously — don't hard-fail, but log.
   if (result.ok && result.data) {
     const dataStr = JSON.stringify(result.data)
     expect(dataStr.length).toBeGreaterThan(2) // more than "{}"
   } else {
     console.warn('Events did not return inline data:', result.error)
+    expect(result.ok).toBe(true)
   }
 }
 
@@ -123,6 +123,7 @@ export async function assertCalltraceContains(
     expect(dataStr).toContain(functionName)
   } else {
     console.warn('Calltrace did not return inline data:', result.error)
+    expect(result.ok).toBe(true)
   }
 }
 
@@ -139,6 +140,7 @@ export async function assertLocalsContainVariable(
     expect(dataStr).toContain(variableName)
   } else {
     console.warn('Locals did not return inline data:', result.error)
+    expect(result.ok).toBe(true)
   }
 }
 
@@ -161,6 +163,9 @@ export async function assertFlowLoads(
   const result = await session.loadFlow(0)
   if (result.ok && result.data) {
     writeDiag('flow.json', result.data)
+  } else {
+    console.warn('Flow did not load:', result.error)
+    expect(result.ok).toBe(true)
   }
 }
 
@@ -176,6 +181,7 @@ export async function assertTerminalContains(
     expect(dataStr).toContain(text)
   } else {
     console.warn('Terminal did not return inline data:', result.error)
+    expect(result.ok).toBe(true)
   }
 }
 
