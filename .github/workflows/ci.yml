@@ -151,6 +151,18 @@ jobs:
             fi
           done
 
+          # Blockchain-specific recorder repos (for MASM, Sway, Move, Solana deep tests).
+          for repo in \
+            codetracer-miden-recorder \
+            codetracer-fuel-recorder \
+            codetracer-move-recorder \
+            codetracer-solana-recorder \
+          ; do
+            if [ ! -d "$repo" ]; then
+              git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${repo}.git"
+            fi
+          done
+
       - name: Build codetracer (for ct binary)
         run: |
           cd ../codetracer
@@ -171,8 +183,29 @@ jobs:
       - name: Record test traces
         run: nix develop -c just record-test-traces
 
+      - name: Prepare blockchain trace fixtures
+        run: |
+          # Run each fixture preparation script. These are idempotent and skip
+          # if the fixture already exists (unless FORCE=1 is set).
+          for script in \
+            scripts/prepare-masm-fixture.sh \
+            scripts/prepare-sway-fixture.sh \
+            scripts/prepare-move-fixture.sh \
+            scripts/prepare-solana-fixture.sh \
+          ; do
+            if [ -x "$script" ]; then
+              echo "=== Running $script ==="
+              nix develop -c bash "$script" || echo "WARNING: $script failed (non-fatal)"
+            else
+              echo "WARNING: $script not found or not executable"
+            fi
+          done
+
       - name: Run per-language smoke tests
         run: nix develop -c just test-wdio-smoke-langs
+
+      - name: Run deep integration tests
+        run: nix develop -c just test-wdio-deep
 
       - name: Upload diagnostics on failure
         if: failure()

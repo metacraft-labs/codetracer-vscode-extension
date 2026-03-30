@@ -144,6 +144,58 @@ export async function assertLocalsContainVariable(
   }
 }
 
+/**
+ * Verify locals contain a variable with a specific expected value.
+ *
+ * This is a stricter alternative to `assertLocalsContainVariable` — it checks
+ * both the variable name AND its value. The value comparison is performed as a
+ * substring match against the JSON-serialised locals payload so that it works
+ * regardless of the exact DAP response structure (nested `value` field, inline
+ * string representation, etc.).
+ */
+export async function assertLocalsContainVariableWithValue(
+  session: DebugSession,
+  variableName: string,
+  expectedValue: string,
+  langId: string,
+): Promise<void> {
+  const result = await session.loadLocals({ lang: langId, countBudget: 100, depthLimit: 3 })
+  expect(result.ok).toBe(true)
+
+  if (result.ok && result.data) {
+    const dataStr = JSON.stringify(result.data)
+    writeDiag('locals-with-value.json', result.data)
+
+    // First verify the variable name exists in the response.
+    expect(dataStr).toContain(variableName)
+
+    // Then verify the expected value also appears. Because the DAP response
+    // format varies (e.g. `{ name: "x", value: "42" }` vs a nested object),
+    // we check for the value as a substring of the full JSON payload.
+    expect(dataStr).toContain(expectedValue)
+
+    // If we have a structured locals array, also log the matching variable for
+    // diagnostic purposes.
+    if (result.data.locals && Array.isArray(result.data.locals)) {
+      const matching = result.data.locals.filter(
+        (l: any) => {
+          const name = l.name ?? l.variable_name ?? ''
+          return name === variableName || String(name).includes(variableName)
+        },
+      )
+      for (const v of matching) {
+        console.log(
+          `  [assertLocalsContainVariableWithValue] ${v.name ?? v.variable_name}: ` +
+          JSON.stringify(v.value ?? v).substring(0, 120),
+        )
+      }
+    }
+  } else {
+    console.warn('Locals did not return inline data:', result.error)
+    expect(result.ok).toBe(true)
+  }
+}
+
 /** Verify step-over works and changes the current location. */
 export async function assertStepWorks(
   session: DebugSession,
