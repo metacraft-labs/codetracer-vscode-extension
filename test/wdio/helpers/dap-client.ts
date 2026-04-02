@@ -120,15 +120,24 @@ export async function loadCalltrace(opts: {
   depth?: number
   height?: number
 } = {}): Promise<DapResult> {
+  // Field names must be camelCase to match the Rust struct's
+  // #[serde(rename_all = "camelCase")] deserialization.
   return dapRequest('ct/load-calltrace-section', {
-    location: {},
-    start_call_line_index: opts.startIndex ?? 0,
+    location: {
+      path: '', line: 0, functionName: '', highLevelPath: '',
+      highLevelLine: 0, highLevelFunctionName: '', lowLevelPath: '',
+      lowLevelLine: 0, rrTicks: 0, functionFirst: 0, functionLast: 0,
+      event: 0, expression: '', offset: 0, error: false,
+      callstackDepth: 0, originatingInstructionAddress: 0,
+      key: '', globalCallKey: '',
+    },
+    startCallLineIndex: opts.startIndex ?? 0,
     depth: opts.depth ?? 50,
     height: opts.height ?? 200,
-    raw_ignore_patterns: '',
-    auto_collapsing: false,
-    optimize_collapse: false,
-    render_call_line_index: 0,
+    rawIgnorePatterns: '',
+    autoCollapsing: false,
+    optimizeCollapse: false,
+    renderCallLineIndex: 0,
   })
 }
 
@@ -145,19 +154,33 @@ export async function loadLocals(opts: {
   watchExpressions?: string[]
   depthLimit?: number
 } = {}): Promise<DapResult> {
+  // Field names must be camelCase to match the Rust struct's
+  // #[serde(rename_all = "camelCase")] deserialization.
   return dapRequest('ct/load-locals', {
-    rr_ticks: opts.rrTicks ?? 0,
-    count_budget: opts.countBudget ?? 100,
-    min_count_limit: 10,
+    rrTicks: opts.rrTicks ?? 0,
+    countBudget: opts.countBudget ?? 100,
+    minCountLimit: 10,
     lang: opts.lang ?? 'Rust',
-    watch_expressions: opts.watchExpressions ?? [],
-    depth_limit: opts.depthLimit ?? 3,
+    watchExpressions: opts.watchExpressions ?? [],
+    depthLimit: opts.depthLimit ?? 3,
   })
 }
 
 /** Load flow data for the current location. */
 export async function loadFlow(flowMode = 0): Promise<DapResult> {
-  return dapRequest('ct/load-flow', { flow_mode: flowMode, location: {} })
+  // Field names must be camelCase to match the Rust struct's
+  // #[serde(rename_all = "camelCase")] deserialization.
+  return dapRequest('ct/load-flow', {
+    flowMode,
+    location: {
+      path: '', line: 0, functionName: '', highLevelPath: '',
+      highLevelLine: 0, highLevelFunctionName: '', lowLevelPath: '',
+      lowLevelLine: 0, rrTicks: 0, functionFirst: 0, functionLast: 0,
+      event: 0, expression: '', offset: 0, error: false,
+      callstackDepth: 0, originatingInstructionAddress: 0,
+      key: '', globalCallKey: '',
+    },
+  })
 }
 
 /** Load terminal output. */
