@@ -27,10 +27,10 @@ import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 const TRACE_NAME = 'circom-flow-test'
 
 // ---- Known trace data (flow_test.circom) ----
-// The compute template defines an arithmetic circuit with signal inputs and
+// The FlowTest template defines an arithmetic circuit with signal inputs and
 // outputs. Circom uses templates rather than functions — the template name
 // appears in the calltrace. Signal `a` is an input to the circuit.
-const KNOWN_FUNCTIONS = ['compute']
+const KNOWN_FUNCTIONS = ['FlowTest']
 const KNOWN_VARIABLE = 'a'
 
 const session = new DebugSession()
@@ -129,7 +129,7 @@ describe('CodeTracer Extension - Circom Deep Test', () => {
   // Calltrace: verify compute template appears
   // ==================================================================
 
-  it('calltrace contains the compute template', async () => {
+  it('calltrace contains the FlowTest template', async () => {
     const result = await session.loadCalltrace({ depth: 50, height: 200 })
     expect(result.ok).toBe(true)
     writeDiag('circom-calltrace.json', result.data)
@@ -137,7 +137,7 @@ describe('CodeTracer Extension - Circom Deep Test', () => {
     const dataStr = JSON.stringify(result.data)
     const foundFunctions = KNOWN_FUNCTIONS.filter(fn => dataStr.includes(fn))
     console.log('[Circom] Calltrace templates found:', foundFunctions)
-    expect(dataStr).toContain('compute')
+    expect(dataStr).toContain('FlowTest')
   })
 
   // ==================================================================
@@ -276,13 +276,13 @@ describe('CodeTracer Extension - Circom Deep Test', () => {
   // Calltrace search
   // ==================================================================
 
-  it('can search the calltrace for "compute"', async () => {
-    const result = await session.searchCalltrace('compute')
+  it('can search the calltrace for "FlowTest"', async () => {
+    const result = await session.searchCalltrace('FlowTest')
     console.log('[Circom] Search calltrace ok:', result.ok)
     expect(result.ok).toBe(true)
 
     if (result.data) {
-      writeDiag('circom-deep-search-compute.json', result.data)
+      writeDiag('circom-deep-search-FlowTest.json', result.data)
     }
   })
 

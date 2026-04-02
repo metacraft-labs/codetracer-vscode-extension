@@ -8,7 +8,7 @@ defineLanguageSmokeTests({
   language: 'Circom',
   traceName: 'circom-flow-test',
   expectedFileName: 'flow_test.circom',
-  calltraceFunction: 'compute',
+  calltraceFunction: 'FlowTest',
   variableName: 'a',
   langId: 'Circom',
 })

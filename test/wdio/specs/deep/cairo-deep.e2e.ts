@@ -159,6 +159,16 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
   // ==================================================================
 
   it('loads locals with variable values including a (felt252)', async () => {
+    // The initial position is at main() which only calls compute(). Step into
+    // compute() and advance past the variable assignments so locals are populated.
+    const stepInLoc = await session.stepIn(3000)
+    console.log('[Cairo] Stepped into:', JSON.stringify(stepInLoc))
+    // Step over a few lines inside compute() to reach variable assignments
+    for (let i = 0; i < 3; i++) {
+      const loc = await session.stepOver(2000)
+      console.log(`[Cairo] Step ${i + 1}:`, JSON.stringify(loc))
+    }
+
     const result = await session.loadLocals({ lang: 'Cairo', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
     writeDiag('cairo-deep-locals.json', result.data)
@@ -191,7 +201,12 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
   // ==================================================================
 
   it('performs multiple step-over operations and changes line', async () => {
-    const locations: Array<{ file: string; line: number }> = []
+    // After the locals test, we should already be inside compute().
+    // Record current position to include in the set of visited lines.
+    const current = await session.currentLocation()
+    console.log('[Cairo] Pre-step location:', JSON.stringify(current))
+
+    const locations: Array<{ file: string; line: number }> = [current]
 
     for (let i = 0; i < 5; i++) {
       const loc = await session.stepOver(3000)
@@ -204,7 +219,9 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
     writeDiag('cairo-deep-multi-step.json', locations)
     console.log('[Cairo] Multi-step locations:', JSON.stringify(locations))
 
-    // Verify we actually moved — not all locations should be the same line
+    // Verify we actually moved — not all locations should be the same line.
+    // Inside compute(), lines 2-7 have variable assignments, so step-overs
+    // should visit different lines.
     const uniqueLines = new Set(locations.map(l => l.line))
     expect(uniqueLines.size).toBeGreaterThan(1)
   })
