@@ -126,50 +126,53 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v2
 
+      # Resolve the codetracer ref from sibling-pins (or fall back to main).
+      - name: Resolve codetracer ref
+        id: resolve-codetracer-ref
+        run: |
+          if [ -f .github/sibling-pins ]; then
+            REF="$(grep '^codetracer ' .github/sibling-pins | cut -d' ' -f2)" || true
+          fi
+          echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
+
+      # Clone codetracer with submodule URL rewriting (needed for nix build
+      # with ?submodules=1 — the shared action rewrites SSH URLs to HTTPS).
+      - name: Clone codetracer
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
+        with:
+          repo: metacraft-labs/codetracer
+          ref: ${{ steps.resolve-codetracer-ref.outputs.ref }}
+          path: ${{ github.workspace }}/../codetracer
+          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          submodules: 'true'
+
+      # Clone remaining sibling repos from .github/sibling-pins.
+      # Each line in the pins file is: <name> <sha> <branch>
       - name: Restore sibling repos
         env:
           GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
         run: |
-          # Clone all sibling repos needed for trace recording and test execution.
-          cd ..
-
-          # codetracer needs --recurse-submodules for nix build (libs/tree-sitter-nim).
-          if [ ! -d codetracer ]; then
-            git clone --depth 1 --recurse-submodules --shallow-submodules \
-              "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/codetracer.git"
-          fi
-
-          # Recorder repos, native test programs, and RR backend.
-          for repo in \
-            codetracer-python-recorder \
-            codetracer-ruby-recorder \
-            codetracer-native-test-programs \
-            codetracer-rr-backend \
-          ; do
-            if [ ! -d "$repo" ]; then
-              git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${repo}.git"
+          while read -r name sha branch; do
+            [ -z "$name" ] && continue
+            # codetracer is handled by the clone-repo action above
+            [ "$name" = "codetracer" ] && continue
+            dest="${GITHUB_WORKSPACE}/../${name}"
+            if [ -d "$dest" ]; then
+              echo "[$name] Already exists, skipping"
+              continue
             fi
-          done
-
-          # Blockchain-specific recorder repos (for deep tests).
-          for repo in \
-            codetracer-miden-recorder \
-            codetracer-fuel-recorder \
-            codetracer-move-recorder \
-            codetracer-solana-recorder \
-            codetracer-cardano-recorder \
-            codetracer-flow-recorder \
-            codetracer-cairo-recorder \
-            codetracer-circom-recorder \
-            codetracer-leo-recorder \
-            codetracer-polkavm-recorder \
-            codetracer-ton-recorder \
-            codetracer-evm-recorder \
-          ; do
-            if [ ! -d "$repo" ]; then
-              git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${repo}.git"
-            fi
-          done
+            echo "[$name] Cloning at $sha (branch: $branch)"
+            git clone --depth 1 --branch "$branch" --single-branch \
+              "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${name}.git" \
+              "$dest" || {
+                echo "[$name] Shallow clone failed, trying full clone"
+                rm -rf "$dest"
+                git clone --no-checkout \
+                  "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${name}.git" \
+                  "$dest"
+                git -C "$dest" checkout "$sha"
+              }
+          done < .github/sibling-pins
 
       - name: Build codetracer (for ct binary)
         run: |
