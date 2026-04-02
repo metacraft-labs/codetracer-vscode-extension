@@ -22,10 +22,14 @@ import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 const TRACE_NAME = 'tolk-flow-test'
 
 // ---- Known trace data (flow_test.tolk) ----
-// The compute function performs stack-based arithmetic. The TVM stack-based
-// execution model exposes locals as debugging variables.
+// main() is merged into <toplevel> (depth 0). compute() appears as a nested
+// call at depth 1. The TVM stack-based execution model exposes locals as
+// debugging variables.
 const KNOWN_FUNCTIONS = ['compute']
 const KNOWN_VARIABLE = 'a'
+
+// Maximum step-overs to find a variable with a value when iterating.
+const MAX_STEPS_FOR_LOCALS = 12
 
 const session = new DebugSession()
 const editor = new EditorPane()
@@ -49,7 +53,7 @@ describe('CodeTracer Extension - Tolk (TON) Deep Test', () => {
   })
 
   afterEach(async function () {
-    const testName = this.currentTest?.title?.replace(/\s+/g, '-').substring(0, 50) ?? 'unknown'
+    const testName = this.currentTest?.title?.replace(/[^a-zA-Z0-9_-]+/g, '-').substring(0, 50) ?? 'unknown'
     if (this.currentTest?.state === 'failed') {
       console.log(`[diag] Test failed: ${this.currentTest.title}`)
       await captureFullDiagnostics(`tolk-deep-FAIL-${testName}`)
@@ -156,56 +160,67 @@ describe('CodeTracer Extension - Tolk (TON) Deep Test', () => {
   // Locals: verify variable values (not just names)
   // ==================================================================
 
-  it('loads locals with variable values including a', async () => {
-    // The initial position is at main() which just calls compute(). Step into
-    // compute() and advance past variable assignments so locals are populated.
-    const stepInLoc = await session.stepIn(3000)
-    console.log('[Tolk] Stepped into:', JSON.stringify(stepInLoc))
-    for (let i = 0; i < 3; i++) {
-      const loc = await session.stepOver(2000)
-      console.log(`[Tolk] Step ${i + 1}:`, JSON.stringify(loc))
-    }
+  it('finds variable with value after stepping into compute', async () => {
+    // main() is merged into <toplevel> (depth 0). compute() is a nested call
+    // at depth 1. We step forward iteratively until we find a variable with
+    // a value — this naturally enters compute() via step-in-like progression
+    // and reaches the assignment steps where locals are populated.
+    let found = false
+    let lastLocals: any = null
 
-    const result = await session.loadLocals({ lang: 'Tolk', countBudget: 100, depthLimit: 3 })
-    expect(result.ok).toBe(true)
-    writeDiag('tolk-deep-locals.json', result.data)
+    for (let i = 0; i < MAX_STEPS_FOR_LOCALS; i++) {
+      // Use step-in to advance unconditionally into nested calls.
+      // Step-over from depth 0 would skip compute()'s body at depth 1.
+      await session.stepIn(500)
 
-    if (result.data) {
-      const dataStr = JSON.stringify(result.data)
-      // Verify the known variable name is present
-      expect(dataStr).toContain(KNOWN_VARIABLE)
-
-      // Verify at least one variable has a non-empty value
-      if (result.data.locals && Array.isArray(result.data.locals)) {
-        console.log('[Tolk] Total locals:', result.data.locals.length)
-
-        const withValues = result.data.locals.filter(
-          (l: any) => l.value !== undefined && l.value !== null && String(l.value).length > 0,
-        )
-        console.log(`[Tolk] Locals with values: ${withValues.length}/${result.data.locals.length}`)
-        expect(withValues.length).toBeGreaterThan(0)
-
-        // Log first few for diagnostics
-        for (const v of withValues.slice(0, 5)) {
-          console.log(`  ${v.name ?? v.variable_name}: ${JSON.stringify(v.value).substring(0, 80)}`)
+      const result = await session.loadLocals({ lang: 'Tolk', countBudget: 100, depthLimit: 3 })
+      if (result.ok && result.data) {
+        lastLocals = result.data
+        const dataStr = JSON.stringify(result.data)
+        if (dataStr.includes(KNOWN_VARIABLE)) {
+          if (result.data.locals && Array.isArray(result.data.locals)) {
+            const withValues = result.data.locals.filter(
+              (l: any) => l.value !== undefined && l.value !== null && String(l.value).length > 0,
+            )
+            if (withValues.length > 0) {
+              console.log(`[Tolk] Found ${KNOWN_VARIABLE} with value at step ${i + 1}`)
+              writeDiag('tolk-deep-locals.json', result.data)
+              for (const v of withValues.slice(0, 5)) {
+                console.log(`  ${v.name ?? v.variable_name}: ${JSON.stringify(v.value).substring(0, 80)}`)
+              }
+              found = true
+              break
+            }
+          }
+        }
+        if (result.data.locals?.length > 0) {
+          console.log(`[Tolk] Step ${i + 1}: ${result.data.locals.length} locals, ` +
+            `names: ${result.data.locals.map((l: any) => l.name ?? l.variable_name).join(', ')}`)
         }
       }
     }
+
+    if (!found) {
+      writeDiag('tolk-deep-locals-last.json', lastLocals)
+    }
+    expect(found).toBe(true)
   })
 
   // ==================================================================
   // Step navigation: multi-step and line change verification
   // ==================================================================
 
-  it('performs multiple step-over operations and changes line', async () => {
-    // After the locals test, we should already be inside compute().
+  it('performs multiple step-in operations and changes line', async () => {
+    // After the locals test, we should be inside the trace. Use step-in to
+    // advance through the trace — step-in always moves to the next step
+    // regardless of call depth. This verifies the trace has multi-line coverage.
     const current = await session.currentLocation()
     console.log('[Tolk] Pre-step location:', JSON.stringify(current))
 
     const locations: Array<{ file: string; line: number }> = [current]
 
     for (let i = 0; i < 5; i++) {
-      const loc = await session.stepOver(3000)
+      const loc = await session.stepIn(3000)
       locations.push(loc)
       // Each step should land in a source file with a valid line
       expect(loc.file.length).toBeGreaterThan(0)
@@ -215,7 +230,7 @@ describe('CodeTracer Extension - Tolk (TON) Deep Test', () => {
     writeDiag('tolk-deep-multi-step.json', locations)
     console.log('[Tolk] Multi-step locations:', JSON.stringify(locations))
 
-    // Verify we actually moved — inside compute(), lines should change.
+    // Verify we actually moved — lines should change across steps.
     const uniqueLines = new Set(locations.map(l => l.line))
     expect(uniqueLines.size).toBeGreaterThan(1)
   })
