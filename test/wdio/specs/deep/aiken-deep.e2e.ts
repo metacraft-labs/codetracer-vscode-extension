@@ -164,6 +164,15 @@ describe('CodeTracer Extension - Aiken (Cardano) Deep Test', () => {
   // ==================================================================
 
   it('loads locals with variable values including a', async () => {
+    // The initial position is at the test entry (single-line body calling
+    // compute()). Step into compute() and advance past variable assignments.
+    const stepInLoc = await session.stepIn(3000)
+    console.log('[Aiken] Stepped into:', JSON.stringify(stepInLoc))
+    for (let i = 0; i < 3; i++) {
+      const loc = await session.stepOver(2000)
+      console.log(`[Aiken] Step ${i + 1}:`, JSON.stringify(loc))
+    }
+
     const result = await session.loadLocals({ lang: 'Aiken', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
     writeDiag('aiken-deep-locals.json', result.data)
@@ -202,7 +211,11 @@ describe('CodeTracer Extension - Aiken (Cardano) Deep Test', () => {
   // ==================================================================
 
   it('performs multiple step-over operations and changes line', async () => {
-    const locations: Array<{ file: string; line: number }> = []
+    // After the locals test, we should already be inside compute().
+    const current = await session.currentLocation()
+    console.log('[Aiken] Pre-step location:', JSON.stringify(current))
+
+    const locations: Array<{ file: string; line: number }> = [current]
 
     for (let i = 0; i < 5; i++) {
       const loc = await session.stepOver(3000)
@@ -215,7 +228,7 @@ describe('CodeTracer Extension - Aiken (Cardano) Deep Test', () => {
     writeDiag('aiken-deep-multi-step.json', locations)
     console.log('[Aiken] Multi-step locations:', JSON.stringify(locations))
 
-    // Verify we actually moved — not all locations should be the same line
+    // Verify we actually moved — inside compute(), lines should change.
     const uniqueLines = new Set(locations.map(l => l.line))
     expect(uniqueLines.size).toBeGreaterThan(1)
   })

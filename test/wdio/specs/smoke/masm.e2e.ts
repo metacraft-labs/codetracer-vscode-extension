@@ -9,6 +9,6 @@ defineLanguageSmokeTests({
   traceName: 'masm-flow-test',
   expectedFileName: 'compute.masm',
   calltraceFunction: 'compute',
-  variableName: 'local[0]',
+  variableName: 'stack[0]',
   langId: 'MASM',
 })
