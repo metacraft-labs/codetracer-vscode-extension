@@ -54,10 +54,10 @@ const EVENT_LOG_TEXT = 'LOG1'
 const STORAGE_VAR_NAME = 'storedA'
 
 // Maximum step-overs to try before giving up on finding the variable.
-// The EVM recorder emits storage variables only at the exact step where
-// the SSTORE opcode executes — they are not carried forward. We step
-// iteratively and check locals at each step until we find the variable.
-const MAX_STEPS_FOR_LOCALS = 30
+// Storage variables are carried forward by the recorder to every subsequent
+// step. Local variables appear once they are assigned. We step iteratively
+// and check locals at each step until we find the target variable.
+const MAX_STEPS_FOR_LOCALS = 15
 
 const session = new DebugSession()
 const editor = new EditorPane()
@@ -128,10 +128,9 @@ describe('CodeTracer Extension - Solidity Smoke Test', () => {
   })
 
   it(`finds ${STORAGE_VAR_NAME} in local variables after stepping`, async () => {
-    // The EVM recorder emits storage variables only at the exact step where
-    // the SSTORE opcode executes — they are not carried forward to subsequent
-    // steps. We step iteratively and check locals at each step until we find
-    // the target variable or exhaust the budget.
+    // Storage variables are carried forward but may not appear until the step
+    // where the SSTORE fires. We step iteratively and check locals at each
+    // step until we find the target variable or exhaust the budget.
     let found = false
     let lastLocals: any = null
 
