@@ -76,6 +76,7 @@ rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
 echo "Recording Cairo trace..."
+export CAIRO_CORELIB_DIR="$CAIRO_RECORDER_DIR/corelib/src"
 recorder_exec "$CAIRO_RECORDER_DIR" "$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
 
 # Verify the fixture was created

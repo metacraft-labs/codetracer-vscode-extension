@@ -72,7 +72,7 @@ fi
 if [ -d "$CADENCE_RECORDER_DIR/go-helper" ]; then
   echo "Building cadence-trace-helper (Go helper)..."
   recorder_exec "$CADENCE_RECORDER_DIR" bash -c \
-    "cd \"$CADENCE_RECORDER_DIR/go-helper\" && go build -o cadence-trace-helper ."
+    "cd \"$CADENCE_RECORDER_DIR/go-helper\" && go mod download && go build -o cadence-trace-helper ."
   HELPER_BIN="$CADENCE_RECORDER_DIR/go-helper/cadence-trace-helper"
   if [ ! -x "$HELPER_BIN" ]; then
     echo "ERROR: cadence-trace-helper binary not found at $HELPER_BIN"
