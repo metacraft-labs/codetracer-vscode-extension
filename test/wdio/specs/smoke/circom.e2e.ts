@@ -4,11 +4,13 @@ import { defineLanguageSmokeTests } from '../../helpers/language-smoke-helpers'
 // It records the Circom flow_test.circom circuit which:
 //   - Performs signal constraint operations
 //   - Exercises the Circom witness generation and Wasm tracer
+// The main template (FlowTest) is merged into <toplevel> so that steps stay
+// at depth 0 and step-over works correctly. The calltrace contains <toplevel>.
 defineLanguageSmokeTests({
   language: 'Circom',
   traceName: 'circom-flow-test',
   expectedFileName: 'flow_test.circom',
-  calltraceFunction: 'FlowTest',
+  calltraceFunction: '<toplevel>',
   variableName: 'a',
   langId: 'Circom',
 })

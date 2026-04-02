@@ -27,11 +27,15 @@ import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 const TRACE_NAME = 'circom-flow-test'
 
 // ---- Known trace data (flow_test.circom) ----
-// The FlowTest template defines an arithmetic circuit with signal inputs and
-// outputs. Circom uses templates rather than functions — the template name
-// appears in the calltrace. Signal `a` is an input to the circuit.
-const KNOWN_FUNCTIONS = ['FlowTest']
+// The FlowTest template's steps are merged into the <toplevel> call (depth 0)
+// so that step-over works correctly. The FlowTest function metadata is
+// registered but does not appear as a nested Call event.
+const KNOWN_FUNCTIONS = ['<toplevel>']
 const KNOWN_VARIABLE = 'a'
+
+// Maximum step-overs to find a variable with a value. The first steps are
+// signal declarations (no values); values appear at assignment steps.
+const MAX_STEPS_FOR_LOCALS = 12
 
 const session = new DebugSession()
 const editor = new EditorPane()
@@ -55,7 +59,7 @@ describe('CodeTracer Extension - Circom Deep Test', () => {
   })
 
   afterEach(async function () {
-    const testName = this.currentTest?.title?.replace(/\s+/g, '-').substring(0, 50) ?? 'unknown'
+    const testName = this.currentTest?.title?.replace(/[^a-zA-Z0-9_-]+/g, '-').substring(0, 50) ?? 'unknown'
     if (this.currentTest?.state === 'failed') {
       console.log(`[diag] Test failed: ${this.currentTest.title}`)
       await captureFullDiagnostics(`circom-deep-FAIL-${testName}`)
@@ -129,15 +133,15 @@ describe('CodeTracer Extension - Circom Deep Test', () => {
   // Calltrace: verify compute template appears
   // ==================================================================
 
-  it('calltrace contains the FlowTest template', async () => {
+  it('calltrace contains the toplevel function', async () => {
     const result = await session.loadCalltrace({ depth: 50, height: 200 })
     expect(result.ok).toBe(true)
     writeDiag('circom-calltrace.json', result.data)
 
     const dataStr = JSON.stringify(result.data)
     const foundFunctions = KNOWN_FUNCTIONS.filter(fn => dataStr.includes(fn))
-    console.log('[Circom] Calltrace templates found:', foundFunctions)
-    expect(dataStr).toContain('FlowTest')
+    console.log('[Circom] Calltrace functions found:', foundFunctions)
+    expect(dataStr).toContain('<toplevel>')
   })
 
   // ==================================================================
@@ -162,32 +166,49 @@ describe('CodeTracer Extension - Circom Deep Test', () => {
   // Locals: verify signal values (not just names)
   // ==================================================================
 
-  it('loads locals with signal values including a', async () => {
-    const result = await session.loadLocals({ lang: 'Circom', countBudget: 100, depthLimit: 3 })
-    expect(result.ok).toBe(true)
-    writeDiag('circom-deep-locals.json', result.data)
+  it('finds signal variable with value after stepping', async () => {
+    // The first steps are signal declarations (no values). Values appear at
+    // assignment steps (a <== 10, b <== 32, etc.). We step iteratively and
+    // check locals at each step until we find a variable with a value.
+    let found = false
+    let lastLocals: any = null
 
-    if (result.data) {
-      const dataStr = JSON.stringify(result.data)
-      // Verify the known signal name is present
-      expect(dataStr).toContain(KNOWN_VARIABLE)
+    for (let i = 0; i < MAX_STEPS_FOR_LOCALS; i++) {
+      await session.stepOver(500)
 
-      // Verify at least one variable has a non-empty value
-      if (result.data.locals && Array.isArray(result.data.locals)) {
-        console.log('[Circom] Total locals:', result.data.locals.length)
-
-        const withValues = result.data.locals.filter(
-          (l: any) => l.value !== undefined && l.value !== null && String(l.value).length > 0,
-        )
-        console.log(`[Circom] Locals with values: ${withValues.length}/${result.data.locals.length}`)
-        expect(withValues.length).toBeGreaterThan(0)
-
-        // Log first few for diagnostics
-        for (const v of withValues.slice(0, 5)) {
-          console.log(`  ${v.name ?? v.variable_name}: ${JSON.stringify(v.value).substring(0, 80)}`)
+      const result = await session.loadLocals({ lang: 'Circom', countBudget: 100, depthLimit: 3 })
+      if (result.ok && result.data) {
+        lastLocals = result.data
+        const dataStr = JSON.stringify(result.data)
+        if (dataStr.includes(KNOWN_VARIABLE)) {
+          // Check that at least one variable has a non-empty value
+          if (result.data.locals && Array.isArray(result.data.locals)) {
+            const withValues = result.data.locals.filter(
+              (l: any) => l.value !== undefined && l.value !== null && String(l.value).length > 0,
+            )
+            if (withValues.length > 0) {
+              console.log(`[Circom] Found ${KNOWN_VARIABLE} with value at step ${i + 1}`)
+              writeDiag('circom-deep-locals.json', result.data)
+              for (const v of withValues.slice(0, 5)) {
+                console.log(`  ${v.name ?? v.variable_name}: ${JSON.stringify(v.value).substring(0, 80)}`)
+              }
+              found = true
+              break
+            }
+          }
+        }
+        // Log non-empty locals for diagnostics
+        if (result.data.locals?.length > 0) {
+          console.log(`[Circom] Step ${i + 1}: ${result.data.locals.length} locals, ` +
+            `names: ${result.data.locals.map((l: any) => l.name ?? l.variable_name).join(', ')}`)
         }
       }
     }
+
+    if (!found) {
+      writeDiag('circom-deep-locals-last.json', lastLocals)
+    }
+    expect(found).toBe(true)
   })
 
   // ==================================================================
@@ -276,13 +297,13 @@ describe('CodeTracer Extension - Circom Deep Test', () => {
   // Calltrace search
   // ==================================================================
 
-  it('can search the calltrace for "FlowTest"', async () => {
-    const result = await session.searchCalltrace('FlowTest')
+  it('can search the calltrace for "toplevel"', async () => {
+    const result = await session.searchCalltrace('toplevel')
     console.log('[Circom] Search calltrace ok:', result.ok)
     expect(result.ok).toBe(true)
 
     if (result.data) {
-      writeDiag('circom-deep-search-FlowTest.json', result.data)
+      writeDiag('circom-deep-search-toplevel.json', result.data)
     }
   })
 
