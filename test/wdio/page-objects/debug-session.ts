@@ -98,6 +98,17 @@ export class DebugSession {
     return this.currentLocation()
   }
 
+  /**
+   * Step over via DAP only — does not read the editor cursor.
+   * Useful for binary-blob traces (e.g. PolkaVM) where VS Code may not
+   * have an active text editor tab.
+   */
+  async stepOverDap(settleMs = 2000): Promise<dap.DapResult> {
+    const result = await dap.stepOver()
+    await browser.pause(settleMs)
+    return result
+  }
+
   // ---- Breakpoints ----
 
   /** Add a source breakpoint at the given 1-based line number. */
