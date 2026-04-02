@@ -56,7 +56,7 @@ describe('CodeTracer Extension - Aiken (Cardano) Deep Test', () => {
   })
 
   afterEach(async function () {
-    const testName = this.currentTest?.title?.replace(/\s+/g, '-').substring(0, 50) ?? 'unknown'
+    const testName = this.currentTest?.title?.replace(/[^a-zA-Z0-9_-]+/g, '-').substring(0, 50) ?? 'unknown'
     if (this.currentTest?.state === 'failed') {
       console.log(`[diag] Test failed: ${this.currentTest.title}`)
       await captureFullDiagnostics(`aiken-deep-FAIL-${testName}`)
