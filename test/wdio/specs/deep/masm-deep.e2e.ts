@@ -25,7 +25,7 @@ const TRACE_NAME = 'masm-flow-test'
 // The compute procedure performs stack-based arithmetic. The Miden VM exposes
 // stack slots and local variables as debugging locals.
 const KNOWN_FUNCTIONS = ['compute']
-const KNOWN_VARIABLE = 'local[0]'
+const KNOWN_VARIABLE = 'stack[0]'
 
 const session = new DebugSession()
 const editor = new EditorPane()
@@ -156,7 +156,7 @@ describe('CodeTracer Extension - MASM (Miden) Deep Test', () => {
   // Locals: verify variable values (not just names)
   // ==================================================================
 
-  it('loads locals with variable values including local[0]', async () => {
+  it('loads locals with variable values including stack[0]', async () => {
     const result = await session.loadLocals({ lang: 'MASM', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
     writeDiag('masm-deep-locals.json', result.data)
