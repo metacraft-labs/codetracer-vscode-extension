@@ -63,30 +63,44 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
   fi
 fi
 
+echo "Building codetracer-evm-recorder..."
+recorder_exec "$EVM_RECORDER_DIR" cargo build --manifest-path "$EVM_RECORDER_DIR/Cargo.toml"
+
+# Locate the built binary
+RECORDER_BIN="$EVM_RECORDER_DIR/target/debug/codetracer-evm-recorder"
+if [ ! -x "$RECORDER_BIN" ]; then
+  echo "ERROR: Recorder binary not found at $RECORDER_BIN"
+  echo "  Build may have failed — check the cargo output above."
+  exit 1
+fi
+
 # Create the fixture directory
 rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
-echo "Running EVM recorder e2e test with fixture export..."
-recorder_exec "$EVM_RECORDER_DIR" bash -c \
-  "cd \"$EVM_RECORDER_DIR\" && SOLIDITY_FIXTURE_OUTPUT_DIR=\"$FIXTURE_DIR\" cargo test --test test_e2e_trace -- --ignored --nocapture test_e2e_trace"
+# The CLI record command does the full pipeline:
+#   1. Compile the Solidity file with solc
+#   2. Spin up a local Anvil node (with --steps-tracing)
+#   3. Deploy the contract
+#   4. Call the specified function (compute)
+#   5. Fetch debug_traceTransaction structlogs
+#   6. Run the EVM recorder pipeline
+#   7. Write trace.bin, trace_metadata.json, trace_paths.json
+#   8. Copy the source file into the trace directory
+echo "Recording Solidity trace..."
+recorder_exec "$EVM_RECORDER_DIR" "$RECORDER_BIN" record "$CONTRACT_SOL" \
+  --trace-dir "$FIXTURE_DIR" --function compute
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then
   echo "ERROR: Fixture generation failed — trace_metadata.json not found."
-  echo "  Check the cargo test output above for errors."
+  echo "  Check the recorder output above for errors."
   exit 1
 fi
 
 if [ ! -f "$FIXTURE_DIR/trace.json" ] && [ ! -f "$FIXTURE_DIR/trace.bin" ]; then
   echo "ERROR: Fixture generation failed — neither trace.json nor trace.bin found."
   exit 1
-fi
-
-# The test program for the trace is FlowTest.sol; copy it alongside the trace
-# files so the DAP server can resolve source references.
-if [ ! -f "$FIXTURE_DIR/FlowTest.sol" ]; then
-  cp "$CONTRACT_SOL" "$FIXTURE_DIR/FlowTest.sol"
 fi
 
 echo ""

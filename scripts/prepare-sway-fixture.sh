@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Prepare a pre-recorded Sway (Fuel) trace fixture for WDIO tests.
 #
-# This script builds the codetracer-fuel-recorder, runs it against the Sway
-# flow_test contract, and copies the resulting trace to the fixture directory
-# used by the VS Code extension's WDIO smoke tests.
+# The Fuel recorder's Sway project mode is not yet implemented, so this script
+# uses the export_fixture test which builds a FuelVM bytecode program using
+# fuel-asm (no Sway/forc compiler needed), records the trace, and writes it
+# to the fixture directory.
 #
 # The fixture trace covers:
-#   - main() entrypoint of the Sway flow_test contract
-#   - Arithmetic on u64 values (sum_val)
-#   - Fuel VM execution path
+#   - Arithmetic operations: r16=10, r17=32, r18=42, r19=84, r20=94
+#   - FuelVM instruction execution with register tracking
+#   - Log and return operations
 #
 # Prerequisites:
 #   - cargo (Rust toolchain) on PATH
@@ -39,16 +40,8 @@ if [ -z "$FUEL_RECORDER_DIR" ] || [ ! -f "$FUEL_RECORDER_DIR/Cargo.toml" ]; then
   exit 1
 fi
 
-PROJECT_DIR="$FUEL_RECORDER_DIR/test-programs/flow_test"
-SOURCE_FILE="$PROJECT_DIR/src/main.sw"
-if [ ! -f "$SOURCE_FILE" ]; then
-  echo "ERROR: Sway flow_test source not found at $SOURCE_FILE"
-  exit 1
-fi
-
 echo "=== Preparing Sway (Fuel) trace fixture ==="
 echo "  Fuel recorder:  $FUEL_RECORDER_DIR"
-echo "  Test program:   $SOURCE_FILE"
 echo "  Fixture output: $FIXTURE_DIR"
 echo ""
 
@@ -61,40 +54,27 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
   fi
 fi
 
-echo "Building codetracer-fuel-recorder..."
-recorder_exec "$FUEL_RECORDER_DIR" cargo build --manifest-path "$FUEL_RECORDER_DIR/Cargo.toml"
-
-# Locate the built binary
-RECORDER_BIN="$FUEL_RECORDER_DIR/target/debug/codetracer-fuel-recorder"
-if [ ! -x "$RECORDER_BIN" ]; then
-  echo "ERROR: Recorder binary not found at $RECORDER_BIN"
-  echo "  Build may have failed — check the cargo output above."
-  exit 1
-fi
-
 # Create the fixture directory
 rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
-echo "Recording Sway trace..."
-recorder_exec "$FUEL_RECORDER_DIR" "$RECORDER_BIN" record "$PROJECT_DIR" -o "$FIXTURE_DIR"
+# The export_fixture test builds a FuelVM bytecode program using fuel-asm
+# (avoiding the need for the forc compiler), records the trace, and writes
+# the output to SWAY_FIXTURE_OUTPUT_DIR.
+echo "Running Fuel recorder export_fixture test..."
+recorder_exec "$FUEL_RECORDER_DIR" bash -c \
+  "cd \"$FUEL_RECORDER_DIR\" && SWAY_FIXTURE_OUTPUT_DIR=\"$FIXTURE_DIR\" cargo test --test test_tracer -- --ignored export_fixture --nocapture"
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then
   echo "ERROR: Fixture generation failed — trace_metadata.json not found."
-  echo "  Check the recorder output above for errors."
+  echo "  Check the cargo test output above for errors."
   exit 1
 fi
 
 if [ ! -f "$FIXTURE_DIR/trace.json" ] && [ ! -f "$FIXTURE_DIR/trace.bin" ]; then
   echo "ERROR: Fixture generation failed — neither trace.json nor trace.bin found."
   exit 1
-fi
-
-# Copy the source file alongside the trace so the DAP server can resolve
-# source references.
-if [ ! -f "$FIXTURE_DIR/main.sw" ]; then
-  cp "$SOURCE_FILE" "$FIXTURE_DIR/main.sw"
 fi
 
 echo ""

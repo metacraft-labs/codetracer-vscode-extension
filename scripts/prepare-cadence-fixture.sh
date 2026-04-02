@@ -60,20 +60,32 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
   fi
 fi
 
-# The Cadence recorder may be Go-based or Rust-based depending on version.
-# Build with the available toolchain via recorder_exec.
-if [ -f "$CADENCE_RECORDER_DIR/Cargo.toml" ]; then
-  echo "Building codetracer-flow-recorder (Rust)..."
-  recorder_exec "$CADENCE_RECORDER_DIR" cargo build --manifest-path "$CADENCE_RECORDER_DIR/Cargo.toml"
-  RECORDER_BIN="$CADENCE_RECORDER_DIR/target/debug/codetracer-flow-recorder"
-elif [ -f "$CADENCE_RECORDER_DIR/go.mod" ]; then
-  echo "Building codetracer-flow-recorder (Go)..."
-  recorder_exec "$CADENCE_RECORDER_DIR" go build -o "$CADENCE_RECORDER_DIR/codetracer-flow-recorder" "$CADENCE_RECORDER_DIR/cmd/recorder"
-  RECORDER_BIN="$CADENCE_RECORDER_DIR/codetracer-flow-recorder"
-else
-  echo "ERROR: No Cargo.toml or go.mod found in $CADENCE_RECORDER_DIR."
+# The Flow recorder is Rust-based with a Go helper binary (cadence-trace-helper)
+# that uses the real Cadence runtime to execute Cadence programs and emit NDJSON
+# trace events for the Rust recorder to consume.
+if [ ! -f "$CADENCE_RECORDER_DIR/Cargo.toml" ]; then
+  echo "ERROR: No Cargo.toml found in $CADENCE_RECORDER_DIR."
   exit 1
 fi
+
+# Build the Go helper first — the recorder needs it to execute Cadence programs.
+if [ -d "$CADENCE_RECORDER_DIR/go-helper" ]; then
+  echo "Building cadence-trace-helper (Go helper)..."
+  recorder_exec "$CADENCE_RECORDER_DIR" bash -c \
+    "cd \"$CADENCE_RECORDER_DIR/go-helper\" && go build -o cadence-trace-helper ."
+  HELPER_BIN="$CADENCE_RECORDER_DIR/go-helper/cadence-trace-helper"
+  if [ ! -x "$HELPER_BIN" ]; then
+    echo "ERROR: cadence-trace-helper binary not found at $HELPER_BIN"
+    echo "  Go build may have failed — check the output above."
+    exit 1
+  fi
+  export CADENCE_HELPER_BIN="$HELPER_BIN"
+  echo "  Go helper built: $HELPER_BIN"
+fi
+
+echo "Building codetracer-flow-recorder (Rust)..."
+recorder_exec "$CADENCE_RECORDER_DIR" cargo build --manifest-path "$CADENCE_RECORDER_DIR/Cargo.toml"
+RECORDER_BIN="$CADENCE_RECORDER_DIR/target/debug/codetracer-flow-recorder"
 
 if [ ! -x "$RECORDER_BIN" ]; then
   echo "ERROR: Recorder binary not found at $RECORDER_BIN"

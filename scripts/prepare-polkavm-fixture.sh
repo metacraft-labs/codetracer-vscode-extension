@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Prepare a pre-recorded PolkaVM trace fixture for WDIO tests.
 #
-# This script builds the codetracer-polkavm-recorder, runs it against the
-# flow_test.pvm test program, and copies the resulting trace to the fixture
-# directory used by the VS Code extension's WDIO smoke tests.
+# PolkaVM test programs are built programmatically using polkavm-common's
+# ProgramBlobBuilder (avoiding the need for a RISC-V cross-compiler). This
+# script runs the recorder's export_fixture test which constructs a compute
+# program blob, records the trace, and writes it to the fixture directory.
 #
 # The fixture trace covers:
-#   - compute function in PolkaVM assembly
-#   - Register-based arithmetic operations
+#   - compute function: (10 + 32) * 2 + 10 = 94
+#   - Register-based arithmetic operations (A0, A1, S0, S1)
 #   - PolkaVM execution path with step tracing
 #
 # Prerequisites:
@@ -39,15 +40,8 @@ if [ -z "$POLKAVM_RECORDER_DIR" ] || [ ! -f "$POLKAVM_RECORDER_DIR/Cargo.toml" ]
   exit 1
 fi
 
-SOURCE_FILE="$POLKAVM_RECORDER_DIR/test-programs/polkavm/flow_test.pvm"
-if [ ! -f "$SOURCE_FILE" ]; then
-  echo "ERROR: PolkaVM test program not found at $SOURCE_FILE"
-  exit 1
-fi
-
 echo "=== Preparing PolkaVM trace fixture ==="
 echo "  PolkaVM recorder:  $POLKAVM_RECORDER_DIR"
-echo "  Test program:      $SOURCE_FILE"
 echo "  Fixture output:    $FIXTURE_DIR"
 echo ""
 
@@ -60,40 +54,27 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
   fi
 fi
 
-echo "Building codetracer-polkavm-recorder..."
-recorder_exec "$POLKAVM_RECORDER_DIR" cargo build --manifest-path "$POLKAVM_RECORDER_DIR/Cargo.toml"
-
-# Locate the built binary
-RECORDER_BIN="$POLKAVM_RECORDER_DIR/target/debug/codetracer-polkavm-recorder"
-if [ ! -x "$RECORDER_BIN" ]; then
-  echo "ERROR: Recorder binary not found at $RECORDER_BIN"
-  echo "  Build may have failed — check the cargo output above."
-  exit 1
-fi
-
 # Create the fixture directory
 rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
-echo "Recording PolkaVM trace..."
-recorder_exec "$POLKAVM_RECORDER_DIR" "$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
+# The export_fixture test builds a compute program blob programmatically using
+# ProgramBlobBuilder (no RISC-V cross-compiler needed), runs the tracer on it,
+# and writes the output to POLKAVM_FIXTURE_OUTPUT_DIR.
+echo "Running PolkaVM recorder export_fixture test..."
+recorder_exec "$POLKAVM_RECORDER_DIR" bash -c \
+  "cd \"$POLKAVM_RECORDER_DIR\" && POLKAVM_FIXTURE_OUTPUT_DIR=\"$FIXTURE_DIR\" cargo test --test test_tracer -- --ignored export_fixture --nocapture"
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then
   echo "ERROR: Fixture generation failed — trace_metadata.json not found."
-  echo "  Check the recorder output above for errors."
+  echo "  Check the cargo test output above for errors."
   exit 1
 fi
 
 if [ ! -f "$FIXTURE_DIR/trace.json" ] && [ ! -f "$FIXTURE_DIR/trace.bin" ]; then
   echo "ERROR: Fixture generation failed — neither trace.json nor trace.bin found."
   exit 1
-fi
-
-# Copy the source file alongside the trace so the DAP server can resolve
-# source references.
-if [ ! -f "$FIXTURE_DIR/flow_test.pvm" ]; then
-  cp "$SOURCE_FILE" "$FIXTURE_DIR/flow_test.pvm"
 fi
 
 echo ""
