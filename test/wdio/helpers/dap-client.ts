@@ -146,6 +146,20 @@ export async function loadEvents(): Promise<DapResult> {
   return dapRequest('ct/event-load', {}, 15000)
 }
 
+/**
+ * Map language names to their numeric IDs matching the Rust `Lang` enum
+ * (repr(u8), serde_repr). The db-backend deserializes `lang` as a u8.
+ */
+const LANG_IDS: Record<string, number> = {
+  C: 0, Cpp: 1, Rust: 2, Nim: 3, Go: 4, Pascal: 5, Fortran: 6,
+  D: 7, Crystal: 8, Lean: 9, Julia: 10, Ada: 11, Python: 12,
+  Ruby: 13, RubyDb: 14, Javascript: 15, Lua: 16, Asm: 17, Noir: 18,
+  RustWasm: 19, CppWasm: 20, Small: 21, PythonDb: 22, Unknown: 23,
+  Bash: 24, Zsh: 25, Solidity: 26, Masm: 27, Sway: 28, Move: 29,
+  PolkaVM: 30, Cairo: 31, Circom: 32, Leo: 33, Tolk: 34, Aiken: 35,
+  Cadence: 36,
+}
+
 /** Load local variables at the current position. */
 export async function loadLocals(opts: {
   rrTicks?: number
@@ -156,11 +170,14 @@ export async function loadLocals(opts: {
 } = {}): Promise<DapResult> {
   // Field names must be camelCase to match the Rust struct's
   // #[serde(rename_all = "camelCase")] deserialization.
+  // The `lang` field is a repr(u8) enum and must be sent as a number.
+  const langName = opts.lang ?? 'Rust'
+  const langId = LANG_IDS[langName] ?? LANG_IDS.Unknown
   return dapRequest('ct/load-locals', {
     rrTicks: opts.rrTicks ?? 0,
     countBudget: opts.countBudget ?? 100,
     minCountLimit: 10,
-    lang: opts.lang ?? 'Rust',
+    lang: langId,
     watchExpressions: opts.watchExpressions ?? [],
     depthLimit: opts.depthLimit ?? 3,
   })
