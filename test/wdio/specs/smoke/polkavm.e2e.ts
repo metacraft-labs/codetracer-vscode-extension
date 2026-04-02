@@ -29,8 +29,9 @@ import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 const TRACE_NAME = 'polkavm-flow-test'
 const LANG_ID = 'PolkaVM'
 
-// The "main" export in the PolkaVM blob should appear in the calltrace.
-const CALLTRACE_FUNCTION = 'main'
+// The PolkaVM recorder emits "<toplevel>" as the function name in the calltrace
+// (both functionName and rawName fields), not "main".
+const CALLTRACE_FUNCTION = '<toplevel>'
 // Within "main", A0 is renamed to arg0 by the recorder's debug info resolver.
 const VARIABLE_NAME = 'arg0'
 

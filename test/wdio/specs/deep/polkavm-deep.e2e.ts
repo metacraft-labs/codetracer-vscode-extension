@@ -20,7 +20,7 @@
  * IMPORTANT: PolkaVM programs are binary blobs (.polkavm) without
  * human-readable source files. VS Code cannot open binary blobs as text
  * editor tabs, so all assertions are DAP-level (no editor tab checks).
- * Within the "main" function scope, A0-A5 are renamed to arg0-arg5.
+ * The PolkaVM recorder wraps execution in a &lt;toplevel&gt; call. Within the
  *
  * Source: codetracer-polkavm-recorder (ProgramBlobBuilder)
  */
@@ -32,9 +32,10 @@ import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 const TRACE_NAME = 'polkavm-flow-test'
 
 // ---- Known trace data (test_program.polkavm) ----
-// The program has a single "main" export. Within the function scope,
-// A0-A5 are renamed to arg0-arg5 by the recorder's register name resolver.
-const KNOWN_FUNCTIONS = ['main']
+// The PolkaVM recorder emits a single <toplevel> call for the program.
+// Within the function scope, A0-A5 are renamed to arg0-arg5 by the
+// recorder's register name resolver.
+const KNOWN_FUNCTIONS = ['<toplevel>']
 const KNOWN_VARIABLE = 'arg0'
 
 const session = new DebugSession()
@@ -101,10 +102,10 @@ describe('CodeTracer Extension - PolkaVM Deep Test', () => {
   })
 
   // ==================================================================
-  // Calltrace: verify main function appears
+  // Calltrace: verify toplevel function appears
   // ==================================================================
 
-  it('calltrace contains the main function', async () => {
+  it('calltrace contains the toplevel function', async () => {
     const result = await session.loadCalltrace({ depth: 50, height: 200 })
     expect(result.ok).toBe(true)
     writeDiag('polkavm-calltrace.json', result.data)
@@ -112,7 +113,7 @@ describe('CodeTracer Extension - PolkaVM Deep Test', () => {
     const dataStr = JSON.stringify(result.data)
     const foundFunctions = KNOWN_FUNCTIONS.filter(fn => dataStr.includes(fn))
     console.log('[PolkaVM] Calltrace functions found:', foundFunctions)
-    expect(dataStr).toContain('main')
+    expect(dataStr).toContain('<toplevel>')
   })
 
   // ==================================================================
@@ -204,13 +205,13 @@ describe('CodeTracer Extension - PolkaVM Deep Test', () => {
   // Calltrace search
   // ==================================================================
 
-  it('can search the calltrace for "main"', async () => {
-    const result = await session.searchCalltrace('main')
+  it('can search the calltrace for "toplevel"', async () => {
+    const result = await session.searchCalltrace('toplevel')
     console.log('[PolkaVM] Search calltrace ok:', result.ok)
     expect(result.ok).toBe(true)
 
     if (result.data) {
-      writeDiag('polkavm-deep-search-main.json', result.data)
+      writeDiag('polkavm-deep-search-toplevel.json', result.data)
     }
   })
 
