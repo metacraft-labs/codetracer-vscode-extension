@@ -135,16 +135,24 @@ jobs:
           fi
           echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
 
-      # Clone codetracer with submodule URL rewriting (needed for nix build
-      # with ?submodules=1 — the shared action rewrites SSH URLs to HTTPS).
+      # Clone codetracer with submodules. Uses git clone directly (rather
+      # than clone-repo action) because --recurse-submodules propagates
+      # credentials to all submodules including private ones like
+      # tree-sitter-nim.
       - name: Clone codetracer
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@main
-        with:
-          repo: metacraft-labs/codetracer
-          ref: ${{ steps.resolve-codetracer-ref.outputs.ref }}
-          path: ${{ github.workspace }}/../codetracer
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
-          submodules: 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+        run: |
+          CT_REF="${{ steps.resolve-codetracer-ref.outputs.ref }}"
+          DEST="$GITHUB_WORKSPACE/../codetracer"
+          rm -rf "$DEST"
+          git clone --depth 1 --recurse-submodules --shallow-submodules \
+            "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/codetracer.git" \
+            "$DEST"
+          if [ "$CT_REF" != "main" ]; then
+            git -C "$DEST" fetch origin "$CT_REF"
+            git -C "$DEST" checkout "$CT_REF"
+          fi
 
       # Clone remaining sibling repos from .github/sibling-pins.
       # Each line in the pins file is: <name> <sha> <branch>
