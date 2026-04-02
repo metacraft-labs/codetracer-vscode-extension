@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepare a pre-recorded Aiken (Cardano) trace fixture for WDIO tests.
 #
-# This script builds the codetracer-aiken-recorder, runs it against the
+# This script builds the codetracer-cardano-recorder, runs it against the
 # flow_test.ak test program, and copies the resulting trace to the fixture
 # directory used by the VS Code extension's WDIO smoke tests.
 #
@@ -12,14 +12,14 @@
 #
 # Prerequisites:
 #   - cargo (Rust toolchain) on PATH
-#   - codetracer-aiken-recorder repo at ../codetracer-aiken-recorder (relative
+#   - codetracer-cardano-recorder repo at ../codetracer-cardano-recorder (relative
 #     to this extension repo) or at $AIKEN_RECORDER_DIR
 #
 # Usage:
 #   ./scripts/prepare-aiken-fixture.sh
 #
 # Environment variables:
-#   AIKEN_RECORDER_DIR  — override path to codetracer-aiken-recorder repo
+#   AIKEN_RECORDER_DIR  — override path to codetracer-cardano-recorder repo
 #   FORCE=1             — re-record even if fixture already exists
 
 set -euo pipefail
@@ -28,12 +28,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/traces/aiken-flow-test"
 
-# Locate the codetracer-aiken-recorder repo (sibling directory)
-AIKEN_RECORDER_DIR="${AIKEN_RECORDER_DIR:-$(cd "$EXTENSION_DIR/../codetracer-aiken-recorder" 2>/dev/null && pwd || true)}"
+# Locate the codetracer-cardano-recorder repo (sibling directory)
+AIKEN_RECORDER_DIR="${AIKEN_RECORDER_DIR:-$(cd "$EXTENSION_DIR/../codetracer-cardano-recorder" 2>/dev/null && pwd || true)}"
 if [ -z "$AIKEN_RECORDER_DIR" ] || [ ! -f "$AIKEN_RECORDER_DIR/Cargo.toml" ]; then
-  echo "ERROR: codetracer-aiken-recorder repo not found."
-  echo "  Tried: $EXTENSION_DIR/../codetracer-aiken-recorder"
-  echo "  Set AIKEN_RECORDER_DIR to the path of the codetracer-aiken-recorder repository."
+  echo "ERROR: codetracer-cardano-recorder repo not found."
+  echo "  Tried: $EXTENSION_DIR/../codetracer-cardano-recorder"
+  echo "  Set AIKEN_RECORDER_DIR to the path of the codetracer-cardano-recorder repository."
   exit 1
 fi
 
@@ -66,7 +66,7 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 
 # Build the recorder binary.
-echo "Building codetracer-aiken-recorder..."
+echo "Building codetracer-cardano-recorder..."
 if command -v direnv >/dev/null 2>&1 && [ -f "$AIKEN_RECORDER_DIR/.envrc" ]; then
   direnv exec "$AIKEN_RECORDER_DIR" cargo build --manifest-path "$AIKEN_RECORDER_DIR/Cargo.toml"
 else
@@ -74,7 +74,7 @@ else
 fi
 
 # Locate the built binary
-RECORDER_BIN="$AIKEN_RECORDER_DIR/target/debug/codetracer-aiken-recorder"
+RECORDER_BIN="$AIKEN_RECORDER_DIR/target/debug/codetracer-cardano-recorder"
 if [ ! -x "$RECORDER_BIN" ]; then
   echo "ERROR: Recorder binary not found at $RECORDER_BIN"
   echo "  Build may have failed — check the cargo output above."

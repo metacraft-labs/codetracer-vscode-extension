@@ -39,6 +39,9 @@ describe('CodeTracer Extension - Sway (Fuel) Deep Test', () => {
       const message =
         `Sway deep tests: trace not found at ${traceDir}\n` +
         'Run scripts/prepare-sway-fixture.sh to generate it.'
+      if (process.env.CI === 'true' || !!process.env.GITHUB_ACTIONS) {
+        throw new Error(message)
+      }
       console.warn(`SKIPPING ${message}`)
       this.skip()
     }

@@ -23,6 +23,9 @@ describe('CodeTracer Extension - Rust Deep Test', () => {
       const message =
         `Rust deep tests: trace not found at ${traceDir}\n` +
         'Run scripts/record-test-traces.sh to generate it.'
+      if (process.env.CI === 'true' || !!process.env.GITHUB_ACTIONS) {
+        throw new Error(message)
+      }
       console.warn(`SKIPPING ${message}`)
       this.skip()
     }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepare a pre-recorded Cadence (Flow) trace fixture for WDIO tests.
 #
-# This script builds the codetracer-cadence-recorder, runs it against the
+# This script builds the codetracer-flow-recorder, runs it against the
 # flow_test.cdc test program, and copies the resulting trace to the fixture
 # directory used by the VS Code extension's WDIO smoke tests.
 #
@@ -11,15 +11,15 @@
 #   - Cadence/Flow VM tracer
 #
 # Prerequisites:
-#   - go toolchain on PATH (Cadence recorder is written in Go)
-#   - codetracer-cadence-recorder repo at ../codetracer-cadence-recorder (relative
+#   - cargo (Rust toolchain) on PATH
+#   - codetracer-flow-recorder repo at ../codetracer-flow-recorder (relative
 #     to this extension repo) or at $CADENCE_RECORDER_DIR
 #
 # Usage:
 #   ./scripts/prepare-cadence-fixture.sh
 #
 # Environment variables:
-#   CADENCE_RECORDER_DIR  — override path to codetracer-cadence-recorder repo
+#   CADENCE_RECORDER_DIR  — override path to codetracer-flow-recorder repo
 #   FORCE=1               — re-record even if fixture already exists
 
 set -euo pipefail
@@ -28,12 +28,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/traces/cadence-flow-test"
 
-# Locate the codetracer-cadence-recorder repo (sibling directory)
-CADENCE_RECORDER_DIR="${CADENCE_RECORDER_DIR:-$(cd "$EXTENSION_DIR/../codetracer-cadence-recorder" 2>/dev/null && pwd || true)}"
+# Locate the codetracer-flow-recorder repo (sibling directory)
+CADENCE_RECORDER_DIR="${CADENCE_RECORDER_DIR:-$(cd "$EXTENSION_DIR/../codetracer-flow-recorder" 2>/dev/null && pwd || true)}"
 if [ -z "$CADENCE_RECORDER_DIR" ] || [ ! -d "$CADENCE_RECORDER_DIR" ]; then
-  echo "ERROR: codetracer-cadence-recorder repo not found."
-  echo "  Tried: $EXTENSION_DIR/../codetracer-cadence-recorder"
-  echo "  Set CADENCE_RECORDER_DIR to the path of the codetracer-cadence-recorder repository."
+  echo "ERROR: codetracer-flow-recorder repo not found."
+  echo "  Tried: $EXTENSION_DIR/../codetracer-flow-recorder"
+  echo "  Set CADENCE_RECORDER_DIR to the path of the codetracer-flow-recorder repository."
   exit 1
 fi
 
@@ -67,13 +67,13 @@ if [ -f "$CADENCE_RECORDER_DIR/Cargo.toml" ]; then
     exit 1
   fi
 
-  echo "Building codetracer-cadence-recorder (Rust)..."
+  echo "Building codetracer-flow-recorder (Rust)..."
   if command -v direnv >/dev/null 2>&1 && [ -f "$CADENCE_RECORDER_DIR/.envrc" ]; then
     direnv exec "$CADENCE_RECORDER_DIR" cargo build --manifest-path "$CADENCE_RECORDER_DIR/Cargo.toml"
   else
     cargo build --manifest-path "$CADENCE_RECORDER_DIR/Cargo.toml"
   fi
-  RECORDER_BIN="$CADENCE_RECORDER_DIR/target/debug/codetracer-cadence-recorder"
+  RECORDER_BIN="$CADENCE_RECORDER_DIR/target/debug/codetracer-flow-recorder"
 elif [ -f "$CADENCE_RECORDER_DIR/go.mod" ]; then
   if ! command -v go >/dev/null 2>&1; then
     echo "ERROR: go not found on PATH."
@@ -81,13 +81,13 @@ elif [ -f "$CADENCE_RECORDER_DIR/go.mod" ]; then
     exit 1
   fi
 
-  echo "Building codetracer-cadence-recorder (Go)..."
+  echo "Building codetracer-flow-recorder (Go)..."
   if command -v direnv >/dev/null 2>&1 && [ -f "$CADENCE_RECORDER_DIR/.envrc" ]; then
-    direnv exec "$CADENCE_RECORDER_DIR" go build -o "$CADENCE_RECORDER_DIR/codetracer-cadence-recorder" "$CADENCE_RECORDER_DIR/cmd/recorder"
+    direnv exec "$CADENCE_RECORDER_DIR" go build -o "$CADENCE_RECORDER_DIR/codetracer-flow-recorder" "$CADENCE_RECORDER_DIR/cmd/recorder"
   else
-    (cd "$CADENCE_RECORDER_DIR" && go build -o codetracer-cadence-recorder ./cmd/recorder)
+    (cd "$CADENCE_RECORDER_DIR" && go build -o codetracer-flow-recorder ./cmd/recorder)
   fi
-  RECORDER_BIN="$CADENCE_RECORDER_DIR/codetracer-cadence-recorder"
+  RECORDER_BIN="$CADENCE_RECORDER_DIR/codetracer-flow-recorder"
 else
   echo "ERROR: No Cargo.toml or go.mod found in $CADENCE_RECORDER_DIR."
   exit 1

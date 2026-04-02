@@ -39,6 +39,9 @@ describe('CodeTracer Extension - Move Deep Test', () => {
       const message =
         `Move deep tests: trace not found at ${traceDir}\n` +
         'Run scripts/prepare-move-fixture.sh to generate it.'
+      if (process.env.CI === 'true' || !!process.env.GITHUB_ACTIONS) {
+        throw new Error(message)
+      }
       console.warn(`SKIPPING ${message}`)
       this.skip()
     }

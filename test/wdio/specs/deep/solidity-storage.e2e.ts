@@ -50,6 +50,9 @@ describe('CodeTracer Extension - Solidity EVM Deep Test', () => {
         `Solidity deep tests: trace not found at ${traceDir}\n` +
         'Run scripts/prepare-solidity-fixture.sh to generate it.\n' +
         'Requires: solc, anvil, cargo, and codetracer-evm-recorder repo as a sibling.'
+      if (process.env.CI === 'true' || !!process.env.GITHUB_ACTIONS) {
+        throw new Error(message)
+      }
       console.warn(`SKIPPING ${message}`)
       this.skip()
     }

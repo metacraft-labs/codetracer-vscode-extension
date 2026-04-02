@@ -51,6 +51,9 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
       const message =
         `Stylus trace tests: fixture not found at ${FIXTURE_DIR}\n` +
         'Run scripts/prepare-stylus-fixture.sh to generate it.'
+      if (process.env.CI === 'true' || !!process.env.GITHUB_ACTIONS) {
+        throw new Error(message)
+      }
       console.warn(`SKIPPING ${message}`)
       this.skip()
     }

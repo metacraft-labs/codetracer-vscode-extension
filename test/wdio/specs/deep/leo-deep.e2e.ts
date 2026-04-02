@@ -40,6 +40,9 @@ describe('CodeTracer Extension - Leo (Aleo) Deep Test', () => {
       const message =
         `Leo deep tests: trace not found at ${traceDir}\n` +
         'Run scripts/prepare-leo-fixture.sh to generate it.'
+      if (process.env.CI === 'true' || !!process.env.GITHUB_ACTIONS) {
+        throw new Error(message)
+      }
       console.warn(`SKIPPING ${message}`)
       this.skip()
     }

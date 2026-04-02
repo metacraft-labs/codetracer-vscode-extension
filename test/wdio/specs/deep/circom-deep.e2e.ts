@@ -46,6 +46,9 @@ describe('CodeTracer Extension - Circom Deep Test', () => {
       const message =
         `Circom deep tests: trace not found at ${traceDir}\n` +
         'Run scripts/prepare-circom-fixture.sh to generate it.'
+      if (process.env.CI === 'true' || !!process.env.GITHUB_ACTIONS) {
+        throw new Error(message)
+      }
       console.warn(`SKIPPING ${message}`)
       this.skip()
     }

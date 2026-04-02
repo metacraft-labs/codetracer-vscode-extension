@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepare a pre-recorded Tolk (TON) trace fixture for WDIO tests.
 #
-# This script builds the codetracer-tolk-recorder, runs it against the
+# This script builds the codetracer-ton-recorder, runs it against the
 # flow_test.tolk test program, and copies the resulting trace to the fixture
 # directory used by the VS Code extension's WDIO smoke tests.
 #
@@ -12,14 +12,14 @@
 #
 # Prerequisites:
 #   - cargo (Rust toolchain) on PATH
-#   - codetracer-tolk-recorder repo at ../codetracer-tolk-recorder (relative
+#   - codetracer-ton-recorder repo at ../codetracer-ton-recorder (relative
 #     to this extension repo) or at $TOLK_RECORDER_DIR
 #
 # Usage:
 #   ./scripts/prepare-tolk-fixture.sh
 #
 # Environment variables:
-#   TOLK_RECORDER_DIR  — override path to codetracer-tolk-recorder repo
+#   TOLK_RECORDER_DIR  — override path to codetracer-ton-recorder repo
 #   FORCE=1            — re-record even if fixture already exists
 
 set -euo pipefail
@@ -28,12 +28,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/traces/tolk-flow-test"
 
-# Locate the codetracer-tolk-recorder repo (sibling directory)
-TOLK_RECORDER_DIR="${TOLK_RECORDER_DIR:-$(cd "$EXTENSION_DIR/../codetracer-tolk-recorder" 2>/dev/null && pwd || true)}"
+# Locate the codetracer-ton-recorder repo (sibling directory)
+TOLK_RECORDER_DIR="${TOLK_RECORDER_DIR:-$(cd "$EXTENSION_DIR/../codetracer-ton-recorder" 2>/dev/null && pwd || true)}"
 if [ -z "$TOLK_RECORDER_DIR" ] || [ ! -f "$TOLK_RECORDER_DIR/Cargo.toml" ]; then
-  echo "ERROR: codetracer-tolk-recorder repo not found."
-  echo "  Tried: $EXTENSION_DIR/../codetracer-tolk-recorder"
-  echo "  Set TOLK_RECORDER_DIR to the path of the codetracer-tolk-recorder repository."
+  echo "ERROR: codetracer-ton-recorder repo not found."
+  echo "  Tried: $EXTENSION_DIR/../codetracer-ton-recorder"
+  echo "  Set TOLK_RECORDER_DIR to the path of the codetracer-ton-recorder repository."
   exit 1
 fi
 
@@ -66,7 +66,7 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 
 # Build the recorder binary.
-echo "Building codetracer-tolk-recorder..."
+echo "Building codetracer-ton-recorder..."
 if command -v direnv >/dev/null 2>&1 && [ -f "$TOLK_RECORDER_DIR/.envrc" ]; then
   direnv exec "$TOLK_RECORDER_DIR" cargo build --manifest-path "$TOLK_RECORDER_DIR/Cargo.toml"
 else
@@ -74,7 +74,7 @@ else
 fi
 
 # Locate the built binary
-RECORDER_BIN="$TOLK_RECORDER_DIR/target/debug/codetracer-tolk-recorder"
+RECORDER_BIN="$TOLK_RECORDER_DIR/target/debug/codetracer-ton-recorder"
 if [ ! -x "$RECORDER_BIN" ]; then
   echo "ERROR: Recorder binary not found at $RECORDER_BIN"
   echo "  Build may have failed — check the cargo output above."

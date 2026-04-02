@@ -151,12 +151,20 @@ jobs:
             fi
           done
 
-          # Blockchain-specific recorder repos (for MASM, Sway, Move, Solana deep tests).
+          # Blockchain-specific recorder repos (for deep tests).
           for repo in \
             codetracer-miden-recorder \
             codetracer-fuel-recorder \
             codetracer-move-recorder \
             codetracer-solana-recorder \
+            codetracer-cardano-recorder \
+            codetracer-flow-recorder \
+            codetracer-cairo-recorder \
+            codetracer-circom-recorder \
+            codetracer-leo-recorder \
+            codetracer-polkavm-recorder \
+            codetracer-ton-recorder \
+            codetracer-evm-recorder \
           ; do
             if [ ! -d "$repo" ]; then
               git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${repo}.git"
@@ -192,6 +200,14 @@ jobs:
             scripts/prepare-sway-fixture.sh \
             scripts/prepare-move-fixture.sh \
             scripts/prepare-solana-fixture.sh \
+            scripts/prepare-aiken-fixture.sh \
+            scripts/prepare-cadence-fixture.sh \
+            scripts/prepare-cairo-fixture.sh \
+            scripts/prepare-circom-fixture.sh \
+            scripts/prepare-leo-fixture.sh \
+            scripts/prepare-polkavm-fixture.sh \
+            scripts/prepare-solidity-fixture.sh \
+            scripts/prepare-tolk-fixture.sh \
           ; do
             if [ -x "$script" ]; then
               echo "=== Running $script ==="
