@@ -78,12 +78,15 @@ describe('CodeTracer Extension - PolkaVM Deep Test', () => {
     const active = await session.isActive()
     expect(active).toBe(true)
 
+    // PolkaVM programs are binary blobs — no editor tab opens, so we must
+    // explicitly wait for the backend to finish initialization. Other languages
+    // use the editor tab wait (15s) as a natural barrier.
+    await session.waitForBackendReady()
+
     const location = await session.currentLocation()
     console.log('[PolkaVM] Initial location:', JSON.stringify(location))
     writeDiag('polkavm-session-start.json', { started, active, location })
   })
-
-  // PolkaVM programs are binary blobs — no editor tab assertions.
 
   // ==================================================================
   // DAP threads

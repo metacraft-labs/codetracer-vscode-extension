@@ -67,13 +67,15 @@ describe('CodeTracer Extension - PolkaVM Smoke Test', () => {
     await ext.ensureActivated()
     await assertSessionStarts(session, traceDir)
 
+    // PolkaVM programs are binary blobs (.polkavm) — VS Code cannot open them
+    // as text editor tabs. Other languages use the editor tab wait (15s) as a
+    // natural barrier for backend initialization; we must explicitly wait here.
+    await session.waitForBackendReady()
+
     const location = await session.currentLocation()
     console.log('[PolkaVM] Initial location:', JSON.stringify(location))
     writeDiag('polkavm-session-start.json', { location })
   })
-
-  // PolkaVM programs are binary blobs (.polkavm) — VS Code cannot open them
-  // as text editor tabs. Skip the editor tab assertion and test DAP directly.
 
   it('reports at least one DAP thread', async () => {
     await assertThreadsExist(session)

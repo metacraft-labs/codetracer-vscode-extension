@@ -53,10 +53,11 @@ const EVENT_LOG_TEXT = 'LOG1'
 // is a storage write (SSTORE opcode) that the recorder always captures.
 const STORAGE_VAR_NAME = 'storedA'
 
-// Number of step-overs needed to advance past the first SSTORE opcode in
-// compute(). The EVM trace starts at the function entry and needs several
-// source-level steps to reach `storedA = a` (line 13 in FlowTest.sol).
-const STEPS_BEFORE_LOCALS_CHECK = 10
+// Maximum step-overs to try before giving up on finding the variable.
+// The EVM recorder emits storage variables only at the exact step where
+// the SSTORE opcode executes — they are not carried forward. We step
+// iteratively and check locals at each step until we find the variable.
+const MAX_STEPS_FOR_LOCALS = 30
 
 const session = new DebugSession()
 const editor = new EditorPane()
@@ -127,22 +128,38 @@ describe('CodeTracer Extension - Solidity Smoke Test', () => {
   })
 
   it(`finds ${STORAGE_VAR_NAME} in local variables after stepping`, async () => {
-    // EVM traces require multiple step-overs to advance past the first
-    // variable assignment. We step forward enough times to reach the SSTORE
-    // opcode that writes storedA (line 13 in FlowTest.sol).
-    for (let i = 0; i < STEPS_BEFORE_LOCALS_CHECK; i++) {
-      await session.stepOver(1000)
+    // The EVM recorder emits storage variables only at the exact step where
+    // the SSTORE opcode executes — they are not carried forward to subsequent
+    // steps. We step iteratively and check locals at each step until we find
+    // the target variable or exhaust the budget.
+    let found = false
+    let lastLocals: any = null
+
+    for (let i = 0; i < MAX_STEPS_FOR_LOCALS; i++) {
+      await session.stepOver(500)
+
+      const result = await session.loadLocals({ lang: LANG_ID, countBudget: 100, depthLimit: 3 })
+      if (result.ok && result.data) {
+        lastLocals = result.data
+        const dataStr = JSON.stringify(result.data)
+        if (dataStr.includes(STORAGE_VAR_NAME)) {
+          console.log(`[Solidity] Found ${STORAGE_VAR_NAME} at step ${i + 1}`)
+          writeDiag('locals.json', result.data)
+          found = true
+          break
+        }
+        // Log non-empty locals for diagnostics
+        if (result.data.locals?.length > 0) {
+          console.log(`[Solidity] Step ${i + 1}: ${result.data.locals.length} locals, ` +
+            `names: ${result.data.locals.map((l: any) => l.name ?? l.variable_name).join(', ')}`)
+        }
+      }
     }
 
-    const result = await session.loadLocals({ lang: LANG_ID, countBudget: 100, depthLimit: 3 })
-    if (result.ok && result.data) {
-      const dataStr = JSON.stringify(result.data)
-      writeDiag('locals.json', result.data)
-      expect(dataStr).toContain(STORAGE_VAR_NAME)
-    } else {
-      console.warn('Locals did not return inline data:', result.error)
-      expect(result.ok).toBe(true)
+    if (!found) {
+      writeDiag('locals-last.json', lastLocals)
     }
+    expect(found).toBe(true)
   })
 
   it(`event log contains "${EVENT_LOG_TEXT}"`, async () => {

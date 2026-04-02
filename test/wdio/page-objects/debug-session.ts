@@ -99,6 +99,28 @@ export class DebugSession {
   }
 
   /**
+   * Wait for the DAP backend to finish initialization by polling threads.
+   *
+   * For traces with source files, the editor tab opening (waitUntil 15s)
+   * acts as a natural barrier. For binary-blob traces (e.g. PolkaVM) that
+   * skip the editor tab check, call this method after start() to ensure
+   * the backend's setup() has completed before sending further requests.
+   */
+  async waitForBackendReady(timeoutMs = 60000): Promise<void> {
+    await browser.waitUntil(
+      async () => {
+        const result = await this.getThreads()
+        return result.ok
+      },
+      {
+        timeout: timeoutMs,
+        interval: 2000,
+        timeoutMsg: `DAP backend not ready within ${timeoutMs / 1000}s (threads request did not succeed)`,
+      },
+    )
+  }
+
+  /**
    * Step over via DAP only — does not read the editor cursor.
    * Useful for binary-blob traces (e.g. PolkaVM) where VS Code may not
    * have an active text editor tab.
