@@ -75,11 +75,53 @@ fi
 rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
-# The Move recorder expects a raw NDJSON trace file as input. To produce one,
-# we need to run the Move VM with tracing enabled. For now, use the recorder's
-# built-in record subcommand which handles this end-to-end.
+# Step 1: Run `sui move test --trace-execution` to produce the NDJSON trace.
+# The trace files are written into <package>/build/<PackageName>/traces/.
+MOVE_PACKAGE_DIR="$MOVE_RECORDER_DIR/test-programs/move/flow_test"
+echo "Running sui move test --trace-execution in $MOVE_PACKAGE_DIR ..."
+recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace-execution --path "$MOVE_PACKAGE_DIR"
+
+# Step 2: Find the NDJSON trace file(s) in the build directory.
+# Sui writes traces to build/<PackageName>/traces/ as .json or .json.zst files.
+BUILD_DIR="$MOVE_PACKAGE_DIR/build"
+if [ ! -d "$BUILD_DIR" ]; then
+  echo "ERROR: Build directory not found at $BUILD_DIR"
+  echo "  sui move test --trace-execution may have failed — check the output above."
+  exit 1
+fi
+
+TRACE_FILE=""
+# Look for .json.zst first (compressed), then .json files under build/**/traces/
+for f in $(find "$BUILD_DIR" -type f \( -name '*.json.zst' -o -name '*.json' \) -path '*/traces/*' 2>/dev/null); do
+  TRACE_FILE="$f"
+  break
+done
+
+# Broader fallback: any .json file in the build directory that starts with a version header
+if [ -z "$TRACE_FILE" ]; then
+  for f in $(find "$BUILD_DIR" -type f -name '*.json' 2>/dev/null); do
+    if head -c 20 "$f" 2>/dev/null | grep -q '"version"'; then
+      TRACE_FILE="$f"
+      break
+    fi
+  done
+fi
+
+if [ -z "$TRACE_FILE" ]; then
+  echo "ERROR: No NDJSON trace file found in $BUILD_DIR after running sui move test."
+  echo "  Expected trace files under build/<PackageName>/traces/"
+  exit 1
+fi
+
+echo "Found trace file: $TRACE_FILE"
+
+# Step 3: Convert the NDJSON trace into CodeTracer format using the recorder.
 echo "Recording Move trace..."
-recorder_exec "$MOVE_RECORDER_DIR" "$RECORDER_BIN" record -o "$FIXTURE_DIR" "$SOURCE_FILE"
+recorder_exec "$MOVE_RECORDER_DIR" "$RECORDER_BIN" record \
+  --source "$SOURCE_FILE" \
+  --format binary \
+  -o "$FIXTURE_DIR" \
+  "$TRACE_FILE"
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then

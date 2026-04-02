@@ -79,6 +79,10 @@ recorder_exec "$SOLANA_RECORDER_DIR" bash -c \
   "cd \"$TEST_PROGRAM_DIR\" && cargo build-sbf 2>&1" || {
   echo "WARNING: cargo build-sbf failed — Solana SDK may not be available."
   echo "  The Solana fixture requires cargo-build-sbf to compile test programs."
+  if [ -n "$FORCE" ]; then
+    echo "  FORCE is set — treating as fatal error."
+    exit 1
+  fi
   echo "  Skipping Solana fixture generation (non-fatal)."
   exit 0
 }
@@ -90,6 +94,10 @@ if [ ! -f "$ELF_FILE" ]; then
   ELF_FILE="$(find "$TEST_PROGRAM_DIR/target" -name "*.so" -path "*/deploy/*" 2>/dev/null | head -1)"
   if [ -z "$ELF_FILE" ] || [ ! -f "$ELF_FILE" ]; then
     echo "WARNING: Compiled .so ELF not found after cargo build-sbf."
+    if [ -n "$FORCE" ]; then
+      echo "  FORCE is set — treating as fatal error."
+      exit 1
+    fi
     echo "  Skipping Solana fixture generation (non-fatal)."
     exit 0
   fi

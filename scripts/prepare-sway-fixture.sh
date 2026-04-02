@@ -77,6 +77,14 @@ if [ ! -f "$FIXTURE_DIR/trace.json" ] && [ ! -f "$FIXTURE_DIR/trace.bin" ]; then
   exit 1
 fi
 
+# Copy the Sway source file alongside the trace so the DAP server can resolve
+# source references.  The trace embeds a relative path "flow_test.sw", so we
+# copy the real test-program source under that name.
+SWAY_SOURCE="$FUEL_RECORDER_DIR/test-programs/flow_test/src/main.sw"
+if [ -f "$SWAY_SOURCE" ] && [ ! -f "$FIXTURE_DIR/flow_test.sw" ]; then
+  cp "$SWAY_SOURCE" "$FIXTURE_DIR/flow_test.sw"
+fi
+
 echo ""
 echo "=== Sway trace fixture ready ==="
 echo "  Location: $FIXTURE_DIR"
