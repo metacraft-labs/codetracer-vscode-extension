@@ -211,7 +211,7 @@ jobs:
           ; do
             if [ -x "$script" ]; then
               echo "=== Running $script ==="
-              nix develop -c bash "$script" || echo "WARNING: $script failed (non-fatal)"
+              bash "$script" || echo "WARNING: $script failed (non-fatal)"
             else
               echo "WARNING: $script not found or not executable"
             fi

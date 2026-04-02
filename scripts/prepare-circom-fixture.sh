@@ -24,6 +24,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/recorder-shell-exec.sh"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/traces/circom-flow-test"
@@ -58,20 +60,8 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
   fi
 fi
 
-# Check prerequisites
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "ERROR: cargo not found on PATH."
-  echo "  Install the Rust toolchain or enter nix develop in $CIRCOM_RECORDER_DIR."
-  exit 1
-fi
-
-# Build the recorder binary.
 echo "Building codetracer-circom-recorder..."
-if command -v direnv >/dev/null 2>&1 && [ -f "$CIRCOM_RECORDER_DIR/.envrc" ]; then
-  direnv exec "$CIRCOM_RECORDER_DIR" cargo build --manifest-path "$CIRCOM_RECORDER_DIR/Cargo.toml"
-else
-  cargo build --manifest-path "$CIRCOM_RECORDER_DIR/Cargo.toml"
-fi
+recorder_exec "$CIRCOM_RECORDER_DIR" cargo build --manifest-path "$CIRCOM_RECORDER_DIR/Cargo.toml"
 
 # Locate the built binary
 RECORDER_BIN="$CIRCOM_RECORDER_DIR/target/debug/codetracer-circom-recorder"
@@ -86,7 +76,7 @@ rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
 echo "Recording Circom trace..."
-"$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
+recorder_exec "$CIRCOM_RECORDER_DIR" "$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then

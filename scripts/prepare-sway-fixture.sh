@@ -24,6 +24,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/recorder-shell-exec.sh"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/traces/sway-flow-test"
@@ -59,20 +61,8 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
   fi
 fi
 
-# Check prerequisites
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "ERROR: cargo not found on PATH."
-  echo "  Install the Rust toolchain or enter nix develop in $FUEL_RECORDER_DIR."
-  exit 1
-fi
-
-# Build the recorder binary
 echo "Building codetracer-fuel-recorder..."
-if command -v direnv >/dev/null 2>&1 && [ -f "$FUEL_RECORDER_DIR/.envrc" ]; then
-  direnv exec "$FUEL_RECORDER_DIR" cargo build --manifest-path "$FUEL_RECORDER_DIR/Cargo.toml"
-else
-  cargo build --manifest-path "$FUEL_RECORDER_DIR/Cargo.toml"
-fi
+recorder_exec "$FUEL_RECORDER_DIR" cargo build --manifest-path "$FUEL_RECORDER_DIR/Cargo.toml"
 
 # Locate the built binary
 RECORDER_BIN="$FUEL_RECORDER_DIR/target/debug/codetracer-fuel-recorder"
@@ -87,7 +77,7 @@ rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
 echo "Recording Sway trace..."
-"$RECORDER_BIN" record "$PROJECT_DIR" -o "$FIXTURE_DIR"
+recorder_exec "$FUEL_RECORDER_DIR" "$RECORDER_BIN" record "$PROJECT_DIR" -o "$FIXTURE_DIR"
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then

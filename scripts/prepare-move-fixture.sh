@@ -24,6 +24,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/recorder-shell-exec.sh"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/traces/move-flow-test"
@@ -58,20 +60,8 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
   fi
 fi
 
-# Check prerequisites
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "ERROR: cargo not found on PATH."
-  echo "  Install the Rust toolchain or enter nix develop in $MOVE_RECORDER_DIR."
-  exit 1
-fi
-
-# Build the recorder binary
 echo "Building codetracer-move-recorder..."
-if command -v direnv >/dev/null 2>&1 && [ -f "$MOVE_RECORDER_DIR/.envrc" ]; then
-  direnv exec "$MOVE_RECORDER_DIR" cargo build --manifest-path "$MOVE_RECORDER_DIR/Cargo.toml"
-else
-  cargo build --manifest-path "$MOVE_RECORDER_DIR/Cargo.toml"
-fi
+recorder_exec "$MOVE_RECORDER_DIR" cargo build --manifest-path "$MOVE_RECORDER_DIR/Cargo.toml"
 
 # Locate the built binary
 RECORDER_BIN="$MOVE_RECORDER_DIR/target/debug/codetracer-move-recorder"
@@ -89,7 +79,7 @@ mkdir -p "$FIXTURE_DIR"
 # we need to run the Move VM with tracing enabled. For now, use the recorder's
 # built-in record subcommand which handles this end-to-end.
 echo "Recording Move trace..."
-"$RECORDER_BIN" record -o "$FIXTURE_DIR" "$SOURCE_FILE"
+recorder_exec "$MOVE_RECORDER_DIR" "$RECORDER_BIN" record -o "$FIXTURE_DIR" "$SOURCE_FILE"
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then

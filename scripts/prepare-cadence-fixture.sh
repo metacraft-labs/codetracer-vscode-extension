@@ -24,6 +24,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/recorder-shell-exec.sh"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/traces/cadence-flow-test"
@@ -59,34 +61,14 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
 fi
 
 # The Cadence recorder may be Go-based or Rust-based depending on version.
-# Try to build with the available toolchain.
+# Build with the available toolchain via recorder_exec.
 if [ -f "$CADENCE_RECORDER_DIR/Cargo.toml" ]; then
-  if ! command -v cargo >/dev/null 2>&1; then
-    echo "ERROR: cargo not found on PATH."
-    echo "  Install the Rust toolchain or enter nix develop in $CADENCE_RECORDER_DIR."
-    exit 1
-  fi
-
   echo "Building codetracer-flow-recorder (Rust)..."
-  if command -v direnv >/dev/null 2>&1 && [ -f "$CADENCE_RECORDER_DIR/.envrc" ]; then
-    direnv exec "$CADENCE_RECORDER_DIR" cargo build --manifest-path "$CADENCE_RECORDER_DIR/Cargo.toml"
-  else
-    cargo build --manifest-path "$CADENCE_RECORDER_DIR/Cargo.toml"
-  fi
+  recorder_exec "$CADENCE_RECORDER_DIR" cargo build --manifest-path "$CADENCE_RECORDER_DIR/Cargo.toml"
   RECORDER_BIN="$CADENCE_RECORDER_DIR/target/debug/codetracer-flow-recorder"
 elif [ -f "$CADENCE_RECORDER_DIR/go.mod" ]; then
-  if ! command -v go >/dev/null 2>&1; then
-    echo "ERROR: go not found on PATH."
-    echo "  Install the Go toolchain or enter nix develop in $CADENCE_RECORDER_DIR."
-    exit 1
-  fi
-
   echo "Building codetracer-flow-recorder (Go)..."
-  if command -v direnv >/dev/null 2>&1 && [ -f "$CADENCE_RECORDER_DIR/.envrc" ]; then
-    direnv exec "$CADENCE_RECORDER_DIR" go build -o "$CADENCE_RECORDER_DIR/codetracer-flow-recorder" "$CADENCE_RECORDER_DIR/cmd/recorder"
-  else
-    (cd "$CADENCE_RECORDER_DIR" && go build -o codetracer-flow-recorder ./cmd/recorder)
-  fi
+  recorder_exec "$CADENCE_RECORDER_DIR" go build -o "$CADENCE_RECORDER_DIR/codetracer-flow-recorder" "$CADENCE_RECORDER_DIR/cmd/recorder"
   RECORDER_BIN="$CADENCE_RECORDER_DIR/codetracer-flow-recorder"
 else
   echo "ERROR: No Cargo.toml or go.mod found in $CADENCE_RECORDER_DIR."
@@ -104,7 +86,7 @@ rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
 echo "Recording Cadence trace..."
-"$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
+recorder_exec "$CADENCE_RECORDER_DIR" "$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then

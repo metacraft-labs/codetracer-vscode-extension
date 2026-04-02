@@ -24,6 +24,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/recorder-shell-exec.sh"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/traces/masm-flow-test"
@@ -58,21 +60,8 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
   fi
 fi
 
-# Check prerequisites
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "ERROR: cargo not found on PATH."
-  echo "  Install the Rust toolchain or enter nix develop in $MIDEN_RECORDER_DIR."
-  exit 1
-fi
-
-# Build the recorder binary. The Miden recorder uses `cargo run` in its CLI
-# tests, so we build via cargo build and locate the binary afterward.
 echo "Building codetracer-miden-recorder..."
-if command -v direnv >/dev/null 2>&1 && [ -f "$MIDEN_RECORDER_DIR/.envrc" ]; then
-  direnv exec "$MIDEN_RECORDER_DIR" cargo build --manifest-path "$MIDEN_RECORDER_DIR/Cargo.toml"
-else
-  cargo build --manifest-path "$MIDEN_RECORDER_DIR/Cargo.toml"
-fi
+recorder_exec "$MIDEN_RECORDER_DIR" cargo build --manifest-path "$MIDEN_RECORDER_DIR/Cargo.toml"
 
 # Locate the built binary
 RECORDER_BIN="$MIDEN_RECORDER_DIR/target/debug/codetracer-miden-recorder"
@@ -87,7 +76,7 @@ rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
 echo "Recording MASM trace..."
-"$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
+recorder_exec "$MIDEN_RECORDER_DIR" "$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then

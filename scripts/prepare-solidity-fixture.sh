@@ -27,6 +27,8 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/recorder-shell-exec.sh"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/traces/solidity-flow-test"
@@ -61,34 +63,13 @@ if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "$
   fi
 fi
 
-# Check prerequisites
-if ! command -v solc >/dev/null 2>&1; then
-  echo "ERROR: solc not found on PATH."
-  echo "  Install solc or enter nix develop in $EVM_RECORDER_DIR."
-  exit 1
-fi
-if ! command -v anvil >/dev/null 2>&1; then
-  echo "ERROR: anvil not found on PATH."
-  echo "  Install Foundry (https://getfoundry.sh) or enter nix develop in $EVM_RECORDER_DIR."
-  exit 1
-fi
-if ! command -v cargo >/dev/null 2>&1; then
-  echo "ERROR: cargo not found on PATH."
-  exit 1
-fi
-
 # Create the fixture directory
 rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
 echo "Running EVM recorder e2e test with fixture export..."
-cd "$EVM_RECORDER_DIR"
-
-# Run the ignored e2e test with the fixture output directory set.
-# The test compiles FlowTest.sol, deploys to anvil, calls compute(), and
-# writes trace files to SOLIDITY_FIXTURE_OUTPUT_DIR.
-SOLIDITY_FIXTURE_OUTPUT_DIR="$FIXTURE_DIR" \
-  cargo test --test test_e2e_trace -- --ignored --nocapture test_e2e_trace
+recorder_exec "$EVM_RECORDER_DIR" bash -c \
+  "cd \"$EVM_RECORDER_DIR\" && SOLIDITY_FIXTURE_OUTPUT_DIR=\"$FIXTURE_DIR\" cargo test --test test_e2e_trace -- --ignored --nocapture test_e2e_trace"
 
 # Verify the fixture was created
 if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then
