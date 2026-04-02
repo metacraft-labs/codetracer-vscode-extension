@@ -17,9 +17,10 @@ recorder_exec() {
   shift
 
   if command -v direnv >/dev/null 2>&1 && [ -f "$repo_dir/.envrc" ]; then
+    direnv allow "$repo_dir"
     direnv exec "$repo_dir" "$@"
   elif [ -f "$repo_dir/flake.nix" ] && command -v nix >/dev/null 2>&1; then
-    nix develop "$repo_dir" -c "$@"
+    nix develop "$repo_dir" --accept-flake-config -c "$@"
   else
     "$@"
   fi
