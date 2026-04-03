@@ -85,6 +85,31 @@ if [ -f "$SWAY_SOURCE" ] && [ ! -f "$FIXTURE_DIR/flow_test.sw" ]; then
   cp "$SWAY_SOURCE" "$FIXTURE_DIR/flow_test.sw"
 fi
 
+# Patch trace_metadata.json so that "workdir" points to the fixture directory.
+# The recorder writes the CWD at recording time, but the db-backend joins
+# workdir + relative source path to resolve files.  After copying the source
+# file above, the fixture directory is the correct workdir.
+if command -v python3 &>/dev/null; then
+  python3 -c "
+import json, sys
+p = '$FIXTURE_DIR/trace_metadata.json'
+with open(p) as f:
+    meta = json.load(f)
+meta['workdir'] = '$FIXTURE_DIR'
+with open(p, 'w') as f:
+    json.dump(meta, f)
+"
+  echo "Patched trace_metadata.json workdir → $FIXTURE_DIR"
+elif command -v jq &>/dev/null; then
+  tmp="$FIXTURE_DIR/trace_metadata.tmp.json"
+  jq --arg w "$FIXTURE_DIR" '.workdir = $w' "$FIXTURE_DIR/trace_metadata.json" > "$tmp"
+  mv "$tmp" "$FIXTURE_DIR/trace_metadata.json"
+  echo "Patched trace_metadata.json workdir → $FIXTURE_DIR"
+else
+  echo "WARNING: neither python3 nor jq found — cannot patch trace_metadata.json workdir."
+  echo "  The DAP server may fail to resolve source files."
+fi
+
 echo ""
 echo "=== Sway trace fixture ready ==="
 echo "  Location: $FIXTURE_DIR"
