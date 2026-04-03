@@ -79,34 +79,30 @@ record_trace() {
 	rm -rf "$trace_dir"
 	mkdir -p "$trace_dir"
 
-	# Record the trace. ct record outputs a traceId line we need to capture.
+	# Record the trace directly into the target directory using -o.
 	local ct_output
-	if ct_output=$("$CT" record "$program" 2>&1); then
-		# Extract the trace ID from ct output (format: "traceId: <id>")
-		local trace_id
-		trace_id=$(echo "$ct_output" | grep -oP 'traceId:\s*\K\S+' || true)
-
-		if [ -n "$trace_id" ]; then
-			# Get the trace output folder from ct trace-metadata
-			local output_folder
-			output_folder=$("$CT" trace-metadata --id="$trace_id" 2>/dev/null | grep -oP 'outputFolder:\s*\K.*' || true)
-
-			if [ -n "$output_folder" ] && [ -d "$output_folder" ]; then
-				# Copy trace files to our traces directory
-				cp -r "$output_folder"/* "$trace_dir/"
-				echo "    OK → $trace_dir"
-				_recorded=$((_recorded + 1))
-				return 0
-			fi
+	if ct_output=$("$CT" record -o "$trace_dir" "$program" 2>&1); then
+		# Verify that ct produced trace metadata in the target directory.
+		if [ -f "$trace_dir/trace_metadata.json" ]; then
+			echo "    OK → $trace_dir"
+			_recorded=$((_recorded + 1))
+			return 0
 		fi
 
-		# Fallback: check if ct record wrote directly to a known location
-		echo "    WARN: could not extract trace location from ct output"
-		echo "    ct output: ${ct_output:0:200}"
+		# Fallback: check if trace.json was written (some recorders
+		# produce trace.json but not trace_metadata.json immediately).
+		if [ -f "$trace_dir/trace.json" ]; then
+			echo "    OK (partial) → $trace_dir"
+			_recorded=$((_recorded + 1))
+			return 0
+		fi
+
+		echo "    WARN: ct record succeeded but trace files not found in $trace_dir"
+		echo "    ct output: ${ct_output:0:300}"
 		_failed=$((_failed + 1))
 	else
 		echo "    FAIL: ct record failed for $name"
-		echo "    ${ct_output:0:200}"
+		echo "    ${ct_output:0:300}"
 		_failed=$((_failed + 1))
 	fi
 }

@@ -110,6 +110,12 @@ jobs:
     runs-on: [self-hosted, nixos]
     if: github.event_name == 'push' || !contains(github.event.pull_request.labels.*.name, 'skip-integration')
 
+    # CI runners typically lack hardware performance counters, so use rr's
+    # software counter mode (-W flag) for recording and replaying native
+    # language traces (Rust, C, Go, Nim).
+    env:
+      CODETRACER_RR_SOFT_MODE: "1"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -189,6 +195,52 @@ jobs:
           nix build -L ".?submodules=1#codetracer" $FLAKE_OVERRIDE
           nix build -L ".?submodules=1#db-backend" $FLAKE_OVERRIDE -o result-db-backend
 
+      # Build recorder components that ct needs to record traces for each
+      # language family.  These are separate repos (restored as siblings above)
+      # with their own flake.nix.  The built binaries are symlinked into
+      # COMBINED_BIN below so ct can discover them via PATH.
+      - name: Build ct-rr-support (native language recording)
+        run: |
+          if [ -d ../codetracer-rr-backend ]; then
+            cd ../codetracer-rr-backend
+            nix build -L ".?submodules=1#codetracer-rr-support" -o result-rr-support
+          else
+            echo "WARNING: codetracer-rr-backend not found — native language recording will fail"
+          fi
+
+      - name: Build codetracer-ruby-recorder
+        run: |
+          if [ -d ../codetracer-ruby-recorder ]; then
+            cd ../codetracer-ruby-recorder
+            nix build -L ".#codetracer-ruby-recorder" -o result-ruby-recorder
+          else
+            echo "WARNING: codetracer-ruby-recorder not found — Ruby recording will fail"
+          fi
+
+      # The Python recorder is a Rust-backed Python module (PyO3/maturin).
+      # We pip-install it into a venv using the recorder repo's own dev shell
+      # (which provides the Rust toolchain, capnproto, and Python needed to
+      # compile the native extension).  The default dev shell has multiple
+      # Python versions; the package requires >=3.12, so we use python3.12.
+      - name: Set up Python recorder
+        run: |
+          if [ -d ../codetracer-python-recorder/codetracer-python-recorder ]; then
+            VENV_DIR="$(pwd)/.python-recorder-venv"
+            cd ../codetracer-python-recorder
+            nix develop . --accept-flake-config -c bash -c '
+              python3.12 -m venv "'"$VENV_DIR"'"
+              "'"$VENV_DIR"'/bin/pip" install --quiet \
+                ./codetracer-python-recorder 2>&1 | tail -5
+            '
+            if "$VENV_DIR/bin/python" -c "import codetracer_python_recorder" 2>/dev/null; then
+              echo "Python recorder installed successfully."
+            else
+              echo "WARNING: Failed to install codetracer_python_recorder."
+            fi
+          else
+            echo "WARNING: codetracer-python-recorder not found — Python recording will fail"
+          fi
+
       - name: Install dependencies
         run: nix develop -c just install
 
@@ -210,11 +262,22 @@ jobs:
           COMBINED_BIN="$(pwd)/.ct-bin"
           mkdir -p "$COMBINED_BIN"
           # Symlink ct from the codetracer package.
-          CT_SRC="$(realpath ../codetracer/result/bin/ct 2>/dev/null || true)"
-          if [ -x "$CT_SRC" ]; then
+          # Try multiple locations: nix build result, then build-debug.
+          CT_SRC=""
+          for candidate in \
+            ../codetracer/result/bin/ct \
+            ../codetracer/src/build-debug/bin/ct; do
+            resolved="$(realpath "$candidate" 2>/dev/null || true)"
+            if [ -x "$resolved" ]; then
+              CT_SRC="$resolved"
+              break
+            fi
+          done
+          if [ -n "$CT_SRC" ]; then
             ln -sf "$CT_SRC" "$COMBINED_BIN/ct"
+            echo "ct binary: $CT_SRC"
           else
-            echo "WARNING: ct binary not found in ../codetracer/result/bin/"
+            echo "WARNING: ct binary not found in ../codetracer/result/bin/ or ../codetracer/src/build-debug/bin/"
           fi
           # Symlink db-backend from the db-backend package.
           DB_SRC="$(realpath ../codetracer/result-db-backend/bin/db-backend 2>/dev/null || true)"
@@ -222,6 +285,22 @@ jobs:
             ln -sf "$DB_SRC" "$COMBINED_BIN/db-backend"
           else
             echo "WARNING: db-backend not found in ../codetracer/result-db-backend/bin/"
+          fi
+          # Symlink ct-rr-support for native language recording (Rust, C, Go, Nim).
+          RR_SRC="$(realpath ../codetracer-rr-backend/result-rr-support/bin/ct-rr-support 2>/dev/null || true)"
+          if [ -x "$RR_SRC" ]; then
+            ln -sf "$RR_SRC" "$COMBINED_BIN/ct-rr-support"
+            echo "ct-rr-support: $RR_SRC"
+          else
+            echo "WARNING: ct-rr-support not found — native language recording will fail"
+          fi
+          # Symlink codetracer-ruby-recorder for Ruby recording.
+          RUBY_REC_SRC="$(realpath ../codetracer-ruby-recorder/result-ruby-recorder/bin/codetracer-ruby-recorder 2>/dev/null || true)"
+          if [ -x "$RUBY_REC_SRC" ]; then
+            ln -sf "$RUBY_REC_SRC" "$COMBINED_BIN/codetracer-ruby-recorder"
+            echo "codetracer-ruby-recorder: $RUBY_REC_SRC"
+          else
+            echo "WARNING: codetracer-ruby-recorder not found — Ruby recording will fail"
           fi
           echo "Combined bin directory:"
           ls -la "$COMBINED_BIN"
@@ -232,6 +311,10 @@ jobs:
           cat test/wdio/projects/stylus-test/.vscode/settings.json
           # Also add to PATH for the extension's findInPath fallback.
           echo "$COMBINED_BIN" >> "$GITHUB_PATH"
+          # Set Python recorder interpreter for Python recording.
+          if [ -x "$(pwd)/.python-recorder-venv/bin/python" ]; then
+            echo "CODETRACER_PYTHON_INTERPRETER=$(pwd)/.python-recorder-venv/bin/python" >> "$GITHUB_ENV"
+          fi
 
       - name: Record test traces
         run: nix develop -c just record-test-traces

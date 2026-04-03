@@ -28,8 +28,11 @@ recorder_exec() {
   fi
 
   # Strategy 2: nix develop (slower — builds the dev shell from flake.nix).
-  # Skipped in CI where the outer nix develop already provides tools.
-  if [ -z "${CI:-}" ] && [ -f "$repo_dir/flake.nix" ] && command -v nix >/dev/null 2>&1; then
+  # Each recorder repo has its own flake.nix with the toolchain needed to
+  # build and run it.  In CI, the outer nix develop shell (from the extension
+  # repo) does NOT include these toolchains, so we must enter the recorder's
+  # dev shell to get the right tools.
+  if [ -f "$repo_dir/flake.nix" ] && command -v nix >/dev/null 2>&1; then
     if nix develop "$repo_dir" --accept-flake-config -c "$@"; then
       return 0
     fi
