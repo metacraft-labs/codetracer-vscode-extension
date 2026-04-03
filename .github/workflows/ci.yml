@@ -175,7 +175,8 @@ jobs:
             [ "$name" = "codetracer" ] && continue
             dest="${GITHUB_WORKSPACE}/../${name}"
             if [ -d "$dest" ]; then
-              echo "[$name] Already exists, skipping"
+              echo "[$name] Already exists — ensuring submodules are initialized"
+              git -C "$dest" submodule update --init --recursive 2>/dev/null || true
               continue
             fi
             echo "[$name] Cloning at $sha (branch: $branch)"
