@@ -34,6 +34,9 @@ const TRACE_NAME = 'aiken-flow-test'
 const KNOWN_FUNCTIONS = ['compute']
 const KNOWN_VARIABLES = ['a', 'b']
 
+// Maximum step-ins to find a variable with a value when iterating.
+const MAX_STEPS_FOR_LOCALS = 12
+
 const session = new DebugSession()
 const editor = new EditorPane()
 const ext = new ExtensionState()
@@ -163,64 +166,63 @@ describe('CodeTracer Extension - Aiken (Cardano) Deep Test', () => {
   // Locals: verify variable values (not just names)
   // ==================================================================
 
-  it('loads locals with variable values including a', async () => {
-    // The initial position is at the test entry (single-line body calling
-    // compute()). Step into compute() and advance past variable assignments.
-    const stepInLoc = await session.stepIn(3000)
-    console.log('[Aiken] Stepped into:', JSON.stringify(stepInLoc))
-    for (let i = 0; i < 3; i++) {
-      const loc = await session.stepOver(2000)
-      console.log(`[Aiken] Step ${i + 1}:`, JSON.stringify(loc))
-    }
+  it('finds variable with value after stepping into compute', async () => {
+    // The entry function is merged into <toplevel> (depth 0). compute() is a
+    // nested call at depth 1. We step forward iteratively with step-in to
+    // enter compute() and reach the assignment steps where locals are populated.
+    let found = false
+    let lastLocals: any = null
 
-    const result = await session.loadLocals({ lang: 'Aiken', countBudget: 100, depthLimit: 3 })
-    expect(result.ok).toBe(true)
-    writeDiag('aiken-deep-locals.json', result.data)
+    for (let i = 0; i < MAX_STEPS_FOR_LOCALS; i++) {
+      await session.stepIn(500)
 
-    if (result.data) {
-      const dataStr = JSON.stringify(result.data)
-
-      // Verify known variable names are present. In the CEK machine execution,
-      // `a` and `b` are bound as local variables in the compute validator.
-      const foundVars = KNOWN_VARIABLES.filter(v => dataStr.includes(v))
-      console.log('[Aiken] Found variables:', foundVars)
-
-      // At least the primary variable (a) should exist
-      expect(dataStr).toContain('a')
-
-      // Verify at least one variable has a non-empty value
-      if (result.data.locals && Array.isArray(result.data.locals)) {
-        console.log('[Aiken] Total locals:', result.data.locals.length)
-
-        const withValues = result.data.locals.filter(
-          (l: any) => l.value !== undefined && l.value !== null && String(l.value).length > 0,
-        )
-        console.log(`[Aiken] Locals with values: ${withValues.length}/${result.data.locals.length}`)
-        expect(withValues.length).toBeGreaterThan(0)
-
-        // Log first few for diagnostics
-        for (const v of withValues.slice(0, 5)) {
-          console.log(`  ${v.name ?? v.variable_name}: ${JSON.stringify(v.value).substring(0, 80)}`)
+      const result = await session.loadLocals({ lang: 'Aiken', countBudget: 100, depthLimit: 3 })
+      if (result.ok && result.data) {
+        lastLocals = result.data
+        const dataStr = JSON.stringify(result.data)
+        if (dataStr.includes('a')) {
+          if (result.data.locals && Array.isArray(result.data.locals)) {
+            const withValues = result.data.locals.filter(
+              (l: any) => l.value !== undefined && l.value !== null && String(l.value).length > 0,
+            )
+            if (withValues.length > 0) {
+              console.log(`[Aiken] Found variable 'a' with value at step ${i + 1}`)
+              writeDiag('aiken-deep-locals.json', result.data)
+              for (const v of withValues.slice(0, 5)) {
+                console.log(`  ${v.name ?? v.variable_name}: ${JSON.stringify(v.value).substring(0, 80)}`)
+              }
+              found = true
+              break
+            }
+          }
+        }
+        if (result.data.locals?.length > 0) {
+          console.log(`[Aiken] Step ${i + 1}: ${result.data.locals.length} locals, ` +
+            `names: ${result.data.locals.map((l: any) => l.name ?? l.variable_name).join(', ')}`)
         }
       }
     }
+
+    if (!found) {
+      writeDiag('aiken-deep-locals-last.json', lastLocals)
+    }
+    expect(found).toBe(true)
   })
 
   // ==================================================================
   // Step navigation: multi-step and line change verification
   // ==================================================================
 
-  it('performs multiple step-over operations and changes line', async () => {
-    // After the locals test, we should already be inside compute().
+  it('performs multiple step-in operations and changes line', async () => {
+    // Use step-in to advance through the trace regardless of call depth.
     const current = await session.currentLocation()
     console.log('[Aiken] Pre-step location:', JSON.stringify(current))
 
     const locations: Array<{ file: string; line: number }> = [current]
 
     for (let i = 0; i < 5; i++) {
-      const loc = await session.stepOver(3000)
+      const loc = await session.stepIn(3000)
       locations.push(loc)
-      // Each step should land in a source file with a valid line
       expect(loc.file.length).toBeGreaterThan(0)
       expect(loc.line).toBeGreaterThan(0)
     }
@@ -228,7 +230,7 @@ describe('CodeTracer Extension - Aiken (Cardano) Deep Test', () => {
     writeDiag('aiken-deep-multi-step.json', locations)
     console.log('[Aiken] Multi-step locations:', JSON.stringify(locations))
 
-    // Verify we actually moved — inside compute(), lines should change.
+    // Verify we actually moved — lines should change across steps.
     const uniqueLines = new Set(locations.map(l => l.line))
     expect(uniqueLines.size).toBeGreaterThan(1)
   })
