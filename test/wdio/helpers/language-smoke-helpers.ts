@@ -45,6 +45,11 @@ export interface LanguageSmokeConfig {
    *  (e.g., `main() { return compute() }`) and step-over would jump to
    *  the end of the trace. */
   useStepIn?: boolean
+  /** Extra step-overs before loading locals. Some recorders (e.g., Ruby)
+   *  only capture variables at certain trace positions, so the single
+   *  step-over from the navigation test may land on a position without
+   *  locals. This advances the debugger further into the trace. */
+  extraStepsForLocals?: number
 }
 
 // ---- Individual assertion functions ----
@@ -324,7 +329,12 @@ export function defineLanguageSmokeTests(config: LanguageSmokeConfig): void {
       await assertStepWorks(session, config.useStepIn)
     })
 
-    it(`finds ${config.variableName} in local variables`, async () => {
+    it(`finds ${config.variableName} in local variables${config.extraStepsForLocals ? ' after stepping' : ''}`, async () => {
+      if (config.extraStepsForLocals) {
+        for (let i = 0; i < config.extraStepsForLocals; i++) {
+          await session.stepOver(2000)
+        }
+      }
       await assertLocalsContainVariable(session, config.variableName, config.langId)
     })
 
