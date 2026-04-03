@@ -342,16 +342,15 @@ jobs:
             just record-test-traces
           "
 
-      # Symlink rr into COMBINED_BIN so ct-rr-support can find it at
-      # replay time. The rr-backend dev shell's shellHook creates a
-      # symlink at target/debug/rr → the rrWrapper (which handles
-      # CODETRACER_RR_SOFT_MODE). This symlink was created during the
-      # "Record test traces" step's `nix develop` invocation.
-      - name: Symlink rr for trace replay
+      # Symlink rr, dlv, and gdb into COMBINED_BIN so ct-rr-support can
+      # find them at replay time. The rr-backend dev shell's shellHook
+      # creates symlinks at target/debug/{rr,dlv,gdb}. These were
+      # created during the "Record test traces" step's `nix develop`.
+      - name: Symlink replay tools (rr, dlv, gdb)
         run: |
           COMBINED_BIN="$GITHUB_WORKSPACE/.ct-bin"
           RR_BACKEND="../codetracer-rr-backend"
-          # The rr-backend shellHook symlinks rrWrapper → target/debug/rr.
+          # rr is required — fail if missing.
           RR_PATH="$(realpath "$RR_BACKEND/target/debug/rr" 2>/dev/null || true)"
           echo "rr-backend target/debug/rr resolves to: '$RR_PATH'"
           if [ -n "$RR_PATH" ] && [ -x "$RR_PATH" ]; then
@@ -363,6 +362,24 @@ jobs:
             ls -la "$RR_BACKEND/target/debug/" 2>/dev/null || echo "  (directory does not exist)"
             exit 1
           fi
+          # dlv (Delve) is needed for Go trace replay.
+          DLV_PATH="$(realpath "$RR_BACKEND/target/debug/dlv" 2>/dev/null || true)"
+          if [ -n "$DLV_PATH" ] && [ -x "$DLV_PATH" ]; then
+            ln -sf "$DLV_PATH" "$COMBINED_BIN/dlv"
+            echo "dlv symlinked: $DLV_PATH → $COMBINED_BIN/dlv"
+          else
+            echo "WARNING: dlv not found at $RR_BACKEND/target/debug/dlv — Go replay may fail"
+          fi
+          # gdb is needed for some native language debugging.
+          GDB_PATH="$(realpath "$RR_BACKEND/target/debug/gdb" 2>/dev/null || true)"
+          if [ -n "$GDB_PATH" ] && [ -x "$GDB_PATH" ]; then
+            ln -sf "$GDB_PATH" "$COMBINED_BIN/gdb"
+            echo "gdb symlinked: $GDB_PATH → $COMBINED_BIN/gdb"
+          else
+            echo "WARNING: gdb not found at $RR_BACKEND/target/debug/gdb"
+          fi
+          echo "COMBINED_BIN contents:"
+          ls -la "$COMBINED_BIN"
 
       - name: Prepare blockchain trace fixtures
         run: |
