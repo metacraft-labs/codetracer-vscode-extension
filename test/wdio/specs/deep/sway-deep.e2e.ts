@@ -12,7 +12,7 @@
  * records the flow_test contract's main() function which performs arithmetic
  * on u64 values in the Fuel VM.
  *
- * Source: codetracer-fuel-recorder/test-programs/flow_test/src/main.sw
+ * Source: codetracer-fuel-recorder/test-programs/flow_test/src/flow_test.sw
  */
 import { browser, expect } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
@@ -21,7 +21,7 @@ import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 
 const TRACE_NAME = 'sway-flow-test'
 
-// ---- Known trace data (flow_test main.sw) ----
+// ---- Known trace data (flow_test flow_test.sw) ----
 // The main() function performs arithmetic: sum_val = a + b, etc.
 // main() is merged into <toplevel> by the recorder to keep steps at depth 0.
 const KNOWN_FUNCTIONS = ['<toplevel>']
@@ -76,15 +76,15 @@ describe('CodeTracer Extension - Sway (Fuel) Deep Test', () => {
   })
 
   // ==================================================================
-  // Editor: verify main.sw opens
+  // Editor: verify flow_test.sw opens
   // ==================================================================
 
-  it('opens main.sw in the editor', async () => {
-    const hasTab = await editor.hasOpenTab('main.sw')
+  it('opens flow_test.sw in the editor', async () => {
+    const hasTab = await editor.hasOpenTab('flow_test.sw')
     if (!hasTab) {
       await browser.waitUntil(
-        async () => editor.hasOpenTab('main.sw'),
-        { timeout: 15000, timeoutMsg: 'main.sw tab did not open within 15s' },
+        async () => editor.hasOpenTab('flow_test.sw'),
+        { timeout: 15000, timeoutMsg: 'flow_test.sw tab did not open within 15s' },
       )
     }
 
@@ -92,7 +92,7 @@ describe('CodeTracer Extension - Sway (Fuel) Deep Test', () => {
       for (const group of vscode.window.tabGroups.all) {
         for (const tab of group.tabs) {
           const input = tab.input as any
-          if (input?.uri?.fsPath?.endsWith('main.sw')) {
+          if (input?.uri?.fsPath?.endsWith('flow_test.sw')) {
             await vscode.window.showTextDocument(input.uri)
             return
           }
@@ -103,7 +103,7 @@ describe('CodeTracer Extension - Sway (Fuel) Deep Test', () => {
 
     const state = await editor.state()
     expect(state).not.toBeNull()
-    expect(state!.fileName).toContain('main.sw')
+    expect(state!.fileName).toContain('flow_test.sw')
     writeDiag('sway-editor-state.json', state)
   })
 
