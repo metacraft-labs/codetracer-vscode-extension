@@ -36,11 +36,23 @@ export function fixtureExists(fixtureName: string): boolean {
   return hasTraceFiles(dir)
 }
 
-/** Check whether a directory contains trace_metadata.json and at least one trace file. */
+/**
+ * Check whether a directory contains valid trace files.
+ *
+ * DB-based traces (Python, Ruby) produce trace_metadata.json + trace.json/trace.bin.
+ * rr-based traces (Rust, C, Go, Nim) produce trace_db_metadata.json + packed rr data.
+ */
 function hasTraceFiles(dir: string): boolean {
   if (!fs.existsSync(dir)) return false
-  const hasMetadata = fs.existsSync(path.join(dir, 'trace_metadata.json'))
-  const hasTrace = fs.existsSync(path.join(dir, 'trace.json')) ||
-                   fs.existsSync(path.join(dir, 'trace.bin'))
-  return hasMetadata && hasTrace
+  // DB-based traces: trace_metadata.json is the primary indicator.
+  const hasDbMetadata = fs.existsSync(path.join(dir, 'trace_metadata.json'))
+  // rr-based traces: ct-rr-support writes trace_db_metadata.json.
+  const hasRrMetadata = fs.existsSync(path.join(dir, 'trace_db_metadata.json'))
+  if (!hasDbMetadata && !hasRrMetadata) return false
+  // For DB-based traces, also require a trace data file.
+  // rr-based traces store data differently (packed rr recording), so
+  // trace_db_metadata.json alone is sufficient.
+  if (hasRrMetadata) return true
+  return fs.existsSync(path.join(dir, 'trace.json')) ||
+         fs.existsSync(path.join(dir, 'trace.bin'))
 }
