@@ -4,7 +4,8 @@ defineLanguageSmokeTests({
   language: 'C',
   traceName: 'c-sudoku',
   expectedFileName: 'main.c',
-  calltraceFunction: 'solve_sudoku',
+  // rr-based calltraces only show top-level functions (children not expanded).
+  calltraceFunction: 'main',
   variableName: 'board',
   langId: 'C',
   terminalText: '1',

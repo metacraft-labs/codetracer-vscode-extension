@@ -12,5 +12,5 @@ defineLanguageSmokeTests({
   // positions. One step-over from the entry point lands on a step
   // without variable data. Step further into the trace to reach a
   // position where 'board' is in scope.
-  extraStepsForLocals: 5,
+  extraStepsForLocals: 10,
 })
