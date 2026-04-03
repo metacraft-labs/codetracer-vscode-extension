@@ -50,6 +50,10 @@ export interface LanguageSmokeConfig {
    *  step-over from the navigation test may land on a position without
    *  locals. This advances the debugger further into the trace. */
   extraStepsForLocals?: number
+  /** Step into user code before checking the editor tab. Some languages
+   *  (e.g., Nim) initially stop in runtime code with no source file.
+   *  This steps forward so the editor opens the user's source file. */
+  stepsBeforeEditorCheck?: number
 }
 
 // ---- Individual assertion functions ----
@@ -310,6 +314,11 @@ export function defineLanguageSmokeTests(config: LanguageSmokeConfig): void {
     })
 
     it(`opens ${config.expectedFileName} in the editor`, async () => {
+      if (config.stepsBeforeEditorCheck) {
+        for (let i = 0; i < config.stepsBeforeEditorCheck; i++) {
+          await session.stepOver(2000)
+        }
+      }
       await assertEditorLoadsFile(editor, config.expectedFileName)
     })
 

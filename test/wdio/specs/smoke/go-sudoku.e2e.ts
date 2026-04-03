@@ -9,4 +9,7 @@ defineLanguageSmokeTests({
   variableName: 'board',
   langId: 'Go',
   terminalText: '1',
+  // Go traces use Delve for replay. Variable extraction needs stepping
+  // to reach a position where locals are in scope.
+  extraStepsForLocals: 20,
 })
