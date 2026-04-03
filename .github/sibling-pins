@@ -1,4 +1,4 @@
-codetracer 50b737db93f2bf75fceb41141563ef7a7e4a1fa8 main
+codetracer 23281f9d7eeec5b2af73d065c5c7de603d5d1345 fix/harmonize-out-dir-flags
 codetracer-python-recorder 2c4c70ecc953a2cb8630f0bda2adf15fd4d5c0c2 main
 codetracer-ruby-recorder 89e3e80a8c060096ee95ef638f400bc782e4e778 main
 codetracer-native-test-programs 7aa3735b4a4d6019d95b36b7ac9e9339a9a1778b main
