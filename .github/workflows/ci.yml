@@ -342,27 +342,25 @@ jobs:
             just record-test-traces
           "
 
-      # Resolve the rr binary from the rr-backend dev shell and symlink it
-      # into COMBINED_BIN so ct-rr-support can find it at replay time.
-      # This is a separate step (not nested in bash -c) to avoid escaping
-      # issues with the double-quoted nix develop command string.
-      # Resolve the rr binary from the rr-backend dev shell and symlink it
-      # into COMBINED_BIN so ct-rr-support can find it at replay time.
-      # `nix develop -c` runs the shellHook first (which prints a welcome
-      # banner to stdout), so we use `tail -1` to extract just the path
-      # from the `which rr` output.
+      # Symlink rr into COMBINED_BIN so ct-rr-support can find it at
+      # replay time. The rr-backend dev shell's shellHook creates a
+      # symlink at target/debug/rr → the rrWrapper (which handles
+      # CODETRACER_RR_SOFT_MODE). This symlink was created during the
+      # "Record test traces" step's `nix develop` invocation.
       - name: Symlink rr for trace replay
         run: |
-          cd ../codetracer-rr-backend
-          RR_PATH=$(nix develop ".?submodules=1" --accept-flake-config -c which rr 2>/dev/null | tail -1) || true
           COMBINED_BIN="$GITHUB_WORKSPACE/.ct-bin"
-          echo "Resolved rr path: '$RR_PATH'"
+          RR_BACKEND="../codetracer-rr-backend"
+          # The rr-backend shellHook symlinks rrWrapper → target/debug/rr.
+          RR_PATH="$(realpath "$RR_BACKEND/target/debug/rr" 2>/dev/null || true)"
+          echo "rr-backend target/debug/rr resolves to: '$RR_PATH'"
           if [ -n "$RR_PATH" ] && [ -x "$RR_PATH" ]; then
             ln -sf "$RR_PATH" "$COMBINED_BIN/rr"
             echo "rr symlinked: $RR_PATH → $COMBINED_BIN/rr"
-            ls -la "$COMBINED_BIN/rr"
           else
-            echo "ERROR: rr not found in rr-backend dev shell"
+            echo "ERROR: rr not found at $RR_BACKEND/target/debug/rr"
+            echo "Listing target/debug/:"
+            ls -la "$RR_BACKEND/target/debug/" 2>/dev/null || echo "  (directory does not exist)"
             exit 1
           fi
 
