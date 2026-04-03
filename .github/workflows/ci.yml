@@ -340,20 +340,34 @@ jobs:
           nix develop ".?submodules=1" --accept-flake-config -c bash -c "
             cd '$GITHUB_WORKSPACE'
             just record-test-traces
-
-            # Resolve rr from this dev shell and symlink it into COMBINED_BIN.
-            # ct-rr-support needs rr at runtime to replay rr-based traces.
-            # The rrWrapper (provided by the rr-backend dev shell) handles
-            # CODETRACER_RR_SOFT_MODE automatically.
-            RR_BIN=\$(which rr 2>/dev/null || true)
-            COMBINED_BIN='$GITHUB_WORKSPACE/.ct-bin'
-            if [ -x \"\$RR_BIN\" ]; then
-              ln -sf \"\$RR_BIN\" \"\$COMBINED_BIN/rr\"
-              echo \"rr symlinked: \$RR_BIN → \$COMBINED_BIN/rr\"
-            else
-              echo 'WARNING: rr not found in rr-backend dev shell — trace replay will fail'
-            fi
           "
+
+      # Resolve the rr binary from the rr-backend dev shell and symlink it
+      # into COMBINED_BIN so ct-rr-support can find it at replay time.
+      # This is a separate step (not nested in bash -c) to avoid escaping
+      # issues with the double-quoted nix develop command string.
+      - name: Symlink rr for trace replay
+        run: |
+          cd ../codetracer-rr-backend
+          RR_PATH=$(nix develop ".?submodules=1" --accept-flake-config -c which rr 2>/dev/null) || true
+          COMBINED_BIN="$GITHUB_WORKSPACE/.ct-bin"
+          if [ -n "$RR_PATH" ] && [ -x "$RR_PATH" ]; then
+            ln -sf "$RR_PATH" "$COMBINED_BIN/rr"
+            echo "rr symlinked: $RR_PATH → $COMBINED_BIN/rr"
+            ls -la "$COMBINED_BIN/rr"
+          else
+            echo "ERROR: rr not found in rr-backend dev shell (got: '$RR_PATH')"
+            echo "Trying fallback: searching nix store for rr wrapper..."
+            # Fallback: find rr in the dev shell's PATH by printing it
+            RR_PATH=$(cd ../codetracer-rr-backend && nix develop ".?submodules=1" --accept-flake-config -c bash -c 'which rr' 2>/dev/null) || true
+            if [ -n "$RR_PATH" ] && [ -x "$RR_PATH" ]; then
+              ln -sf "$RR_PATH" "$COMBINED_BIN/rr"
+              echo "rr symlinked (fallback): $RR_PATH → $COMBINED_BIN/rr"
+            else
+              echo "ERROR: rr still not found — rr-based trace replay will fail"
+              exit 1
+            fi
+          fi
 
       - name: Prepare blockchain trace fixtures
         run: |
