@@ -8,7 +8,7 @@ defineLanguageSmokeTests({
   language: 'Sway',
   traceName: 'sway-flow-test',
   expectedFileName: 'flow_test.sw',
-  calltraceFunction: 'main',
-  variableName: 'r16',
+  calltraceFunction: '<toplevel>',
+  variableName: 'r18',
   langId: 'Sway',
 })

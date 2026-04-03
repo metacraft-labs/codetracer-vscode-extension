@@ -23,8 +23,10 @@ const TRACE_NAME = 'sway-flow-test'
 
 // ---- Known trace data (flow_test main.sw) ----
 // The main() function performs arithmetic: sum_val = a + b, etc.
-const KNOWN_FUNCTIONS = ['main']
-const KNOWN_VARIABLE = 'sum_val'
+// main() is merged into <toplevel> by the recorder to keep steps at depth 0.
+const KNOWN_FUNCTIONS = ['<toplevel>']
+// Fuel VM uses register names; the recorder exposes FuelVM registers.
+const KNOWN_VARIABLE = 'r18'
 
 const session = new DebugSession()
 const editor = new EditorPane()
@@ -121,7 +123,7 @@ describe('CodeTracer Extension - Sway (Fuel) Deep Test', () => {
   // Calltrace: verify main() function appears
   // ==================================================================
 
-  it('calltrace contains the main() function', async () => {
+  it('calltrace contains the toplevel function', async () => {
     const result = await session.loadCalltrace({ depth: 50, height: 200 })
     expect(result.ok).toBe(true)
     writeDiag('sway-calltrace.json', result.data)
@@ -129,7 +131,7 @@ describe('CodeTracer Extension - Sway (Fuel) Deep Test', () => {
     const dataStr = JSON.stringify(result.data)
     const foundFunctions = KNOWN_FUNCTIONS.filter(fn => dataStr.includes(fn))
     console.log('[Sway] Calltrace functions found:', foundFunctions)
-    expect(dataStr).toContain('main')
+    expect(dataStr).toContain('toplevel')
   })
 
   // ==================================================================
@@ -264,8 +266,8 @@ describe('CodeTracer Extension - Sway (Fuel) Deep Test', () => {
   // Calltrace search
   // ==================================================================
 
-  it('can search the calltrace for "main"', async () => {
-    const result = await session.searchCalltrace('main')
+  it('can search the calltrace for "toplevel"', async () => {
+    const result = await session.searchCalltrace('toplevel')
     console.log('[Sway] Search calltrace ok:', result.ok)
     expect(result.ok).toBe(true)
 
