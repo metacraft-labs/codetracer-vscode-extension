@@ -48,15 +48,15 @@ const CALLTRACE_FUNCTION = 'fn_at_'
 // The Computed(uint256) event is a LOG1 containing the event signature topic.
 const EVENT_LOG_TEXT = 'LOG1'
 
-// Storage variable written by the first SSTORE in compute(): storedA = a.
-// This is the most reliably visible variable in the EVM trace because it
-// is a storage write (SSTORE opcode) that the recorder always captures.
-const STORAGE_VAR_NAME = 'storedA'
+// Local variable assigned on line 11 of FlowTest.sol: `uint256 a = 10;`
+// The EVM recorder emits source-level locals (not storage variables) in
+// the DAP locals response. We look for `a` because it is the first
+// variable assigned in compute().
+const LOCAL_VAR_NAME = 'a'
 
 // Maximum step-overs to try before giving up on finding the variable.
-// Storage variables are carried forward by the recorder to every subsequent
-// step. Local variables appear once they are assigned. We step iteratively
-// and check locals at each step until we find the target variable.
+// Local variables appear once the debugger reaches the corresponding
+// assignment. We step iteratively and check locals at each step.
 const MAX_STEPS_FOR_LOCALS = 15
 
 const session = new DebugSession()
@@ -124,7 +124,7 @@ describe('CodeTracer Extension - Solidity Smoke Test', () => {
     await assertStepWorks(session)
   })
 
-  it(`finds ${STORAGE_VAR_NAME} in local variables after stepping`, async () => {
+  it(`finds ${LOCAL_VAR_NAME} in local variables after stepping`, async () => {
     // Storage variables are carried forward but may not appear until the step
     // where the SSTORE fires. We step iteratively and check locals at each
     // step until we find the target variable or exhaust the budget.
@@ -138,8 +138,8 @@ describe('CodeTracer Extension - Solidity Smoke Test', () => {
       if (result.ok && result.data) {
         lastLocals = result.data
         const dataStr = JSON.stringify(result.data)
-        if (dataStr.includes(STORAGE_VAR_NAME)) {
-          console.log(`[Solidity] Found ${STORAGE_VAR_NAME} at step ${i + 1}`)
+        if (dataStr.includes(LOCAL_VAR_NAME)) {
+          console.log(`[Solidity] Found ${LOCAL_VAR_NAME} at step ${i + 1}`)
           writeDiag('locals.json', result.data)
           found = true
           break
@@ -158,7 +158,7 @@ describe('CodeTracer Extension - Solidity Smoke Test', () => {
     expect(found).toBe(true)
   })
 
-  it(`event log contains "${EVENT_LOG_TEXT}"`, async () => {
+  it(`event log contains ${EVENT_LOG_TEXT}`, async () => {
     const result = await session.loadEvents()
     if (result.ok && result.data) {
       const dataStr = JSON.stringify(result.data)
