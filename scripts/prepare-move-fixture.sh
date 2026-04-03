@@ -75,12 +75,11 @@ fi
 rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
-# Step 1: Run `sui move test --trace` to produce the NDJSON trace.
+# Step 1: Run `sui move test --trace-execution` to produce the NDJSON trace.
 # The trace files are written into <package>/build/<PackageName>/traces/.
-# NOTE: older Sui CLI versions used --trace-execution; modern versions use --trace.
 MOVE_PACKAGE_DIR="$MOVE_RECORDER_DIR/test-programs/move/flow_test"
-echo "Running sui move test --trace in $MOVE_PACKAGE_DIR ..."
-recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace --path "$MOVE_PACKAGE_DIR"
+echo "Running sui move test --trace-execution in $MOVE_PACKAGE_DIR ..."
+recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace-execution --path "$MOVE_PACKAGE_DIR"
 
 # Step 2: Find the NDJSON trace file(s) in the build directory.
 # Sui writes traces to build/<PackageName>/traces/ as .json or .json.zst files.
@@ -98,10 +97,14 @@ for f in $(find "$BUILD_DIR" -type f \( -name '*.json.zst' -o -name '*.json' \) 
   break
 done
 
-# Broader fallback: any .json file in the build directory that starts with a version header
+# Broader fallback: any .json file in the build directory that starts with the
+# Move trace version header ({"version":3} on the first line, NDJSON format).
+# Exclude dependency disassembly files which may also contain "version" keys.
 if [ -z "$TRACE_FILE" ]; then
-  for f in $(find "$BUILD_DIR" -type f -name '*.json' 2>/dev/null); do
-    if head -c 20 "$f" 2>/dev/null | grep -q '"version"'; then
+  for f in $(find "$BUILD_DIR" -type f -name '*.json' \
+    ! -path '*/dependencies/*' ! -path '*/disassembly/*' 2>/dev/null); do
+    # The trace NDJSON must start with exactly {"version":3}
+    if head -n 1 "$f" 2>/dev/null | grep -q '"version"[[:space:]]*:[[:space:]]*3'; then
       TRACE_FILE="$f"
       break
     fi
@@ -111,6 +114,8 @@ fi
 if [ -z "$TRACE_FILE" ]; then
   echo "ERROR: No NDJSON trace file found in $BUILD_DIR after running sui move test."
   echo "  Expected trace files under build/<PackageName>/traces/"
+  echo "  Build directory contents:"
+  find "$BUILD_DIR" -type f -name '*.json' -o -name '*.json.zst' 2>/dev/null | head -20
   exit 1
 fi
 
