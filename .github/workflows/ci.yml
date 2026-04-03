@@ -182,10 +182,12 @@ jobs:
               }
           done < .github/sibling-pins
 
-      - name: Build codetracer (for ct binary)
+      - name: Build codetracer (ct + db-backend binaries)
         run: |
           cd ../codetracer
-          nix build -L '.?submodules=1#codetracer' --override-input codetracer-trace-format path:./libs/codetracer-trace-format
+          FLAKE_OVERRIDE="--override-input codetracer-trace-format path:./libs/codetracer-trace-format"
+          nix build -L ".?submodules=1#codetracer" $FLAKE_OVERRIDE
+          nix build -L ".?submodules=1#db-backend" $FLAKE_OVERRIDE -o result-db-backend
 
       - name: Install dependencies
         run: nix develop -c just install
@@ -198,6 +200,38 @@ jobs:
           if [ -f media/ct_vscode.js ]; then
             cp media/ct_vscode.js out/ct_vscode.js
           fi
+
+      # The extension resolves db-backend from dirname(runnablePath). The nix
+      # packages for ct and db-backend are separate outputs, so we create a
+      # combined bin/ directory with symlinks to both. The .vscode/ directory
+      # is gitignored, so settings.json must be generated in CI.
+      - name: Configure ct binary path for WDIO tests
+        run: |
+          COMBINED_BIN="$(pwd)/.ct-bin"
+          mkdir -p "$COMBINED_BIN"
+          # Symlink ct from the codetracer package.
+          CT_SRC="$(realpath ../codetracer/result/bin/ct 2>/dev/null || true)"
+          if [ -x "$CT_SRC" ]; then
+            ln -sf "$CT_SRC" "$COMBINED_BIN/ct"
+          else
+            echo "WARNING: ct binary not found in ../codetracer/result/bin/"
+          fi
+          # Symlink db-backend from the db-backend package.
+          DB_SRC="$(realpath ../codetracer/result-db-backend/bin/db-backend 2>/dev/null || true)"
+          if [ -x "$DB_SRC" ]; then
+            ln -sf "$DB_SRC" "$COMBINED_BIN/db-backend"
+          else
+            echo "WARNING: db-backend not found in ../codetracer/result-db-backend/bin/"
+          fi
+          echo "Combined bin directory:"
+          ls -la "$COMBINED_BIN"
+          # Write workspace settings pointing at ct in the combined directory.
+          mkdir -p test/wdio/projects/stylus-test/.vscode
+          printf '{\n  "codetracer.runnablePath": "%s/ct"\n}\n' "$COMBINED_BIN" \
+            > test/wdio/projects/stylus-test/.vscode/settings.json
+          cat test/wdio/projects/stylus-test/.vscode/settings.json
+          # Also add to PATH for the extension's findInPath fallback.
+          echo "$COMBINED_BIN" >> "$GITHUB_PATH"
 
       - name: Record test traces
         run: nix develop -c just record-test-traces
