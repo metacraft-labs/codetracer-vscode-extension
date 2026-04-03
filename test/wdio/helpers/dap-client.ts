@@ -45,11 +45,15 @@ export async function dapRequest<T = any>(
  * VS Code setting (set by CI in .vscode/settings.json).
  */
 export async function startDebugSession(traceFolder: string): Promise<boolean> {
-  return browser.executeWorkbench(
-    async (vscode, folder: string) => {
-      const fs = require('fs') as typeof import('fs')
-      const path = require('path') as typeof import('path')
+  // Detect rr-based traces from the test runner (Node.js context).
+  // We can't use require('fs') inside executeWorkbench because the
+  // callback is serialized and executed in the VS Code browser context.
+  const fs = await import('fs')
+  const path = await import('path')
+  const isRr = fs.existsSync(path.join(traceFolder, 'rr'))
 
+  return browser.executeWorkbench(
+    async (vscode, folder: string, rrTrace: boolean) => {
       const config: any = {
         type: 'codetracer-debug',
         request: 'launch',
@@ -58,9 +62,7 @@ export async function startDebugSession(traceFolder: string): Promise<boolean> {
         traceFolder: folder
       }
 
-      // Detect rr-based traces by the presence of an rr/ subdirectory.
-      const isRr = fs.existsSync(path.join(folder, 'rr'))
-      if (isRr) {
+      if (rrTrace) {
         const cfg = vscode.workspace.getConfiguration('codetracer')
         const rrWorkerPath = cfg.get<string>('rrWorkerPath')?.trim() ?? ''
         if (rrWorkerPath) {
@@ -75,7 +77,8 @@ export async function startDebugSession(traceFolder: string): Promise<boolean> {
 
       return await vscode.debug.startDebugging(undefined, config)
     },
-    traceFolder
+    traceFolder,
+    isRr
   )
 }
 
