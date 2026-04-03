@@ -63,7 +63,11 @@ record_trace() {
 	local trace_dir="$TRACES_DIR/$name"
 
 	# Check if trace already exists (skip unless FORCE=1).
-	if [ -d "$trace_dir" ] && [ -f "$trace_dir/trace_metadata.json" ] && [ -z "${FORCE:-}" ]; then
+	# DB-based traces (Python, Ruby) produce trace_metadata.json;
+	# rr-based traces (Rust, C, Go, Nim) produce trace_db_metadata.json.
+	if [ -d "$trace_dir" ] && \
+	   { [ -f "$trace_dir/trace_metadata.json" ] || [ -f "$trace_dir/trace_db_metadata.json" ]; } && \
+	   [ -z "${FORCE:-}" ]; then
 		echo "  SKIP $name (already recorded, use FORCE=1 to re-record)"
 		_skipped=$((_skipped + 1))
 		return 0
@@ -86,7 +90,9 @@ record_trace() {
 	local ct_output
 	if ct_output=$("$CT" record -o="$trace_dir" "$program" 2>&1); then
 		# Verify that ct produced trace metadata in the target directory.
-		if [ -f "$trace_dir/trace_metadata.json" ]; then
+		# DB-based traces write trace_metadata.json; rr-based traces write
+		# trace_db_metadata.json.
+		if [ -f "$trace_dir/trace_metadata.json" ] || [ -f "$trace_dir/trace_db_metadata.json" ]; then
 			echo "    OK → $trace_dir"
 			_recorded=$((_recorded + 1))
 			return 0
