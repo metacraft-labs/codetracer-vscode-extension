@@ -346,27 +346,24 @@ jobs:
       # into COMBINED_BIN so ct-rr-support can find it at replay time.
       # This is a separate step (not nested in bash -c) to avoid escaping
       # issues with the double-quoted nix develop command string.
+      # Resolve the rr binary from the rr-backend dev shell and symlink it
+      # into COMBINED_BIN so ct-rr-support can find it at replay time.
+      # `nix develop -c` runs the shellHook first (which prints a welcome
+      # banner to stdout), so we use `tail -1` to extract just the path
+      # from the `which rr` output.
       - name: Symlink rr for trace replay
         run: |
           cd ../codetracer-rr-backend
-          RR_PATH=$(nix develop ".?submodules=1" --accept-flake-config -c which rr 2>/dev/null) || true
+          RR_PATH=$(nix develop ".?submodules=1" --accept-flake-config -c which rr 2>/dev/null | tail -1) || true
           COMBINED_BIN="$GITHUB_WORKSPACE/.ct-bin"
+          echo "Resolved rr path: '$RR_PATH'"
           if [ -n "$RR_PATH" ] && [ -x "$RR_PATH" ]; then
             ln -sf "$RR_PATH" "$COMBINED_BIN/rr"
             echo "rr symlinked: $RR_PATH → $COMBINED_BIN/rr"
             ls -la "$COMBINED_BIN/rr"
           else
-            echo "ERROR: rr not found in rr-backend dev shell (got: '$RR_PATH')"
-            echo "Trying fallback: searching nix store for rr wrapper..."
-            # Fallback: find rr in the dev shell's PATH by printing it
-            RR_PATH=$(cd ../codetracer-rr-backend && nix develop ".?submodules=1" --accept-flake-config -c bash -c 'which rr' 2>/dev/null) || true
-            if [ -n "$RR_PATH" ] && [ -x "$RR_PATH" ]; then
-              ln -sf "$RR_PATH" "$COMBINED_BIN/rr"
-              echo "rr symlinked (fallback): $RR_PATH → $COMBINED_BIN/rr"
-            else
-              echo "ERROR: rr still not found — rr-based trace replay will fail"
-              exit 1
-            fi
+            echo "ERROR: rr not found in rr-backend dev shell"
+            exit 1
           fi
 
       - name: Prepare blockchain trace fixtures
