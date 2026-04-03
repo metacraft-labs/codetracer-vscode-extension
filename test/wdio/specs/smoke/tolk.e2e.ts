@@ -11,4 +11,7 @@ defineLanguageSmokeTests({
   calltraceFunction: 'compute',
   variableName: 'a',
   langId: 'Tolk',
+  // main() only has `return compute()`, so step-over from depth 0 would
+  // skip the entire compute() body. Use step-in to enter compute().
+  useStepIn: true,
 })

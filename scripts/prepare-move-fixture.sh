@@ -75,11 +75,17 @@ fi
 rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
-# Step 1: Run `sui move test --trace-execution` to produce the NDJSON trace.
+# Step 1: Run `sui move test --trace` to produce the NDJSON trace.
 # The trace files are written into <package>/build/<PackageName>/traces/.
 MOVE_PACKAGE_DIR="$MOVE_RECORDER_DIR/test-programs/move/flow_test"
-echo "Running sui move test --trace-execution in $MOVE_PACKAGE_DIR ..."
-recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace-execution --path "$MOVE_PACKAGE_DIR"
+# The Sui CLI flag varies by version: newer versions use --trace, older
+# versions use --trace-execution.  Try --trace first (matches CI Nix dev shell),
+# fall back to --trace-execution if that fails.
+echo "Running sui move test --trace in $MOVE_PACKAGE_DIR ..."
+if ! recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace --path "$MOVE_PACKAGE_DIR" 2>/dev/null; then
+  echo "  --trace not recognized, trying --trace-execution..."
+  recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace-execution --path "$MOVE_PACKAGE_DIR"
+fi
 
 # Step 2: Find the NDJSON trace file(s) in the build directory.
 # Sui writes traces to build/<PackageName>/traces/ as .json or .json.zst files.

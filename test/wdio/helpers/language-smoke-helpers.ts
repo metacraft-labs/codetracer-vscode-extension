@@ -40,6 +40,11 @@ export interface LanguageSmokeConfig {
   terminalText?: string
   /** Expected text in event log (optional). */
   eventLogText?: string
+  /** Use step-in instead of step-over for the navigation test.
+   *  Needed when the entry function only contains a single nested call
+   *  (e.g., `main() { return compute() }`) and step-over would jump to
+   *  the end of the trace. */
+  useStepIn?: boolean
 }
 
 // ---- Individual assertion functions ----
@@ -199,9 +204,12 @@ export async function assertLocalsContainVariableWithValue(
 /** Verify step-over works and changes the current location. */
 export async function assertStepWorks(
   session: DebugSession,
+  useStepIn = false,
 ): Promise<void> {
   const before = await session.currentLocation()
-  const after = await session.stepOver(2000)
+  const after = useStepIn
+    ? await session.stepIn(2000)
+    : await session.stepOver(2000)
   // We should still be in a source file.
   expect(after.file.length).toBeGreaterThan(0)
   expect(after.line).toBeGreaterThan(0)
@@ -315,8 +323,8 @@ export function defineLanguageSmokeTests(config: LanguageSmokeConfig): void {
       await assertCalltraceContains(session, config.calltraceFunction)
     })
 
-    it('can step-over and remain in the trace', async () => {
-      await assertStepWorks(session)
+    it(`can ${config.useStepIn ? 'step-in' : 'step-over'} and remain in the trace`, async () => {
+      await assertStepWorks(session, config.useStepIn)
     })
 
     it(`finds ${config.variableName} in local variables`, async () => {
