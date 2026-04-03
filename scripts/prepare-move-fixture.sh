@@ -87,41 +87,52 @@ if ! recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace --path "$MOVE_PACK
   recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace-execution --path "$MOVE_PACKAGE_DIR"
 fi
 
-# Step 2: Find the NDJSON trace file(s) in the build directory.
-# Sui writes traces to build/<PackageName>/traces/ as .json or .json.zst files.
-BUILD_DIR="$MOVE_PACKAGE_DIR/build"
-if [ ! -d "$BUILD_DIR" ]; then
-  echo "ERROR: Build directory not found at $BUILD_DIR"
-  echo "  sui move test --trace-execution may have failed — check the output above."
-  exit 1
-fi
-
+# Step 2: Find the NDJSON trace file(s).
+# Newer Sui versions (≥1.68) write traces to <package>/traces/ at the package
+# root.  Older versions wrote them to build/<PackageName>/traces/.  Search
+# both locations.
 TRACE_FILE=""
-# Look for .json.zst first (compressed), then .json files under build/**/traces/
-for f in $(find "$BUILD_DIR" -type f \( -name '*.json.zst' -o -name '*.json' \) -path '*/traces/*' 2>/dev/null); do
-  TRACE_FILE="$f"
-  break
-done
 
-# Broader fallback: any .json file in the build directory that starts with the
-# Move trace version header ({"version":3} on the first line, NDJSON format).
-# Exclude dependency disassembly files which may also contain "version" keys.
-if [ -z "$TRACE_FILE" ]; then
-  for f in $(find "$BUILD_DIR" -type f -name '*.json' \
-    ! -path '*/dependencies/*' ! -path '*/disassembly/*' 2>/dev/null); do
-    # The trace NDJSON must start with exactly {"version":3}
-    if head -n 1 "$f" 2>/dev/null | grep -q '"version"[[:space:]]*:[[:space:]]*3'; then
-      TRACE_FILE="$f"
-      break
-    fi
+# Primary: look in <package>/traces/ (current Sui behaviour)
+TRACES_DIR="$MOVE_PACKAGE_DIR/traces"
+if [ -d "$TRACES_DIR" ]; then
+  for f in $(find "$TRACES_DIR" -type f \( -name '*.json.zst' -o -name '*.json' \) 2>/dev/null); do
+    TRACE_FILE="$f"
+    break
   done
 fi
 
+# Fallback: look in build/**/traces/ (older Sui behaviour)
 if [ -z "$TRACE_FILE" ]; then
-  echo "ERROR: No NDJSON trace file found in $BUILD_DIR after running sui move test."
-  echo "  Expected trace files under build/<PackageName>/traces/"
-  echo "  Build directory contents:"
-  find "$BUILD_DIR" -type f -name '*.json' -o -name '*.json.zst' 2>/dev/null | head -20
+  BUILD_DIR="$MOVE_PACKAGE_DIR/build"
+  if [ -d "$BUILD_DIR" ]; then
+    for f in $(find "$BUILD_DIR" -type f \( -name '*.json.zst' -o -name '*.json' \) -path '*/traces/*' 2>/dev/null); do
+      TRACE_FILE="$f"
+      break
+    done
+  fi
+fi
+
+# Last-resort fallback: any .json file in the build directory that starts with
+# the Move trace version header ({"version":3} on the first line, NDJSON).
+if [ -z "$TRACE_FILE" ]; then
+  BUILD_DIR="$MOVE_PACKAGE_DIR/build"
+  if [ -d "$BUILD_DIR" ]; then
+    for f in $(find "$BUILD_DIR" -type f -name '*.json' \
+      ! -path '*/dependencies/*' ! -path '*/disassembly/*' 2>/dev/null); do
+      if head -n 1 "$f" 2>/dev/null | grep -q '"version"[[:space:]]*:[[:space:]]*3'; then
+        TRACE_FILE="$f"
+        break
+      fi
+    done
+  fi
+fi
+
+if [ -z "$TRACE_FILE" ]; then
+  echo "ERROR: No NDJSON trace file found after running sui move test."
+  echo "  Searched: $MOVE_PACKAGE_DIR/traces/ and $MOVE_PACKAGE_DIR/build/**/traces/"
+  echo "  Package directory contents:"
+  find "$MOVE_PACKAGE_DIR" -type f \( -name '*.json' -o -name '*.json.zst' \) 2>/dev/null | head -20
   exit 1
 fi
 
