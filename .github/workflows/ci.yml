@@ -166,6 +166,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
         run: |
+          # Rewrite GitHub HTTPS URLs to include the access token so that
+          # --recurse-submodules can clone private submodules.
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
           while read -r name sha branch; do
             [ -z "$name" ] && continue
             # codetracer is handled by the clone-repo action above
@@ -177,11 +180,12 @@ jobs:
             fi
             echo "[$name] Cloning at $sha (branch: $branch)"
             git clone --depth 1 --branch "$branch" --single-branch \
+              --recurse-submodules --shallow-submodules \
               "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${name}.git" \
               "$dest" || {
                 echo "[$name] Shallow clone failed, trying full clone"
                 rm -rf "$dest"
-                git clone --no-checkout \
+                git clone --no-checkout --recurse-submodules \
                   "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${name}.git" \
                   "$dest"
                 git -C "$dest" checkout "$sha"
