@@ -93,13 +93,22 @@ fi
 # both locations.
 TRACE_FILE=""
 
-# Primary: look in <package>/traces/ (current Sui behaviour)
+# Primary: look in <package>/traces/ (current Sui behaviour).
+# Prefer the test_computation trace since that's what the WDIO smoke test expects.
 TRACES_DIR="$MOVE_PACKAGE_DIR/traces"
 if [ -d "$TRACES_DIR" ]; then
-  for f in $(find "$TRACES_DIR" -type f \( -name '*.json.zst' -o -name '*.json' \) 2>/dev/null); do
+  # First try to find the specific test_computation trace
+  for f in $(find "$TRACES_DIR" -type f -name '*test_computation*' \( -name '*.json.zst' -o -name '*.json' \) 2>/dev/null); do
     TRACE_FILE="$f"
     break
   done
+  # Fall back to any trace file
+  if [ -z "$TRACE_FILE" ]; then
+    for f in $(find "$TRACES_DIR" -type f \( -name '*.json.zst' -o -name '*.json' \) 2>/dev/null); do
+      TRACE_FILE="$f"
+      break
+    done
+  fi
 fi
 
 # Fallback: look in build/**/traces/ (older Sui behaviour)
