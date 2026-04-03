@@ -299,6 +299,17 @@ jobs:
           else
             echo "WARNING: ct-rr-support not found — native language recording will fail"
           fi
+          # Symlink rr for trace replay. ct-rr-support needs rr at runtime to
+          # replay traces, but the nix package doesn't wrap rr into its PATH.
+          # The rr-backend dev shell provides an rrWrapper that handles
+          # CODETRACER_RR_SOFT_MODE. Resolve it via `which rr` in that shell.
+          RR_BIN="$(cd ../codetracer-rr-backend && nix develop '.?submodules=1' --accept-flake-config -c which rr 2>/dev/null || true)"
+          if [ -x "$RR_BIN" ]; then
+            ln -sf "$RR_BIN" "$COMBINED_BIN/rr"
+            echo "rr: $RR_BIN"
+          else
+            echo "WARNING: rr not found — rr-based trace replay will fail"
+          fi
           # Symlink codetracer-ruby-recorder for Ruby recording.
           RUBY_REC_SRC="$(realpath ../codetracer-ruby-recorder/result-ruby-recorder/bin/codetracer-ruby-recorder 2>/dev/null || true)"
           if [ -x "$RUBY_REC_SRC" ]; then
