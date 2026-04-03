@@ -9,6 +9,8 @@ defineLanguageSmokeTests({
   traceName: 'move-flow-test',
   expectedFileName: 'flow_test.move',
   calltraceFunction: 'test_computation',
-  variableName: 'sum_val',
+  // Move VM traces use local indices, not source variable names.
+  // local_2 corresponds to `sum_val` in test_computation (a=0, b=1, sum_val=2).
+  variableName: 'local_2',
   langId: 'Move',
 })
