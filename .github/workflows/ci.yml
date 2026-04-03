@@ -318,12 +318,9 @@ jobs:
           # next to ct-rr-support, or PATH lookup. Both work since COMBINED_BIN
           # contains rr and is on PATH.
           mkdir -p test/wdio/projects/stylus-test/.vscode
-          cat > test/wdio/projects/stylus-test/.vscode/settings.json <<SETTINGS_EOF
-          {
-            "codetracer.runnablePath": "$COMBINED_BIN/ct",
-            "codetracer.rrWorkerPath": "$COMBINED_BIN/ct-rr-support"
-          }
-          SETTINGS_EOF
+          printf '{\n  "codetracer.runnablePath": "%s/ct",\n  "codetracer.rrWorkerPath": "%s/ct-rr-support"\n}\n' \
+            "$COMBINED_BIN" "$COMBINED_BIN" \
+            > test/wdio/projects/stylus-test/.vscode/settings.json
           cat test/wdio/projects/stylus-test/.vscode/settings.json
           # Also add to PATH for the extension's findInPath fallback.
           echo "$COMBINED_BIN" >> "$GITHUB_PATH"
