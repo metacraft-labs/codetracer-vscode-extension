@@ -299,17 +299,8 @@ jobs:
           else
             echo "WARNING: ct-rr-support not found — native language recording will fail"
           fi
-          # Symlink rr for trace replay. ct-rr-support needs rr at runtime to
-          # replay traces, but the nix package doesn't wrap rr into its PATH.
-          # The rr-backend dev shell provides an rrWrapper that handles
-          # CODETRACER_RR_SOFT_MODE. Resolve it via `which rr` in that shell.
-          RR_BIN="$(cd ../codetracer-rr-backend && nix develop '.?submodules=1' --accept-flake-config -c which rr 2>/dev/null || true)"
-          if [ -x "$RR_BIN" ]; then
-            ln -sf "$RR_BIN" "$COMBINED_BIN/rr"
-            echo "rr: $RR_BIN"
-          else
-            echo "WARNING: rr not found — rr-based trace replay will fail"
-          fi
+          # rr is resolved later in the "Record test traces" step (which
+          # enters the rr-backend dev shell) and symlinked into COMBINED_BIN.
           # Symlink codetracer-ruby-recorder for Ruby recording.
           RUBY_REC_SRC="$(realpath ../codetracer-ruby-recorder/result-ruby-recorder/bin/codetracer-ruby-recorder 2>/dev/null || true)"
           if [ -x "$RUBY_REC_SRC" ]; then
@@ -320,10 +311,19 @@ jobs:
           fi
           echo "Combined bin directory:"
           ls -la "$COMBINED_BIN"
-          # Write workspace settings pointing at ct in the combined directory.
+          # Write workspace settings pointing at ct and ct-rr-support.
+          # - runnablePath: ct binary for db-based traces (Python, Ruby, blockchain)
+          # - rrWorkerPath: ct-rr-support binary for rr-based traces (Rust, C, Go, Nim)
+          # rrExePath is omitted — the extension falls back to a sibling "rr"
+          # next to ct-rr-support, or PATH lookup. Both work since COMBINED_BIN
+          # contains rr and is on PATH.
           mkdir -p test/wdio/projects/stylus-test/.vscode
-          printf '{\n  "codetracer.runnablePath": "%s/ct"\n}\n' "$COMBINED_BIN" \
-            > test/wdio/projects/stylus-test/.vscode/settings.json
+          cat > test/wdio/projects/stylus-test/.vscode/settings.json <<SETTINGS_EOF
+          {
+            "codetracer.runnablePath": "$COMBINED_BIN/ct",
+            "codetracer.rrWorkerPath": "$COMBINED_BIN/ct-rr-support"
+          }
+          SETTINGS_EOF
           cat test/wdio/projects/stylus-test/.vscode/settings.json
           # Also add to PATH for the extension's findInPath fallback.
           echo "$COMBINED_BIN" >> "$GITHUB_PATH"
@@ -343,6 +343,19 @@ jobs:
           nix develop ".?submodules=1" --accept-flake-config -c bash -c "
             cd '$GITHUB_WORKSPACE'
             just record-test-traces
+
+            # Resolve rr from this dev shell and symlink it into COMBINED_BIN.
+            # ct-rr-support needs rr at runtime to replay rr-based traces.
+            # The rrWrapper (provided by the rr-backend dev shell) handles
+            # CODETRACER_RR_SOFT_MODE automatically.
+            RR_BIN=\$(which rr 2>/dev/null || true)
+            COMBINED_BIN='$GITHUB_WORKSPACE/.ct-bin'
+            if [ -x \"\$RR_BIN\" ]; then
+              ln -sf \"\$RR_BIN\" \"\$COMBINED_BIN/rr\"
+              echo \"rr symlinked: \$RR_BIN → \$COMBINED_BIN/rr\"
+            else
+              echo 'WARNING: rr not found in rr-backend dev shell — trace replay will fail'
+            fi
           "
 
       - name: Prepare blockchain trace fixtures

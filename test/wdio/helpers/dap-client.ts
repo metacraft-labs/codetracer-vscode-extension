@@ -34,17 +34,46 @@ export async function dapRequest<T = any>(
   }, command, args, timeoutMs) as DapResult<T>
 }
 
-/** Start a CodeTracer debug session with the given trace folder. */
+/** Start a CodeTracer debug session with the given trace folder.
+ *
+ * For rr-based traces (detected by the presence of an `rr/` subdirectory),
+ * the debug config includes `ctRRWorkerExe` pointing to `ct-rr-support`.
+ * This mirrors what the extension's `loadTrace` command does when it detects
+ * an rr trace folder via `isRrTraceFolder()`.
+ *
+ * The `ct-rr-support` path is resolved from the `codetracer.rrWorkerPath`
+ * VS Code setting (set by CI in .vscode/settings.json).
+ */
 export async function startDebugSession(traceFolder: string): Promise<boolean> {
   return browser.executeWorkbench(
     async (vscode, folder: string) => {
-      return await vscode.debug.startDebugging(undefined, {
+      const fs = require('fs') as typeof import('fs')
+      const path = require('path') as typeof import('path')
+
+      const config: any = {
         type: 'codetracer-debug',
         request: 'launch',
         name: 'WDIO Test Trace',
         cwd: '',
         traceFolder: folder
-      })
+      }
+
+      // Detect rr-based traces by the presence of an rr/ subdirectory.
+      const isRr = fs.existsSync(path.join(folder, 'rr'))
+      if (isRr) {
+        const cfg = vscode.workspace.getConfiguration('codetracer')
+        const rrWorkerPath = cfg.get<string>('rrWorkerPath')?.trim() ?? ''
+        if (rrWorkerPath) {
+          config.ctRRWorkerExe = rrWorkerPath
+          config.rawDiffIndex = null
+          config.restoreLocation = null
+          console.log('[WDIO] rr trace detected, ctRRWorkerExe:', rrWorkerPath)
+        } else {
+          console.warn('[WDIO] rr trace detected but codetracer.rrWorkerPath is not set')
+        }
+      }
+
+      return await vscode.debug.startDebugging(undefined, config)
     },
     traceFolder
   )
