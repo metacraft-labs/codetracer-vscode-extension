@@ -321,8 +321,18 @@ jobs:
             echo "CODETRACER_PYTHON_INTERPRETER=$(pwd)/.python-recorder-venv/bin/python" >> "$GITHUB_ENV"
           fi
 
+      # Record test traces for standard languages (Python, Ruby, Rust, C, Go, Nim).
+      # This step runs inside the codetracer-rr-backend dev shell because:
+      #   - ct record → ct-rr-support build needs compilers (gcc, rustc, go, nim)
+      #   - ct record → ct-rr-support record needs rr for native language replay
+      # The extension's own dev shell only has Node.js/VS Code tooling.
       - name: Record test traces
-        run: nix develop -c just record-test-traces
+        run: |
+          cd ../codetracer-rr-backend
+          nix develop ".?submodules=1" --accept-flake-config -c bash -c "
+            cd '$GITHUB_WORKSPACE'
+            just record-test-traces
+          "
 
       - name: Prepare blockchain trace fixtures
         run: |

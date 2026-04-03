@@ -79,9 +79,12 @@ record_trace() {
 	rm -rf "$trace_dir"
 	mkdir -p "$trace_dir"
 
-	# Record the trace directly into the target directory using -o.
+	# Record the trace directly into the target directory using -o=<dir>.
+	# IMPORTANT: confutils (the Nim CLI parser ct uses) requires the = sign
+	# for named options — `-o <value>` does NOT work (it treats <value> as a
+	# positional argument).
 	local ct_output
-	if ct_output=$("$CT" record -o "$trace_dir" "$program" 2>&1); then
+	if ct_output=$("$CT" record -o="$trace_dir" "$program" 2>&1); then
 		# Verify that ct produced trace metadata in the target directory.
 		if [ -f "$trace_dir/trace_metadata.json" ]; then
 			echo "    OK → $trace_dir"
@@ -150,37 +153,40 @@ for lang in "${LANGUAGES[@]}"; do
 			fi
 			;;
 		rust)
+			# Pass the individual source file, not the directory.
+			# ct-rr-support build uses the file extension to detect the language;
+			# directory-based detection only works for project files (Cargo.toml, etc.).
 			if [ -n "${CODETRACER_NATIVE_TEST_PROGRAMS_PRESENT:-}" ]; then
-				record_trace "rust-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/rust/sudoku_solver/"
-			elif [ -d "$CODETRACER_PATH/test-programs/rs_sudoku_solver" ]; then
-				record_trace "rust-sudoku" "$CODETRACER_PATH/test-programs/rs_sudoku_solver/"
+				record_trace "rust-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/rust/sudoku_solver/main.rs"
+			elif [ -f "$CODETRACER_PATH/test-programs/rs_sudoku_solver/main.rs" ]; then
+				record_trace "rust-sudoku" "$CODETRACER_PATH/test-programs/rs_sudoku_solver/main.rs"
 			else
 				echo "  SKIP rust (test program not found)"
 			fi
 			;;
 		c)
 			if [ -n "${CODETRACER_NATIVE_TEST_PROGRAMS_PRESENT:-}" ]; then
-				record_trace "c-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/c/sudoku_solver/"
-			elif [ -d "$CODETRACER_PATH/test-programs/c_sudoku_solver" ]; then
-				record_trace "c-sudoku" "$CODETRACER_PATH/test-programs/c_sudoku_solver/"
+				record_trace "c-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/c/sudoku_solver/main.c"
+			elif [ -f "$CODETRACER_PATH/test-programs/c_sudoku_solver/main.c" ]; then
+				record_trace "c-sudoku" "$CODETRACER_PATH/test-programs/c_sudoku_solver/main.c"
 			else
 				echo "  SKIP c (test program not found)"
 			fi
 			;;
 		go)
 			if [ -n "${CODETRACER_NATIVE_TEST_PROGRAMS_PRESENT:-}" ]; then
-				record_trace "go-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/go/sudoku_solver/"
-			elif [ -d "$CODETRACER_PATH/test-programs/go_sudoku_solver" ]; then
-				record_trace "go-sudoku" "$CODETRACER_PATH/test-programs/go_sudoku_solver/"
+				record_trace "go-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/go/sudoku_solver/sudoku.go"
+			elif [ -f "$CODETRACER_PATH/test-programs/go_sudoku_solver/sudoku.go" ]; then
+				record_trace "go-sudoku" "$CODETRACER_PATH/test-programs/go_sudoku_solver/sudoku.go"
 			else
 				echo "  SKIP go (test program not found)"
 			fi
 			;;
 		nim)
 			if [ -n "${CODETRACER_NATIVE_TEST_PROGRAMS_PRESENT:-}" ]; then
-				record_trace "nim-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/nim/sudoku_solver/"
-			elif [ -d "$CODETRACER_PATH/test-programs/nim_sudoku_solver" ]; then
-				record_trace "nim-sudoku" "$CODETRACER_PATH/test-programs/nim_sudoku_solver/"
+				record_trace "nim-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/nim/sudoku_solver/main.nim"
+			elif [ -f "$CODETRACER_PATH/test-programs/nim_sudoku_solver/main.nim" ]; then
+				record_trace "nim-sudoku" "$CODETRACER_PATH/test-programs/nim_sudoku_solver/main.nim"
 			else
 				echo "  SKIP nim (test program not found)"
 			fi
@@ -193,3 +199,8 @@ done
 
 echo ""
 echo "=== Done: $_recorded recorded, $_skipped skipped, $_failed failed ==="
+
+# Fail the script if any recordings failed so CI catches the problem.
+if [ "$_failed" -gt 0 ]; then
+	exit 1
+fi
