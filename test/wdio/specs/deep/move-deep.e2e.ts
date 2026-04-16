@@ -24,7 +24,9 @@ const TRACE_NAME = 'move-flow-test'
 // ---- Known trace data (flow_test.move test_computation()) ----
 // The test_computation function performs arithmetic: sum_val = a + b, etc.
 const KNOWN_FUNCTIONS = ['test_computation']
-const KNOWN_VARIABLE = 'sum_val'
+// Move VM traces use local indices, not source variable names.
+// local_2 corresponds to `sum_val` in test_computation (a=0, b=1, sum_val=2).
+const KNOWN_VARIABLE = 'local_2'
 
 const session = new DebugSession()
 const editor = new EditorPane()
