@@ -42,12 +42,12 @@
         "codetracer.rrWorkerPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the ct-rr-support (RR worker) executable used for rr-based traces"
+          "description": "Path to the ct-native-replay (RR worker) executable used for rr-based traces"
         },
         "codetracer.rrExePath": {
           "type": "string",
           "default": "",
-          "description": "Path to the rr executable used by ct-rr-support (optional; falls back to PATH or bundled rr)"
+          "description": "Path to the rr executable used by ct-native-replay (optional; falls back to PATH or bundled rr)"
         }
       }
     },

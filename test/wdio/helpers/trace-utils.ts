@@ -46,7 +46,7 @@ function hasTraceFiles(dir: string): boolean {
   if (!fs.existsSync(dir)) return false
   // DB-based traces: trace_metadata.json is the primary indicator.
   const hasDbMetadata = fs.existsSync(path.join(dir, 'trace_metadata.json'))
-  // rr-based traces: ct-rr-support writes trace_db_metadata.json.
+  // rr-based traces: ct-native-replay writes trace_db_metadata.json.
   const hasRrMetadata = fs.existsSync(path.join(dir, 'trace_db_metadata.json'))
   if (!hasDbMetadata && !hasRrMetadata) return false
   // For DB-based traces, also require a trace data file.

@@ -37,11 +37,11 @@ export async function dapRequest<T = any>(
 /** Start a CodeTracer debug session with the given trace folder.
  *
  * For rr-based traces (detected by the presence of an `rr/` subdirectory),
- * the debug config includes `ctRRWorkerExe` pointing to `ct-rr-support`.
+ * the debug config includes `ctRRWorkerExe` pointing to `ct-native-replay`.
  * This mirrors what the extension's `loadTrace` command does when it detects
  * an rr trace folder via `isRrTraceFolder()`.
  *
- * The `ct-rr-support` path is resolved from the `codetracer.rrWorkerPath`
+ * The `ct-native-replay` path is resolved from the `codetracer.rrWorkerPath`
  * VS Code setting (set by CI in .vscode/settings.json).
  */
 export async function startDebugSession(traceFolder: string): Promise<boolean> {

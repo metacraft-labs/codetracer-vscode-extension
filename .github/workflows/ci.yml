@@ -204,13 +204,16 @@ jobs:
       # language family.  These are separate repos (restored as siblings above)
       # with their own flake.nix.  The built binaries are symlinked into
       # COMBINED_BIN below so ct can discover them via PATH.
-      - name: Build ct-rr-support (native language recording)
+      - name: Build ct-native-replay (native language recording)
         run: |
-          if [ -d ../codetracer-rr-backend ]; then
+          if [ -d ../codetracer-native-backend ]; then
+            cd ../codetracer-native-backend
+            nix build -L ".?submodules=1#ct-native-replay" -o result-native-replay
+          elif [ -d ../codetracer-rr-backend ]; then
             cd ../codetracer-rr-backend
             nix build -L ".?submodules=1#codetracer-rr-support" -o result-rr-support
           else
-            echo "WARNING: codetracer-rr-backend not found — native language recording will fail"
+            echo "WARNING: codetracer-native-backend not found — native language recording will fail"
           fi
 
       - name: Build codetracer-ruby-recorder
@@ -291,10 +294,11 @@ jobs:
           else
             echo "WARNING: db-backend not found in ../codetracer/result-db-backend/bin/"
           fi
-          # Symlink ct-rr-support for native language recording (Rust, C, Go, Nim).
-          RR_SRC="$(realpath ../codetracer-rr-backend/result-rr-support/bin/ct-rr-support 2>/dev/null || true)"
+          # Symlink ct-native-replay for native language recording (Rust, C, Go, Nim).
+          RR_SRC="$(realpath ../codetracer-native-backend/result-native-replay/bin/ct-native-replay 2>/dev/null \
+                    || realpath ../codetracer-rr-backend/result-rr-support/bin/ct-rr-support 2>/dev/null || true)"
           if [ -x "$RR_SRC" ]; then
-            ln -sf "$RR_SRC" "$COMBINED_BIN/ct-rr-support"
+            ln -sf "$RR_SRC" "$COMBINED_BIN/ct-native-replay"
             echo "ct-rr-support: $RR_SRC"
           else
             echo "WARNING: ct-rr-support not found — native language recording will fail"

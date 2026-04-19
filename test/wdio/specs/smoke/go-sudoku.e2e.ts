@@ -12,6 +12,6 @@ defineLanguageSmokeTests({
   // rr soft-mode replay: Delve variable extraction currently returns empty
   // locals for Go traces at all tested step positions. The locals test
   // verifies the DAP response is valid but defers variable-name assertion
-  // until the ct-rr-support backend is fixed.
+  // until the ct-native-replay backend is fixed.
   localsResponseOnly: true,
 })

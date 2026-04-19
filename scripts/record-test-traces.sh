@@ -160,7 +160,7 @@ for lang in "${LANGUAGES[@]}"; do
 			;;
 		rust)
 			# Pass the individual source file, not the directory.
-			# ct-rr-support build uses the file extension to detect the language;
+			# ct-native-replay build uses the file extension to detect the language;
 			# directory-based detection only works for project files (Cargo.toml, etc.).
 			if [ -n "${CODETRACER_NATIVE_TEST_PROGRAMS_PRESENT:-}" ]; then
 				record_trace "rust-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/rust/sudoku_solver/main.rs"

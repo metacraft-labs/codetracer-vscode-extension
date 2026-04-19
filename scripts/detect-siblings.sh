@@ -97,11 +97,15 @@ if [ -n "$_EXT_WORKSPACE_ROOT" ] && [ -d "$_EXT_WORKSPACE_ROOT/codetracer-ruby-r
 	_ext_detect_summary "codetracer-ruby-recorder"
 fi
 
-# --- codetracer-rr-backend ---
+# --- codetracer-native-backend (formerly codetracer-rr-backend) ---
 # Exports: CODETRACER_RR_BACKEND_PATH
-if [ -n "$_EXT_WORKSPACE_ROOT" ] && [ -x "$_EXT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
+if [ -n "$_EXT_WORKSPACE_ROOT" ] && [ -x "$_EXT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" ]; then
+	export CODETRACER_RR_BACKEND_PATH="$_EXT_WORKSPACE_ROOT/codetracer-native-backend"
+	_ext_detect_summary "codetracer-native-backend"
+elif [ -n "$_EXT_WORKSPACE_ROOT" ] && [ -x "$_EXT_WORKSPACE_ROOT/codetracer-rr-backend/target/debug/ct-rr-support" ]; then
+	# Legacy fallback
 	export CODETRACER_RR_BACKEND_PATH="$_EXT_WORKSPACE_ROOT/codetracer-rr-backend"
-	_ext_detect_summary "codetracer-rr-backend"
+	_ext_detect_summary "codetracer-rr-backend (legacy)"
 fi
 
 # --- codetracer-native-test-programs ---
