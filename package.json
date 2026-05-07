@@ -56,6 +56,8 @@
         "type": "codetracer-debug",
         "label": "Codetracer Debugger",
         "languages": [
+          "elixir",
+          "erlang",
           "noir",
           "ruby",
           "rust",
@@ -212,7 +214,10 @@
     "test:wdio:elixir": "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/elixir.e2e.ts",
     "test:wdio:stylus": "npx wdio run wdio.conf.ts --spec test/wdio/specs/stylus-trace-load.e2e.ts",
     "test:wdio:solidity": "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/solidity.e2e.ts",
-    "test:wdio:solidity:deep": "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/solidity-storage.e2e.ts"
+    "test:wdio:solidity:deep": "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/solidity-storage.e2e.ts",
+    "test:wdio:elixir": "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/elixir.e2e.ts",
+    "test:wdio:erlang": "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/erlang.e2e.ts",
+    "test:wdio:beam:deep": "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/beam-deep.e2e.ts"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

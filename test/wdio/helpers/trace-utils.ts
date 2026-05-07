@@ -41,6 +41,8 @@ export function fixtureExists(fixtureName: string): boolean {
  *
  * DB-based traces produce trace_metadata.json + trace.json/trace.bin/*.ct.
  * rr-based traces (Rust, C, Go, Nim) produce trace_db_metadata.json + packed rr data.
+ * CTFS-based traces (BEAM Elixir/Erlang, M15+) produce trace_metadata.json
+ * plus one or more `.ct` container files at the bundle root.
  */
 function hasTraceFiles(dir: string): boolean {
   if (!fs.existsSync(dir)) return false
@@ -53,7 +55,24 @@ function hasTraceFiles(dir: string): boolean {
   // rr-based traces store data differently (packed rr recording), so
   // trace_db_metadata.json alone is sufficient.
   if (hasRrMetadata) return true
-  return fs.existsSync(path.join(dir, 'trace.json')) ||
-         fs.existsSync(path.join(dir, 'trace.bin')) ||
-         fs.readdirSync(dir).some(file => file.endsWith('.ct'))
+  if (fs.existsSync(path.join(dir, 'trace.json')) ||
+      fs.existsSync(path.join(dir, 'trace.bin'))) {
+    return true
+  }
+  // CTFS-based traces (BEAM): a non-empty .ct file at the bundle root.
+  // The codetracer-beam-recorder writes either erl.ct or mix.ct depending
+  // on the runner; we accept any .ct file as evidence the recorder
+  // produced a real bundle. Empty .ct files are rejected so half-recorded
+  // bundles don't quietly satisfy the predicate.
+  try {
+    const entries = fs.readdirSync(dir)
+    for (const entry of entries) {
+      if (!entry.endsWith('.ct')) continue
+      const stat = fs.statSync(path.join(dir, entry))
+      if (stat.isFile() && stat.size > 0) return true
+    }
+  } catch {
+    // ignore — falls through to false
+  }
+  return false
 }

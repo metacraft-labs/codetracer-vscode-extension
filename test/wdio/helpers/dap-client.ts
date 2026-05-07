@@ -190,7 +190,7 @@ const LANG_IDS: Record<string, number> = {
   RustWasm: 19, CppWasm: 20, Small: 21, PythonDb: 22, Unknown: 23,
   Bash: 24, Zsh: 25, Solidity: 26, Masm: 27, Sway: 28, Move: 29,
   PolkaVM: 30, Cairo: 31, Circom: 32, Leo: 33, Tolk: 34, Aiken: 35,
-  Cadence: 36, Solana: 37, Elixir: 38,
+  Cadence: 36, Solana: 37, Elixir: 38, Erlang: 39,
 }
 
 /** Load local variables at the current position. */

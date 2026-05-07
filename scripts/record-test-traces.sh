@@ -121,7 +121,7 @@ record_trace() {
 # ---------------------------------------------------------------------------
 LANGUAGES=("$@")
 if [ ${#LANGUAGES[@]} -eq 0 ]; then
-	LANGUAGES=(python ruby rust c go nim)
+	LANGUAGES=(python ruby rust c go nim beam)
 fi
 
 echo "=== Recording test traces ==="
@@ -195,6 +195,44 @@ for lang in "${LANGUAGES[@]}"; do
 				record_trace "nim-sudoku" "$CODETRACER_PATH/test-programs/nim_sudoku_solver/main.nim"
 			else
 				echo "  SKIP nim (test program not found)"
+			fi
+			;;
+		beam)
+			# BEAM canonical fixtures (Elixir + Erlang) are recorded via the
+			# recorder-owned prepare-beam-fixtures.sh, not ct record. The
+			# script handles compilation, recorder invocation, and bundle
+			# validation; it fails loudly on missing prerequisites (verified
+			# by codetracer-beam-recorder/tests/verify-beam-fixture-generation-no-silent-skip.sh).
+			if [ -n "${CODETRACER_BEAM_RECORDER_PRESENT:-}" ]; then
+				_beam_script="$CODETRACER_BEAM_RECORDER_ROOT/scripts/prepare-beam-fixtures.sh"
+				if [ -x "$_beam_script" ]; then
+					_beam_elixir="$TRACES_DIR/elixir-canonical-flow"
+					_beam_erlang="$TRACES_DIR/erlang-canonical-flow"
+					# Skip if both fixtures already exist (idempotent),
+					# unless FORCE=1.
+					if [ -z "${FORCE:-}" ] && \
+					   [ -f "$_beam_elixir/trace_metadata.json" ] && \
+					   [ -f "$_beam_erlang/trace_metadata.json" ]; then
+						echo "  SKIP beam (fixtures present at $_beam_elixir and $_beam_erlang; use FORCE=1)"
+						_skipped=$((_skipped + 2))
+					else
+						echo "  RECORDING beam (Elixir + Erlang canonical_flow) ..."
+						if FORCE="${FORCE:-}" "$_beam_script" "$_beam_elixir" "$_beam_erlang"; then
+							echo "    OK → $_beam_elixir"
+							echo "    OK → $_beam_erlang"
+							_recorded=$((_recorded + 2))
+						else
+							echo "    FAIL: prepare-beam-fixtures.sh exited non-zero"
+							_failed=$((_failed + 2))
+						fi
+					fi
+				else
+					echo "  SKIP beam (prepare-beam-fixtures.sh not executable at $_beam_script)"
+					_skipped=$((_skipped + 1))
+				fi
+			else
+				echo "  SKIP beam (codetracer-beam-recorder sibling not available)"
+				_skipped=$((_skipped + 1))
 			fi
 			;;
 		*)

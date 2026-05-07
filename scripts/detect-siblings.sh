@@ -97,6 +97,28 @@ if [ -n "$_EXT_WORKSPACE_ROOT" ] && [ -d "$_EXT_WORKSPACE_ROOT/codetracer-ruby-r
 	_ext_detect_summary "codetracer-ruby-recorder"
 fi
 
+# --- codetracer-beam-recorder (Elixir + Erlang) ---
+# Exports: CODETRACER_BEAM_RECORDER_ROOT, CODETRACER_BEAM_RECORDER_BIN
+# This sibling owns the BEAM recorder binary AND the canonical fixture
+# programs at test-programs/elixir/canonical_flow and
+# test-programs/erlang/canonical_flow. M15 WDIO smoke + deep tests
+# regenerate the trace bundles via scripts/prepare-beam-fixtures.sh
+# rather than committing pre-baked goldens (regenerate-from-source CI
+# decision documented in the BEAM milestones plan).
+if [ -n "$_EXT_WORKSPACE_ROOT" ] && [ -d "$_EXT_WORKSPACE_ROOT/codetracer-beam-recorder" ]; then
+	export CODETRACER_BEAM_RECORDER_ROOT="$_EXT_WORKSPACE_ROOT/codetracer-beam-recorder"
+	for _candidate in \
+		"$CODETRACER_BEAM_RECORDER_ROOT/target/debug/codetracer-beam-recorder" \
+		"$CODETRACER_BEAM_RECORDER_ROOT/target/release/codetracer-beam-recorder"; do
+		if [ -x "$_candidate" ]; then
+			export CODETRACER_BEAM_RECORDER_BIN="$_candidate"
+			break
+		fi
+	done
+	unset _candidate
+	_ext_detect_summary "codetracer-beam-recorder"
+fi
+
 # --- codetracer-native-backend (formerly codetracer-rr-backend) ---
 # Exports: CODETRACER_RR_BACKEND_PATH
 if [ -n "$_EXT_WORKSPACE_ROOT" ] && [ -x "$_EXT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/ct-native-replay" ]; then
@@ -126,6 +148,9 @@ if [ -n "${CODETRACER_PYTHON_RECORDER_ROOT:-}" ]; then
 fi
 if [ -n "${CODETRACER_RUBY_RECORDER_ROOT:-}" ]; then
 	export CODETRACER_RUBY_RECORDER_PRESENT=1
+fi
+if [ -n "${CODETRACER_BEAM_RECORDER_ROOT:-}" ]; then
+	export CODETRACER_BEAM_RECORDER_PRESENT=1
 fi
 if [ -n "${CODETRACER_RR_BACKEND_PATH:-}" ]; then
 	export CODETRACER_RR_BACKEND_PRESENT=1

@@ -581,6 +581,23 @@ function isRrSourceFile(filePath: string, languageId: string): boolean {
   return [".c", ".cc", ".cpp", ".cxx", ".rs", ".nim"].includes(ext);
 }
 
+/**
+ * Detect BEAM-language source files (Elixir + Erlang) for the
+ * codetracer-beam-recorder dispatch path. Used by the future "Record current
+ * file" command on .ex/.exs/.erl/.hrl files; M15 introduces only the
+ * predicate so language detection is consistent with package.json's
+ * debuggers.languages registration. Source-of-truth for the recorder pipeline
+ * (Mix vs. raw erlc compilation) lives in
+ * codetracer-beam-recorder/scripts/prepare-beam-fixtures.sh.
+ */
+function isBeamSourceFile(filePath: string, languageId: string): boolean {
+  if (["elixir", "erlang"].includes(languageId)) {
+    return true;
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  return [".ex", ".exs", ".erl", ".hrl"].includes(ext);
+}
+
 function isRrTraceFolder(traceFolder: string): boolean {
   return fs.existsSync(path.join(traceFolder, "rr"));
 }
@@ -621,6 +638,10 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
         const isNoirFile = editor.document.languageId === "noir" || filePath.endsWith(".nr");
         const isRubyFile = editor.document.languageId === "ruby" || filePath.endsWith(".rb");
         const isRrFile = isRrSourceFile(filePath, editor.document.languageId);
+        // BEAM (Elixir/Erlang) source files use the full file path so the
+        // recorder can locate the surrounding Mix/rebar3 project. Detection
+        // matches the languages registered in package.json.debuggers.languages.
+        const isBeamFile = isBeamSourceFile(filePath, editor.document.languageId);
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
         const workspaceRoot = workspaceFolder?.uri.fsPath;
 
@@ -633,6 +654,11 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
         if (!isNoirFile) {
           if (isRrFile) {
             // RR-based recordings need the full source file path.
+            return await getCurrentTrace(codetracerExe, filePath, isNixOS);
+          }
+          if (isBeamFile) {
+            // BEAM materialized recordings (Elixir/Erlang) need the file
+            // path so prepare-beam-fixtures.sh / Mix can locate the project.
             return await getCurrentTrace(codetracerExe, filePath, isNixOS);
           }
           const rootPath = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath;
