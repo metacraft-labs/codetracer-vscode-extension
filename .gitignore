@@ -32,6 +32,7 @@ yarn-error.log*
 .wdio-vscode-service/
 out-wdio/
 test/traces/
+test/fixtures/elixir-canonical-flow/
 test/wdio/diagnostics/
 # Stylus trace fixture (generated, not committed — regenerate with scripts/prepare-stylus-fixture.sh)
 test/fixtures/stylus-fund-trace/trace.json

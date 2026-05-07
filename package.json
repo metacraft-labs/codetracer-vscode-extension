@@ -59,6 +59,7 @@
           "noir",
           "ruby",
           "rust",
+          "elixir",
           "solidity",
           "vyper"
         ],
@@ -208,6 +209,7 @@
     "test": "vscode-test",
     "test:wdio": "npx wdio run wdio.conf.ts",
     "test:wdio:hello": "npx wdio run wdio.conf.ts --spec test/wdio/specs/hello-vscode.e2e.ts",
+    "test:wdio:elixir": "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/elixir.e2e.ts",
     "test:wdio:stylus": "npx wdio run wdio.conf.ts --spec test/wdio/specs/stylus-trace-load.e2e.ts",
     "test:wdio:solidity": "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/solidity.e2e.ts",
     "test:wdio:solidity:deep": "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/solidity-storage.e2e.ts"

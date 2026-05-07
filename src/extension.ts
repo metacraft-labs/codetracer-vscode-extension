@@ -4,7 +4,7 @@ import { initPanels, disposePanels, disposeCommands, addTracepoint, addLoopPosit
 import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
-import { access, lstat, readFile, readdir } from "fs/promises";
+import { access, readFile, readdir, stat } from "fs/promises";
 import { execFileSync } from "child_process";
 import * as path from 'path';
 import {
@@ -1048,8 +1048,8 @@ export async function isExecutable(p?: string): Promise<boolean> {
     return false;
   }
   try {
-    const stat = await lstat(p);
-    if (!stat.isFile()) {
+    const fileStat = await stat(p);
+    if (!fileStat.isFile()) {
       return false;
     } else if (p.endsWith(".AppImage")) {
       return true;
