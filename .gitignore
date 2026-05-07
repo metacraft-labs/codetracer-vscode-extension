@@ -21,6 +21,7 @@ yarn-error.log*
 # Environment
 .env
 .direnv/
+.ct-bin/
 
 # Nix
 /result

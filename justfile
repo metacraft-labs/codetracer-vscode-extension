@@ -101,6 +101,10 @@ test-wdio-smoke-langs: record-test-traces
 
 # Run WDIO Elixir trace smoke test (generates fixture through the recorder script)
 test-wdio-elixir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scripts/prepare-wdio-codetracer-bin.sh
+    export PATH="$(pwd)/.ct-bin:$PATH"
     just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/elixir.e2e.ts"
 
 # Run WDIO Stylus trace tests (requires fixture + Xvfb)
