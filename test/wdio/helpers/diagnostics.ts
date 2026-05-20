@@ -7,9 +7,19 @@
  */
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { browser } from '@wdio/globals'
 
 const DIAG_DIR = path.resolve(__dirname, '..', 'diagnostics')
+
+// Root of the per-run wdio-vscode-service storage tree.  Must match the
+// `shortTmpDir` computed in wdio.conf.ts: `/tmp/wdio-vscode-ct` on POSIX
+// (short path to stay under the Unix-socket sun_path limit) and a directory
+// under the OS temp dir on Windows (no such limit, and `/tmp` is not a valid
+// Windows path).
+const WDIO_STORAGE_ROOT = process.platform === 'win32'
+  ? path.join(os.tmpdir(), 'wdio-vscode-ct')
+  : '/tmp/wdio-vscode-ct'
 
 // Ensure the diagnostics directory exists at module load time.
 if (!fs.existsSync(DIAG_DIR)) {
@@ -64,8 +74,8 @@ export async function captureBrowserLogs(label: string): Promise<any[]> {
 /** Read the VS Code extension host log and extract relevant lines. */
 export async function captureExtHostLog(label: string): Promise<any> {
   try {
-    const result = await browser.executeWorkbench(async (vscode) => {
-      const base = vscode.Uri.file('/tmp/wdio-vscode-ct')
+    const result = await browser.executeWorkbench(async (vscode, storageRoot: string) => {
+      const base = vscode.Uri.file(storageRoot)
       const entries = await vscode.workspace.fs.readDirectory(base)
       const latest = entries
         .filter(([n]: any) => n.startsWith('run-'))
@@ -90,7 +100,7 @@ export async function captureExtHostLog(label: string): Promise<any> {
         l.includes('activat')
       )
       return { total: lines.length, relevant: relevant.length, lines: relevant.slice(-80) }
-    })
+    }, WDIO_STORAGE_ROOT)
     writeDiag(`exthost-log-${label}.json`, result)
     return result
   } catch (e: any) {

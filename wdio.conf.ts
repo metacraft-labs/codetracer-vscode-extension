@@ -1,5 +1,6 @@
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { execSync } from 'child_process'
 
 // Resolve chromedriver binary: prefer Nix-provided, fallback to npm package.
@@ -61,8 +62,15 @@ if (vscodeInsidersBinary) {
   console.warn('VS Code Insiders binary not found; falling back to download via browserVersion=insiders')
 }
 
-// Use a short tmp directory to avoid Unix socket path length issues
-const shortTmpDir = '/tmp/wdio-vscode-ct'
+// Use a short tmp directory to avoid Unix socket path length issues.
+// On POSIX, wdio-vscode-service places its IPC socket under TMPDIR and the
+// 108-char sun_path limit can be exceeded by deep default temp paths, so we
+// pin a short, stable `/tmp` location. On Windows there is no Unix-socket
+// path-length limit and `/tmp` is not a valid path, so we base the short
+// directory under the OS temp directory instead.
+const shortTmpDir = process.platform === 'win32'
+  ? path.join(os.tmpdir(), 'wdio-vscode-ct')
+  : '/tmp/wdio-vscode-ct'
 // Create a unique storage root per run to avoid user-data-dir lock contention
 const uniqueStorageRoot = path.join(shortTmpDir, `run-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`)
 try {
