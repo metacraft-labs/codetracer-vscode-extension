@@ -73,9 +73,15 @@ const shortTmpDir = process.platform === 'win32'
   : '/tmp/wdio-vscode-ct'
 // Create a unique storage root per run to avoid user-data-dir lock contention
 const uniqueStorageRoot = path.join(shortTmpDir, `run-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+// Pin VS Code's --logsPath to a stable directory inside the diagnostics tree
+// so the extension host / renderer logs survive a VS Code crash and a
+// post-run storage cleanup (the per-run user-data-dir is volatile).
+const vscodeLogsDir = path.resolve(__dirname, 'test', 'wdio', 'diagnostics', 'vscode-logs')
 try {
   if (!fs.existsSync(shortTmpDir)) fs.mkdirSync(shortTmpDir, { recursive: true })
   if (!fs.existsSync(uniqueStorageRoot)) fs.mkdirSync(uniqueStorageRoot, { recursive: true })
+  fs.rmSync(vscodeLogsDir, { recursive: true, force: true })
+  fs.mkdirSync(vscodeLogsDir, { recursive: true })
   process.env.TMPDIR = shortTmpDir
   process.env.TEMP = shortTmpDir
   process.env.TMP = shortTmpDir
@@ -111,14 +117,21 @@ export const config: any = {
         'disable-telemetry': true,
         'disable-extensions': false,
         'enable-proposed-api': 'metacraft-labs.ct-vscode',
-        // Chromium sandbox workaround for NixOS CI runners.
-        // wdio-vscode-service already passes --no-sandbox, but on runners
-        // without user namespace support the zygote still fails to fork
-        // renderers. --no-zygote skips the zygote entirely.
-        'no-zygote': true,
-        'disable-gpu': true,
-        'disable-gpu-compositing': true,
-        'disable-dev-shm-usage': true,
+        // Linux/NixOS-only Chromium workarounds. wdio-vscode-service already
+        // passes --no-sandbox; on NixOS CI runners without user-namespace
+        // support the zygote still fails to fork renderers, and the headless
+        // GPU stack is unavailable. None of these conditions apply on a normal
+        // Windows host (where --no-zygote / --disable-gpu only degrade the
+        // renderer), so the workarounds are scoped to non-Windows platforms.
+        ...(process.platform !== 'win32' ? {
+          'no-zygote': true,
+          'disable-gpu': true,
+          'disable-gpu-compositing': true,
+          'disable-dev-shm-usage': true,
+        } : {}),
+        // Pin the log directory so extension host / renderer logs survive a
+        // VS Code crash for post-mortem diagnostics.
+        'logsPath': vscodeLogsDir,
       },
     } as any)
   } as any],

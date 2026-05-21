@@ -5,7 +5,6 @@ import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
 import { access, readFile, readdir, stat } from "fs/promises";
-import { execFileSync } from "child_process";
 import * as path from 'path';
 import {
   DapVsCodeApi,
@@ -389,33 +388,71 @@ function registerFlowDecorationHandlers(
   });
 }
 
-/// Locate a binary by name in the system PATH.
-/// Returns the absolute path if found, or undefined otherwise.
-function findInPath(binaryName: string): string | undefined {
-  try {
-    // Use `command -v` (POSIX) which works in both bash and zsh.
-    const result = execFileSync('/bin/sh', ['-c', `command -v ${binaryName}`], {
-      encoding: 'utf8',
-      timeout: 5000,
-    }).trim();
-    return result || undefined;
-  } catch {
-    return undefined;
+/// Candidate file names for an executable, accounting for the Windows `.exe`
+/// suffix. The bare name is tried first so POSIX layouts keep working.
+function executableCandidates(binaryName: string): string[] {
+  if (process.platform === 'win32') {
+    // On Windows, prefer the `.exe` variant but also accept extension-less
+    // files (some toolchains ship wrapper scripts without an extension).
+    return [`${binaryName}.exe`, binaryName];
   }
+  return [binaryName];
 }
 
+/// Locate a binary by name in the system PATH.
+/// Returns the absolute path if found, or undefined otherwise.
+///
+/// This is implemented purely with `fs` lookups (no shell-out) so it works
+/// identically on Windows, macOS and Linux. The Nix dev shell / direnv
+/// environment and the Windows `env.ps1` both place the CodeTracer binaries
+/// on PATH, so a PATH scan is sufficient.
+function findInPath(binaryName: string): string | undefined {
+  const pathVar = process.env.PATH ?? '';
+  const segments = pathVar.split(path.delimiter).filter(Boolean);
+  const names = executableCandidates(binaryName);
+  for (const segment of segments) {
+    for (const name of names) {
+      const candidate = path.join(segment, name);
+      try {
+        const st = fs.statSync(candidate);
+        if (st.isFile()) {
+          return candidate;
+        }
+      } catch {
+        // not here; keep scanning
+      }
+    }
+  }
+  return undefined;
+}
+
+/// Names of the DAP replay server binary, newest first.
+///
+/// The replay backend was historically called `db-backend`; the Phase 4
+/// naming alignment in the codetracer repo renamed the on-disk binary to
+/// `replay-server` (see codetracer/src/db-backend/Cargo.toml and
+/// src/common/paths.nim `dbBackendExe`). We accept both so the extension
+/// works against old and new CodeTracer builds.
+const DAP_SERVER_BINARY_NAMES = ['replay-server', 'db-backend'] as const;
+
+/// Locate the directory containing the CodeTracer backend binaries
+/// (`replay-server`, `ct`, …).
 function getBackendBinPath(context: vscode.ExtensionContext): string {
   // If runnablePath is set (e.g. /path/to/codetracer/src/build-debug/bin/ct),
-  // derive the backend bin directory from it — db-backend lives in the same dir.
+  // derive the backend bin directory from it — the replay server lives in the
+  // same dir.
   const cfg = vscode.workspace.getConfiguration('codetracer');
   const runnablePath = cfg.get<string>('runnablePath')?.trim();
   if (runnablePath) {
     return path.dirname(runnablePath);
   }
-  // Try to find db-backend or ct in PATH (set up by direnv / nix dev shells).
-  const dbBackendInPath = findInPath('db-backend');
-  if (dbBackendInPath) {
-    return path.dirname(dbBackendInPath);
+  // Try to find the replay server or ct in PATH (set up by direnv / nix dev
+  // shells on POSIX, or env.ps1 on Windows).
+  for (const name of DAP_SERVER_BINARY_NAMES) {
+    const inPath = findInPath(name);
+    if (inPath) {
+      return path.dirname(inPath);
+    }
   }
   const ctInPath = findInPath('ct');
   if (ctInPath) {
@@ -432,14 +469,52 @@ function getBackendBinPath(context: vscode.ExtensionContext): string {
   );
 }
 
+/// Resolve the absolute path to the DAP replay server executable.
+///
+/// Looks inside the backend bin directory for `replay-server` (current) or
+/// `db-backend` (legacy), trying the platform-specific executable suffixes.
+/// Falls back to a `replay-server` path in the bin directory so the
+/// DebugAdapterExecutable still produces a meaningful spawn error if the
+/// binary is genuinely missing.
+function resolveDapServerPath(context: vscode.ExtensionContext): string {
+  const binDir = getBackendBinPath(context);
+  for (const name of DAP_SERVER_BINARY_NAMES) {
+    for (const candidateName of executableCandidates(name)) {
+      const candidate = path.join(binDir, candidateName);
+      try {
+        if (fs.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        // keep looking
+      }
+    }
+  }
+  // Also consult PATH directly — getBackendBinPath may have fallen back to the
+  // bundled layout while the binary actually lives elsewhere on PATH.
+  for (const name of DAP_SERVER_BINARY_NAMES) {
+    const inPath = findInPath(name);
+    if (inPath) {
+      return inPath;
+    }
+  }
+  // Last resort: a (possibly non-existent) path so the spawn error is clear.
+  const fallbackName = process.platform === 'win32'
+    ? `${DAP_SERVER_BINARY_NAMES[0]}.exe`
+    : DAP_SERVER_BINARY_NAMES[0];
+  return path.join(binDir, fallbackName);
+}
+
 function makeEnvWithBackend(context: vscode.ExtensionContext): NodeJS.ProcessEnv {
   const backendBin = getBackendBinPath(context);
   const rrEnv = resolveRrEnvironment();
 
+  // Prepend the backend bin dir using the platform PATH delimiter so the
+  // replay server can locate its sibling binaries (recorders, rr, …).
   return {
     ...process.env,
     ...rrEnv,
-    PATH: `${backendBin}:${process.env.PATH ?? ''}`,
+    PATH: `${backendBin}${path.delimiter}${process.env.PATH ?? ''}`,
   };
 }
 
@@ -453,20 +528,10 @@ function normalizeEnv(env: NodeJS.ProcessEnv): { [key: string]: string } {
   return out;
 }
 
-function findExecutableInPath(binaryName: string): string | undefined {
-  const pathVar = process.env.PATH ?? "";
-  const segments = pathVar.split(path.delimiter).filter(Boolean);
-  for (const segment of segments) {
-    const candidate = path.join(segment, binaryName);
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch {
-      // continue
-    }
-  }
-  return undefined;
-}
+// `findExecutableInPath` was a near-duplicate of `findInPath` that used an
+// `X_OK` access check; that check is unreliable for Windows `.exe` files, so
+// callers now use `findInPath`, which scans PATH with the correct
+// platform-specific executable suffixes.
 
 function resolveRrEnvironment(): NodeJS.ProcessEnv {
   const cfg = vscode.workspace.getConfiguration('codetracer');
@@ -1033,7 +1098,7 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
           fs.accessSync(siblingRr, fs.constants.X_OK);
           rrResolved = true;
         } catch {
-          const pathRr = findExecutableInPath("rr");
+          const pathRr = findInPath("rr");
           rrResolved = Boolean(pathRr);
         }
         if (!rrResolved) {
@@ -1167,8 +1232,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
             const args = ["dap-server", "--stdio"];
 
             const env = normalizeEnv(makeEnvWithBackend(context));
-            const binDir = getBackendBinPath(context);
-            const dbBackendPath = path.join(binDir, "db-backend");
+            const dbBackendPath = resolveDapServerPath(context);
 
             console.log('[CodeTracer] debug adapter: dbBackendPath =', dbBackendPath);
 

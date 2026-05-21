@@ -36,34 +36,8 @@ export function fixtureExists(fixtureName: string): boolean {
   return hasTraceFiles(dir)
 }
 
-/**
- * Check whether a directory contains valid trace files.
- *
- * DB-based traces produce trace_metadata.json + trace.json/trace.bin/*.ct.
- * rr-based traces (Rust, C, Go, Nim) produce trace_db_metadata.json + packed rr data.
- * CTFS-based traces (BEAM Elixir/Erlang, M15+) produce trace_metadata.json
- * plus one or more `.ct` container files at the bundle root.
- */
-function hasTraceFiles(dir: string): boolean {
-  if (!fs.existsSync(dir)) return false
-  // DB-based traces: trace_metadata.json is the primary indicator.
-  const hasDbMetadata = fs.existsSync(path.join(dir, 'trace_metadata.json'))
-  // rr-based traces: ct-native-replay writes trace_db_metadata.json.
-  const hasRrMetadata = fs.existsSync(path.join(dir, 'trace_db_metadata.json'))
-  if (!hasDbMetadata && !hasRrMetadata) return false
-  // For DB-based traces, also require a trace data file.
-  // rr-based traces store data differently (packed rr recording), so
-  // trace_db_metadata.json alone is sufficient.
-  if (hasRrMetadata) return true
-  if (fs.existsSync(path.join(dir, 'trace.json')) ||
-      fs.existsSync(path.join(dir, 'trace.bin'))) {
-    return true
-  }
-  // CTFS-based traces (BEAM): a non-empty .ct file at the bundle root.
-  // The codetracer-beam-recorder writes either erl.ct or mix.ct depending
-  // on the runner; we accept any .ct file as evidence the recorder
-  // produced a real bundle. Empty .ct files are rejected so half-recorded
-  // bundles don't quietly satisfy the predicate.
+/** Check whether the directory contains a non-empty `.ct` CTFS container. */
+function hasCtfsContainer(dir: string): boolean {
   try {
     const entries = fs.readdirSync(dir)
     for (const entry of entries) {
@@ -73,6 +47,40 @@ function hasTraceFiles(dir: string): boolean {
     }
   } catch {
     // ignore — falls through to false
+  }
+  return false
+}
+
+/**
+ * Check whether a directory contains valid trace files.
+ *
+ * Three recorder output shapes are recognised:
+ *  - CTFS containers: one or more `.ct` files at the bundle root. This is the
+ *    canonical, recorder-convention output for the materialized-trace
+ *    languages (Python, Ruby, JavaScript, the blockchain recorders, BEAM …).
+ *    The Nim CTFS writer names the container after the recorded program
+ *    (e.g. `main.ct`), so any non-empty `.ct` file counts. The db-backend
+ *    auto-detects the container in the folder via `find_ct_file_in_dir`.
+ *  - rr/native traces: `ct-native-replay` writes `trace_db_metadata.json`
+ *    plus a packed recording.
+ *  - Legacy DB traces: `trace_metadata.json` + `trace.json`/`trace.bin`.
+ *
+ * The CTFS check is performed first and independently — a recorder that
+ * emits a CTFS-only bundle (no JSON metadata sidecar, which is the current
+ * convention) must still be recognised as a valid trace.
+ */
+function hasTraceFiles(dir: string): boolean {
+  if (!fs.existsSync(dir)) return false
+  // CTFS containers are the canonical recorder output and carry their own
+  // metadata inside `meta.dat`; no JSON sidecar is required.
+  if (hasCtfsContainer(dir)) return true
+  // rr-based traces: ct-native-replay writes trace_db_metadata.json.
+  if (fs.existsSync(path.join(dir, 'trace_db_metadata.json'))) return true
+  // Legacy DB-based traces: trace_metadata.json + a trace data file.
+  if (fs.existsSync(path.join(dir, 'trace_metadata.json')) &&
+      (fs.existsSync(path.join(dir, 'trace.json')) ||
+       fs.existsSync(path.join(dir, 'trace.bin')))) {
+    return true
   }
   return false
 }
