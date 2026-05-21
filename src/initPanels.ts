@@ -195,19 +195,59 @@ export function addTracepoint(context: vscode.ExtensionContext, viewsApi: any, e
   return inset;
 }
 
-export function initPanels(
+/** Resolve after `ms` milliseconds — used to pace sequential panel creation. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Initialise the CodeTracer panels.
+ *
+ * The panels are created **sequentially**, all as tabs of a single editor
+ * group, rather than all at once and spread across editor groups. Each
+ * CodeTracer webview loads a large (~44 MB) frontend bundle plus a ~14 MB
+ * Nim `ui.js`, and `vscode.window.createWebviewPanel` mounts the webview
+ * immediately and makes it visible. The previous implementation created
+ * all five panels back-to-back and `moveEditor…`'d them across three
+ * editor groups, so several heavy webviews mounted and stayed resident
+ * concurrently in the VS Code renderer.
+ *
+ * Two changes minimise the renderer's peak webview load:
+ *
+ *  1. Panels are created one at a time, with a pause between each so the
+ *     renderer finishes mounting (and the previous heavy bundle finishes
+ *     parsing) before the next webview starts loading.
+ *  2. All panels open in the same editor group (`ViewColumn.Two`). Within
+ *     a group only the active tab is visible; combined with
+ *     `retainContextWhenHidden: false` (see `panelManager.ts`) every panel
+ *     except the active one releases its renderer context, so at most one
+ *     copy of the bundle is resident at a time.
+ *
+ * The grouped layout is also what the WDIO panel checks expect — they
+ * assert panel *existence* via the tab-groups API, not a particular split
+ * layout.
+ */
+export async function initPanels(
   context: vscode.ExtensionContext,
   viewsApi: any
-): CodeTracerPanels {
+): Promise<CodeTracerPanels> {
+  // Pause between panel mounts so the renderer fully finishes mounting,
+  // running and then *unloading* one webview before the next one starts,
+  // keeping the renderer's peak webview memory to a single panel.
+  const STEP_MS = 3000;
+
   const state = (panelMap.state = createStatePanel(context, viewsApi));
   panelCommands.state = registerPanelCommand("openState", context, () =>
     createStatePanel(context, viewsApi)
   );
+  state.reveal(vscode.ViewColumn.Two);
+  await delay(STEP_MS);
 
   const calltrace = (panelMap.calltrace = createCalltracePanel(context, viewsApi));
   panelCommands.calltrace = registerPanelCommand("openCalltrace", context, () =>
     createCalltracePanel(context, viewsApi)
   );
+  await delay(STEP_MS);
 
   const scratchpad = (panelMap.scratchpad = createScratchpadPanel(context, viewsApi));
   panelCommands.scratchpad = registerPanelCommand(
@@ -215,6 +255,7 @@ export function initPanels(
     context,
     () => createScratchpadPanel(context, viewsApi)
   );
+  await delay(STEP_MS);
 
   const eventLog = (panelMap.eventLog = createEventLogPanel(context, viewsApi));
   panelCommands.eventLog = registerPanelCommand(
@@ -222,8 +263,7 @@ export function initPanels(
     context,
     () => createEventLogPanel(context, viewsApi)
   );
-
-  const flow = (panelMap.flow);
+  await delay(STEP_MS);
 
   const terminalOutput = (panelMap.terminalOutput =
     createTerminalPanel(context, viewsApi));
@@ -232,21 +272,13 @@ export function initPanels(
     context,
     () => createTerminalPanel(context, viewsApi)
   );
+  await delay(STEP_MS);
 
-  setTimeout(() => {
-    terminalOutput.reveal();
-    vscode.commands.executeCommand("workbench.action.moveEditorToBelowGroup");
-    eventLog.reveal();
-    vscode.commands.executeCommand("workbench.action.moveEditorToBelowGroup");
-    vscode.commands.executeCommand("workbench.action.moveEditorLeftInGroup");
-  }, 500);
-
-  setTimeout(() => {
-    calltrace.reveal();
-    vscode.commands.executeCommand("workbench.action.moveEditorToRightGroup");
-  }, 500);
-
-  state.reveal(vscode.ViewColumn.Two);
+  // `flow` is created lazily by `addLoopPosition`; keep the field present.
+  void calltrace;
+  void scratchpad;
+  void eventLog;
+  void terminalOutput;
 
   return panelMap as CodeTracerPanels;
 }

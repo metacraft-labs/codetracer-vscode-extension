@@ -55,11 +55,24 @@ function resolveVSCodeInsidersBinary(): string | undefined {
   return undefined
 }
 
-const vscodeInsidersBinary = resolveVSCodeInsidersBinary()
-if (vscodeInsidersBinary) {
+// VS Code channel to test against. Defaults to `stable`.
+//
+// `stable` is the representative target for the suite: no WDIO spec
+// exercises the extension's sole proposed API (`editorInsets`, used only
+// by the interactive tracepoint / flow-inset commands), so the suite does
+// not require the Insiders channel. The renderer-crash investigation also
+// confirmed the crash reproduces identically on stable 1.121.0 and
+// Insiders 1.122.0, so it is not a pre-release-build instability.
+//
+// Override with WDIO_VSCODE_VERSION (e.g. `insiders`, or a pinned version
+// like `1.96.4`) when a proposed-API run is genuinely needed.
+const vscodeChannel = process.env.WDIO_VSCODE_VERSION?.trim() || 'stable'
+
+const vscodeInsidersBinary = vscodeChannel === 'insiders' ? resolveVSCodeInsidersBinary() : undefined
+if (vscodeChannel === 'insiders' && vscodeInsidersBinary) {
   console.log(`Using VS Code Insiders binary: ${vscodeInsidersBinary}`)
 } else {
-  console.warn('VS Code Insiders binary not found; falling back to download via browserVersion=insiders')
+  console.log(`Using VS Code channel: ${vscodeChannel} (downloaded by wdio-vscode-service)`)
 }
 
 // Use a short tmp directory to avoid Unix socket path length issues.
@@ -96,7 +109,7 @@ export const config: any = {
 
   capabilities: [{
     browserName: 'vscode',
-    browserVersion: 'insiders',
+    browserVersion: vscodeChannel,
     'wdio:enforceWebDriverClassic': true,
     ...(chromedriverBinary ? {
       'wdio:chromedriverOptions': {
@@ -119,16 +132,18 @@ export const config: any = {
         'enable-proposed-api': 'metacraft-labs.ct-vscode',
         // Linux/NixOS-only Chromium workarounds. wdio-vscode-service already
         // passes --no-sandbox; on NixOS CI runners without user-namespace
-        // support the zygote still fails to fork renderers, and the headless
-        // GPU stack is unavailable. None of these conditions apply on a normal
-        // Windows host (where --no-zygote / --disable-gpu only degrade the
-        // renderer), so the workarounds are scoped to non-Windows platforms.
+        // support the zygote still fails to fork renderers.
         ...(process.platform !== 'win32' ? {
           'no-zygote': true,
-          'disable-gpu': true,
-          'disable-gpu-compositing': true,
           'disable-dev-shm-usage': true,
         } : {}),
+        // Disable GPU acceleration on every platform. The CodeTracer webview
+        // panels render heavy DOM/Monaco content; with the GPU process in
+        // play the headless WDIO run was prone to GPU-process crashes that
+        // took the workbench renderer down with them. Software compositing
+        // is slower but stable, which is what a test run needs.
+        'disable-gpu': true,
+        'disable-gpu-compositing': true,
         // Pin the log directory so extension host / renderer logs survive a
         // VS Code crash for post-mortem diagnostics.
         'logsPath': vscodeLogsDir,

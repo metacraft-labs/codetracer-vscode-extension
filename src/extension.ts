@@ -6,6 +6,7 @@ import * as os from "os";
 import * as fs from "fs";
 import { access, readFile, readdir, stat } from "fs/promises";
 import * as path from 'path';
+import { readCtfsMetaDat } from "./ctfs";
 import {
   DapVsCodeApi,
   setupVsCodeExtensionViewsApi,
@@ -784,13 +785,15 @@ async function recordTraceForWorkdir(
   );
 }
 
-function initPanelsIfNeeded(context: vscode.ExtensionContext, viewsApi: MediatorWithSubscribers): void {
+async function initPanelsIfNeeded(context: vscode.ExtensionContext, viewsApi: MediatorWithSubscribers): Promise<void> {
   if (panelsInitialized) {
     return;
   }
-  const panels = initPanels(context, viewsApi);
-  (vscode.window as any).panels = panels; // easier debugging
+  // Mark initialised up-front so a second debug-session start while the
+  // sequential panel creation is still in flight does not create panels twice.
   panelsInitialized = true;
+  const panels = await initPanels(context, viewsApi);
+  (vscode.window as any).panels = panels; // easier debugging
 }
 
 async function loadFlow() {
@@ -830,9 +833,47 @@ async function readTracePaths(traceFolder: string): Promise<string[]> {
   }
 }
 
+/**
+ * Heuristic: does a path look like recorder runtime/stdlib source rather
+ * than user code? Recorders intern stdlib files (e.g. the Ruby/Python
+ * standard library, language runtime) alongside the user's program. When
+ * picking a file to surface in the editor we prefer the user's own code.
+ */
+function looksLikeRuntimeSource(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  return (
+    normalized.includes("/lib/ruby/") ||
+    normalized.includes("/site-packages/") ||
+    normalized.includes("/lib/python") ||
+    normalized.includes("/gems/") ||
+    /\/nix\/store\//.test(normalized) ||
+    normalized.includes("/runtime/")
+  );
+}
+
 async function findFirstTraceSourceFile(traceFolder: string): Promise<string | undefined> {
   // Prefer explicit program paths, then trace paths, then any bundled file copy.
   const candidates: string[] = [];
+
+  // Current CTFS-only recorders carry the source file list inside the
+  // `.ct` container's binary `meta.dat`; the legacy JSON sidecars
+  // (trace_metadata.json / trace_paths.json) are no longer written.
+  // Read the container first and surface the user's program, then any
+  // remaining (non-runtime) source paths it references.
+  const ctfsMeta = readCtfsMetaDat(traceFolder);
+  if (ctfsMeta) {
+    if (ctfsMeta.program) {
+      const programPath = ctfsMeta.workdir && !path.isAbsolute(ctfsMeta.program)
+        ? path.join(ctfsMeta.workdir, ctfsMeta.program)
+        : ctfsMeta.program;
+      candidates.push(programPath);
+    }
+    const userPaths = ctfsMeta.paths.filter((p) => !looksLikeRuntimeSource(p));
+    const runtimePaths = ctfsMeta.paths.filter((p) => looksLikeRuntimeSource(p));
+    candidates.push(...userPaths, ...runtimePaths);
+  }
+
+  // Legacy JSON-sidecar traces (trace_metadata.json / trace_paths.json).
   const metadata = await readTraceMetadata(traceFolder);
   if (metadata?.program) {
     const programPath = metadata.workdir && !path.isAbsolute(metadata.program)
@@ -1350,7 +1391,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
             console.log('[CodeTracer] viewsApi=', !!viewsApi, 'dapVsCodeApi=', !!dapVsCodeApi);
             if (viewsApi && dapVsCodeApi) {
               setupMiddlewareApis(dapVsCodeApi, viewsApi);
-              initPanelsIfNeeded(context, viewsApi);
+              await initPanelsIfNeeded(context, viewsApi);
 
               // Open a source file from the trace so the editor isn't empty
               const traceFolder = session.configuration?.traceFolder as string | undefined;

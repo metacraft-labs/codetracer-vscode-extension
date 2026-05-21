@@ -10,10 +10,37 @@ build:
             --extra-experimental-features flakes \
             .#devShells.x86_64-linux.default --command ./build_for_extension.sh ../../media/ui.js ../../media/ct_vscode.js ../../backend/db-backend && \
         popd;
-    if [[ ! -e ./media/frontend_bundle.js && ! -f ./media/frontend_bundle.js ]]; then
-        rm -f ./media/frontend_bundle.js
-        ln -s $(pwd)/libs/codetracer/src/public/dist/frontend_bundle.js ./media/frontend_bundle.js
-    fi;
+    # Re-build the webpack frontend bundle with `--devtool false`.
+    #
+    # `build_for_extension.sh` builds `frontend_bundle.js` via codetracer's
+    # `webpack.config.js`, which runs in `mode: development`. Webpack's
+    # development mode defaults `devtool` to `eval`, which wraps every one
+    # of ~3500 modules in a separate `eval()` call. Five CodeTracer webview
+    # panels each load this bundle, and `eval`-mode parsing is so expensive
+    # that loading it in several webviews at once exhausted the single
+    # shared VS Code renderer process and crashed it ("renderer closed the
+    # MessagePort"). A `devtool: false` build emits an ordinary
+    # function-wrapped bundle that V8 can lazily parse, removing the crash.
+    pushd libs/codetracer && \
+        node node_modules/webpack-cli/bin/cli.js --config webpack.config.js --devtool false && \
+        popd;
+    # Copy the complete webpack output — `frontend_bundle.js` AND every
+    # code-split chunk (`*.frontend_bundle.js`) plus the emitted asset
+    # files (Monaco web-workers, the oniguruma .wasm, fonts, …). The
+    # bundle's runtime resolves async `import()` chunks relative to its own
+    # script URL, so the chunks must sit next to `frontend_bundle.js` in
+    # `media/` or Monaco / Nim-language loading 404s ("Error using
+    # fileReader"). The previous symlink-only step copied just the entry
+    # bundle and left every chunk missing.
+    rm -f ./media/frontend_bundle.js
+    cp -f libs/codetracer/src/public/dist/*.frontend_bundle.js ./media/
+    for asset in libs/codetracer/src/public/dist/*; do
+        case "$asset" in
+            *.frontend_bundle.js) ;;
+            *.LICENSE.txt) ;;
+            *) cp -f "$asset" ./media/ ;;
+        esac
+    done
     if [[ ! -e ./media/third_party && ! -d ./media/third_party ]]; then
         rm -rf ./media/third_party
         ln -s $(pwd)/libs/codetracer/src/public/third_party media/third_party

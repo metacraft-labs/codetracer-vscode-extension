@@ -105,7 +105,18 @@ export function getOrCreatePanel(
         vscode.ViewColumn.Two,
         {
             enableScripts: true,
-            retainContextWhenHidden: true
+            // `retainContextWhenHidden: false` so a hidden panel releases
+            // its renderer/iframe context. The CodeTracer webview loads a
+            // large (~44 MB) frontend bundle plus a ~14 MB Nim `ui.js`;
+            // keeping the context alive for every hidden panel kept a copy
+            // of all that resident in the VS Code renderer for each of the
+            // five panels at once. With this off, only the visible panel
+            // holds the bundle; hidden panels reload it when revealed.
+            retainContextWhenHidden: false,
+            localResourceRoots: [
+                vscode.Uri.joinPath(context.extensionUri, "media"),
+                vscode.Uri.joinPath(context.extensionUri, "public"),
+            ],
         }
     );
 
