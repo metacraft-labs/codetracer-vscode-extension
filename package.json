@@ -48,6 +48,16 @@
           "type": "string",
           "default": "",
           "description": "Path to the rr executable used by ct-native-replay (optional; falls back to PATH or bundled rr)"
+        },
+        "codetracer.marketingListenerEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the CodeTracer marketing-command TCP listener (127.0.0.1) used by the GuiAssert recording pipeline. Off by default — only turn on for video recording sessions."
+        },
+        "codetracer.marketingListenerPort": {
+          "type": "number",
+          "default": 7117,
+          "description": "TCP port the marketing-command listener binds to on 127.0.0.1 (default 7117; matches GuiAssert's VsCodeClient)."
         }
       }
     },
