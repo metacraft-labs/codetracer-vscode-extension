@@ -65,6 +65,14 @@ jobs:
     runs-on: [self-hosted, nixos]
 
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -75,7 +83,7 @@ jobs:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install dependencies
         run: nix develop -c just install
@@ -117,6 +125,14 @@ jobs:
       CODETRACER_RR_SOFT_MODE: "1"
 
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -127,7 +143,7 @@ jobs:
           cachix-cache: ${{ vars.CACHIX_CACHE }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
           substituters: ${{ vars.SUBSTITUTERS }}
-          gh-token: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          gh-token: ${{ steps.app-token.outputs.token }}
 
       - name: Install just
         uses: extractions/setup-just@v2
@@ -147,7 +163,7 @@ jobs:
       # tree-sitter-nim.
       - name: Clone codetracer
         env:
-          GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           CT_REF="${{ steps.resolve-codetracer-ref.outputs.ref }}"
           DEST="$GITHUB_WORKSPACE/../codetracer"
@@ -164,7 +180,7 @@ jobs:
       # Each line in the pins file is: <name> <sha> <branch>
       - name: Restore sibling repos
         env:
-          GH_TOKEN: ${{ secrets.GH_READ_METACRAFT_PRIVATE_REPOS }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           # Rewrite GitHub HTTPS URLs to include the access token so that
           # --recurse-submodules can clone private submodules.
