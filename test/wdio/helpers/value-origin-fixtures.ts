@@ -76,7 +76,7 @@ export function codetracerFixtureRoot(): string {
   )
 }
 
-export type SupportedLanguage = "python" | "ruby" | "javascript"
+export type SupportedLanguage = "python" | "ruby" | "javascript" | "rust" | "c" | "cpp" | "nim" | "go" | "d"
 
 /**
  * Absolute path to the fixture's source program inside the locally
@@ -94,6 +94,18 @@ export function originFixturePath(
         return "main.rb"
       case "javascript":
         return "main.js"
+      case "rust":
+        return "main.rs"
+      case "c":
+        return "main.c"
+      case "cpp":
+        return "main.cpp"
+      case "nim":
+        return "main.nim"
+      case "go":
+        return "main.go"
+      case "d":
+        return "main.d"
     }
   })()
   return path.join(localFixtureRoot, language, scenario, fileName)
@@ -210,6 +222,77 @@ export function javascriptRecorderUnavailableReason(): string | null {
 }
 
 /**
+ * M11 — RR-backed origin spec probes for natively-compiled languages.
+ *
+ * The native-backend pipeline drives `rr` for record/replay and
+ * `ct-native-replay` (formerly `ct-rr-support`) as the worker. Each
+ * per-language spec additionally needs the source compiler on PATH.
+ */
+export function rrToolchainUnavailableReason(): string | null {
+  if (findOnPath("rr") === null) {
+    return "rr binary not on PATH (install rr to run RR-backed origin tests)"
+  }
+  if (findOnPath("ct-native-replay") === null && findOnPath("ct-rr-support") === null) {
+    return "ct-native-replay not on PATH (M11 RR specs need the native-backend replay worker)"
+  }
+  return null
+}
+
+export function rustRrRecorderUnavailableReason(): string | null {
+  const tc = rrToolchainUnavailableReason()
+  if (tc !== null) return tc
+  if (findOnPath("rustc") === null) {
+    return "rustc not on PATH (M11 Rust RR spec needs the Rust compiler)"
+  }
+  return null
+}
+
+export function cRrRecorderUnavailableReason(): string | null {
+  const tc = rrToolchainUnavailableReason()
+  if (tc !== null) return tc
+  if (findOnPath("gcc") === null) {
+    return "gcc not on PATH (M11 C RR spec needs a C compiler)"
+  }
+  return null
+}
+
+export function cppRrRecorderUnavailableReason(): string | null {
+  const tc = rrToolchainUnavailableReason()
+  if (tc !== null) return tc
+  if (findOnPath("g++") === null) {
+    return "g++ not on PATH (M11 C++ RR spec needs a C++ compiler)"
+  }
+  return null
+}
+
+export function nimRrRecorderUnavailableReason(): string | null {
+  const tc = rrToolchainUnavailableReason()
+  if (tc !== null) return tc
+  if (findOnPath("nim") === null) {
+    return "nim not on PATH (M11 Nim RR spec needs the Nim compiler)"
+  }
+  return null
+}
+
+export function goRrRecorderUnavailableReason(): string | null {
+  const tc = rrToolchainUnavailableReason()
+  if (tc !== null) return tc
+  if (findOnPath("go") === null) {
+    return "go not on PATH (M11 Go RR spec needs the Go compiler)"
+  }
+  return null
+}
+
+export function dRrRecorderUnavailableReason(): string | null {
+  const tc = rrToolchainUnavailableReason()
+  if (tc !== null) return tc
+  if (findOnPath("ldc2") === null) {
+    return "ldc2 not on PATH (M11 D RR spec needs the LDC2 D compiler)"
+  }
+  return null
+}
+
+/**
  * Aggregate SKIP probe used at the top of every M7 spec. Composes the
  * individual probes in the order a real spec runs them: fixture must be
  * synced first (no point checking recorders otherwise), then ct binary,
@@ -236,5 +319,17 @@ export function valueOriginSpecSkipReason(
       return rubyRecorderUnavailableReason()
     case "javascript":
       return javascriptRecorderUnavailableReason()
+    case "rust":
+      return rustRrRecorderUnavailableReason()
+    case "c":
+      return cRrRecorderUnavailableReason()
+    case "cpp":
+      return cppRrRecorderUnavailableReason()
+    case "nim":
+      return nimRrRecorderUnavailableReason()
+    case "go":
+      return goRrRecorderUnavailableReason()
+    case "d":
+      return dRrRecorderUnavailableReason()
   }
 }
