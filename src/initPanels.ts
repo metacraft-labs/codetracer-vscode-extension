@@ -62,6 +62,106 @@ function dapRedirect(
   panel: any
 ) { }
 
+/**
+ * Snapshot of the embedded CodeTracer webview panels currently mounted in
+ * the host workbench. Callers (typically the extension-side command and
+ * DAP-event forwarding layers added by M6 of the Value Origin Tracking
+ * initiative) use this snapshot to address `panel.webview.postMessage(...)`
+ * directly without taking a dependency on the internal `panelMap` symbol.
+ */
+export function getActivePanels(): Partial<CodeTracerPanels> {
+  // Return a shallow copy — callers iterate the result and we do not want
+  // them mutating the internal `panelMap` (e.g. by deleting entries).
+  return { ...panelMap };
+}
+
+// Minimal duck-typed shape of the panels we forward to. Tests install
+// a fake panel matching this contract via `_testRegisterPanelOverride`
+// so they can observe `postMessage` calls without needing a real
+// DAP session, a real CodeTracer binary, or a real webview frame.
+export interface PostMessageTarget {
+  webview: { postMessage: (message: unknown) => unknown };
+}
+
+// Internal map of test-installed panel overrides. Keyed by an opaque
+// caller-chosen name so multiple tests can install/uninstall independently.
+const panelOverrides: Map<string, PostMessageTarget> = new Map();
+
+/**
+ * Install a fake "panel" that captures `postMessage` calls from
+ * `forwardToEmbeddedPanels(...)`. Intended for the M6 verification
+ * suite in `test/wdio/specs/value-origin/` — production code never
+ * calls this. The caller is responsible for invoking the returned
+ * dispose function to remove the override.
+ *
+ * This test seam is deliberately exposed from the same module that
+ * owns `panelMap` (rather than via a globals hack) so its contract is
+ * type-checked and the implementation stays internal to `initPanels`.
+ */
+export function _testRegisterPanelOverride(
+  name: string,
+  target: PostMessageTarget
+): () => void {
+  panelOverrides.set(name, target);
+  return () => {
+    panelOverrides.delete(name);
+  };
+}
+
+/**
+ * Forward an extension → webview post-message to every embedded CodeTracer
+ * panel that is currently mounted (State, Calltrace, Scratchpad, Event Log,
+ * Terminal Output). The State pane is the primary target for Value Origin
+ * Tracking but the Scratchpad and Editor panes also receive origin-related
+ * messages (pinned chain diffs, badge updates), so the broadcast keeps the
+ * post-message bridge symmetric with the in-Electron event bus and avoids
+ * the extension needing to know which sub-pane consumes a given message.
+ *
+ * Returns the number of panels the message was successfully posted to so
+ * callers (and tests) can verify the forwarding actually landed.
+ *
+ * Spec: `codetracer-specs/GUI/Debugging-Features/Value-Origin-Tracking.md`
+ * §8.2 — the extension is the thin command/menu + DAP-event bridge; all
+ * rendering lives inside the embedded CodeTracer panels.
+ */
+export function forwardToEmbeddedPanels(message: unknown): number {
+  let delivered = 0;
+  for (const key of Object.keys(panelMap) as (keyof CodeTracerPanels)[]) {
+    const panel = panelMap[key];
+    if (!panel) {
+      continue;
+    }
+    try {
+      // `postMessage` returns a Thenable<boolean>; we intentionally
+      // fire-and-forget here — failures are logged for diagnostics but must
+      // not block the DAP-event loop or the synchronous command handler.
+      void panel.webview.postMessage(message);
+      delivered += 1;
+    } catch (err) {
+      console.warn(
+        `[CodeTracer] forwardToEmbeddedPanels: post to ${key} panel failed:`,
+        err
+      );
+    }
+  }
+  // Test-only overrides registered via `_testRegisterPanelOverride`. These
+  // are addressed *in addition* to the real panels so a test can still
+  // observe the message even when a real DAP session is alive. The map is
+  // empty in production builds, so the loop body is a no-op there.
+  for (const [name, target] of panelOverrides) {
+    try {
+      void target.webview.postMessage(message);
+      delivered += 1;
+    } catch (err) {
+      console.warn(
+        `[CodeTracer] forwardToEmbeddedPanels: post to test panel "${name}" failed:`,
+        err
+      );
+    }
+  }
+  return delivered;
+}
+
 export function createStatePanel(
   context: vscode.ExtensionContext,
   viewsApi: any

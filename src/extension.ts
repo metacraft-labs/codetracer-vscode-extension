@@ -1,6 +1,15 @@
 /// <reference path="../vscode.proposed.editorInsets.d.ts" />
 import * as vscode from "vscode";
-import { initPanels, disposePanels, disposeCommands, addTracepoint, addLoopPosition } from "./initPanels";
+import {
+  initPanels,
+  disposePanels,
+  disposeCommands,
+  addTracepoint,
+  addLoopPosition,
+  forwardToEmbeddedPanels,
+  _testRegisterPanelOverride,
+  PostMessageTarget,
+} from "./initPanels";
 import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
@@ -387,6 +396,102 @@ function registerFlowDecorationHandlers(
       }
     }
   });
+}
+
+// Value Origin Tracking (M6, spec §8.2) — message commands used by the
+// extension → embedded-webview post-message bridge. These constants are
+// shared between the command handler and the DAP-event forwarder so the
+// embedded panels can route them through one router on their side.
+//
+// `SHOW_VALUE_ORIGIN_COMMAND` is what `ct-vscode.showValueOrigin` emits;
+// the embedded `StateVM.onShowOrigin` listens for it.
+//
+// `UPDATED_ORIGIN_CHAIN_EVENT` is the DAP event the db-backend emits as a
+// lazy continuation alongside the canonical `ct/originChain` response
+// (spec §5.2). The TypeScript side does not parse the body — it just
+// hands the entire event payload over to the embedded webview, which
+// already knows how to merge the update into `OriginChainVM`.
+const SHOW_VALUE_ORIGIN_COMMAND = "showValueOrigin";
+const UPDATED_ORIGIN_CHAIN_EVENT = "ct/updated-origin-chain";
+
+/**
+ * Resolve the expression to query for "Show Value Origin" from the active
+ * editor. Mirrors the heuristic used by `ct-vscode.addToScratchpad`:
+ *
+ *   1. If the user has a non-empty selection, use the selected text verbatim
+ *      (this is the path the `editor/context` menu entry takes when the
+ *      `editorHasSelection` clause matches).
+ *   2. Otherwise fall back to the word range under the cursor — the same
+ *      thing VS Code's "F2 to rename" / "Ctrl+click" features use, so the
+ *      gesture matches user expectation.
+ *   3. If neither resolves, return `undefined` so the caller can decide
+ *      whether to bail or forward an empty payload (the side-panel itself
+ *      will then prompt for an expression).
+ */
+function resolveValueOriginExpression(
+  editor: vscode.TextEditor | undefined
+): { expression: string; location: { path: string; line: number; column: number } } | undefined {
+  if (!editor) {
+    return undefined;
+  }
+
+  const selection = editor.selection;
+  let expression = "";
+  if (!selection.isEmpty) {
+    expression = editor.document.getText(selection).trim();
+  }
+  if (expression.length === 0) {
+    const wordRange = editor.document.getWordRangeAtPosition(selection.active);
+    if (wordRange) {
+      expression = editor.document.getText(wordRange).trim();
+    }
+  }
+  if (expression.length === 0) {
+    return undefined;
+  }
+
+  // Use 1-based line numbers to match the convention used everywhere in the
+  // CodeTracer DAP protocol (see `ctSourceLineJump`'s `selection.active.line + 1`).
+  return {
+    expression,
+    location: {
+      path: editor.document.uri.fsPath,
+      line: selection.active.line + 1,
+      column: selection.active.character + 1,
+    },
+  };
+}
+
+/**
+ * Handler for `ct-vscode.showValueOrigin` (M6, spec §8.2).
+ *
+ * Resolves the variable/expression from the active editor, then forwards
+ * the request into every embedded CodeTracer panel via the existing
+ * `panel.webview.postMessage(...)` bridge. The embedded `StateVM` listens
+ * for `command: "showValueOrigin"` and dispatches the actual
+ * `ct/originChain` DAP request itself — the extension intentionally does
+ * not own that DAP round-trip (no logic duplication between host and
+ * embedded panels).
+ *
+ * Returns the number of panels the message was delivered to, so the test
+ * suite can assert the forwarding actually fired even when the embedded
+ * panels haven't fully mounted yet.
+ */
+function showValueOriginHandler(): number {
+  const editor = vscode.window.activeTextEditor;
+  const resolved = resolveValueOriginExpression(editor);
+  const message = {
+    command: SHOW_VALUE_ORIGIN_COMMAND,
+    value: resolved ?? { expression: "", location: null },
+  };
+  const delivered = forwardToEmbeddedPanels(message);
+  if (delivered === 0) {
+    console.warn(
+      "[CodeTracer] ct-vscode.showValueOrigin: no embedded panels available; " +
+      "the message was not delivered. Start a CodeTracer debug session first."
+    );
+  }
+  return delivered;
 }
 
 /// Candidate file names for an executable, accounting for the Windows `.exe`
@@ -1319,6 +1424,14 @@ async function reinitCommands(context: vscode.ExtensionContext) {
     stub('ct-vscode.backwardSourceLineJump');
     stub('ct-vscode.addToScratchpad');
     stub('ct-vscode.addTracepoint');
+    // Value Origin Tracking (M6): the command is *always* contributed in
+    // package.json so the verification suite finds it after activation,
+    // regardless of whether the Nim backend has finished loading. When the
+    // backend is unavailable we still register a real handler that forwards
+    // an empty payload into any embedded panels that are mounted — this
+    // preserves the post-message contract for tests that simulate trigger
+    // before a real DAP session is alive.
+    register('ct-vscode.showValueOrigin', () => showValueOriginHandler());
   } else {
     // ---- real registrations ----
     register('ct-vscode.toggleCT', async () => toggleCtReal(LoadMode.Trace));
@@ -1374,6 +1487,16 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       const inset = addTracepoint(context, viewsApi, editor, line);
       tracepointInsets.set(line, inset);
     });
+
+    // Value Origin Tracking (M6): the command resolves the variable name to
+    // query, then forwards into the embedded webview's `StateVM.onShowOrigin`
+    // via the existing post-message bridge. The extension itself does NOT
+    // render any TreeView, hover provider, decoration type or standalone
+    // webview — every origin chain affordance is rendered by the embedded
+    // CodeTracer panels (spec §8.2). This handler is the thin command-plumbing
+    // half of M6; the other half is the `ct/updated-origin-chain` DAP-event
+    // forwarder registered below.
+    register('ct-vscode.showValueOrigin', () => showValueOriginHandler());
   }
 
   if (miscDisposables.length === 0) {
@@ -1442,12 +1565,58 @@ async function reinitCommands(context: vscode.ExtensionContext) {
           await reinitCommands(context);
         }
       }),
+      // Value Origin Tracking (M6, spec §5.2) — the db-backend emits
+      // `ct/updated-origin-chain` as a lazy continuation alongside the
+      // canonical `ct/originChain` response so frontends can update an
+      // already-rendered chain without re-issuing the request. The
+      // TypeScript side does NOT parse the event body (everything is
+      // rendered inside the embedded panels per spec §8.2); it just
+      // re-broadcasts the payload to every embedded CodeTracer panel.
+      // Using `onDidReceiveDebugSessionCustomEvent` rather than the
+      // Nim-side CtEventKind table keeps the bridge independent of the
+      // (potentially older) CodeTracer submodule pin shipped with the
+      // extension.
+      vscode.debug.onDidReceiveDebugSessionCustomEvent((event) => {
+        if (event.session.type !== "codetracer-debug") {
+          return;
+        }
+        if (event.event !== UPDATED_ORIGIN_CHAIN_EVENT) {
+          return;
+        }
+        forwardToEmbeddedPanels({
+          command: UPDATED_ORIGIN_CHAIN_EVENT,
+          value: event.body,
+        });
+      }),
     );
     context.subscriptions.push(...miscDisposables);
   }
 }
 
-export async function activate(context: vscode.ExtensionContext) {
+/**
+ * The object returned from `activate(...)` is exposed to other extensions
+ * (and to the M6 verification suite) via `vscode.extensions.getExtension(...).exports`.
+ *
+ * The surface is intentionally narrow — only the helpers the value-origin
+ * test suite needs to verify the extension-side bridge from §8.2:
+ *
+ *   - `registerPanelOverride(name, target)` lets a test install a fake
+ *     panel that captures `postMessage` calls from
+ *     `forwardToEmbeddedPanels(...)`, so we can verify
+ *     `ct-vscode.showValueOrigin` and the `ct/updated-origin-chain` event
+ *     forwarder land the expected message without depending on the full
+ *     CodeTracer toolchain being available in the test environment.
+ *
+ *   - `forwardToEmbeddedPanels(message)` is the same function the
+ *     command handler and the DAP-event subscription call internally —
+ *     exposing it lets tests directly exercise the post-message bridge.
+ */
+export interface CodeTracerExtensionExports {
+  registerPanelOverride(name: string, target: PostMessageTarget): () => void;
+  forwardToEmbeddedPanels(message: unknown): number;
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<CodeTracerExtensionExports> {
   // initial (stub or real)
   await reinitCommands(context);
   context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('codetracer-debug', {
@@ -1477,6 +1646,11 @@ export async function activate(context: vscode.ExtensionContext) {
       return undefined;
     }
   }));
+
+  return {
+    registerPanelOverride: _testRegisterPanelOverride,
+    forwardToEmbeddedPanels,
+  };
 }
 
 export function deactivate() {

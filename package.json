@@ -150,6 +150,11 @@
         "command": "ct-vscode.addToScratchpad",
         "title": "Add to Scratchpad",
         "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.showValueOrigin",
+        "title": "Show Value Origin",
+        "category": "CodeTracer"
       }
     ],
     "menus": {
@@ -178,10 +183,34 @@
           "command": "ct-vscode.addTracepoint",
           "when": "codetracer:active",
           "group": "codetracerSpecific"
+        },
+        {
+          "command": "ct-vscode.showValueOrigin",
+          "when": "codetracer:active",
+          "group": "codetracerSpecific"
+        }
+      ],
+      "debug/variables/context": [
+        {
+          "command": "ct-vscode.showValueOrigin",
+          "when": "debugType == codetracer-debug",
+          "group": "ct@10"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "ct-vscode.showValueOrigin"
         }
       ]
     },
-    "keybindings": [],
+    "keybindings": [
+      {
+        "command": "ct-vscode.showValueOrigin",
+        "key": "ctrl+shift+o",
+        "mac": "cmd+shift+o",
+        "when": "codetracer:active"
+      }
+    ],
     "viewsContainers": {
       "activitybar": [
         {
