@@ -100,6 +100,99 @@ try {
   process.env.TMP = shortTmpDir
 } catch { }
 
+/**
+ * M7 — Value Origin Tracking fixture-discovery hook.
+ *
+ * Resolves the codetracer-repo fixture root and exposes it locally under
+ * `test/wdio/fixtures/origin/` so the M7 specs can address the fixtures
+ * through a stable repo-relative path without having to thread the
+ * codetracer-checkout location into every spec.
+ *
+ * Resolution order (matches the documented `CT_REPO` env contract):
+ *   1. `$CT_REPO/src/db-backend/tests/fixtures/origin/` (explicit override).
+ *   2. Conventional sibling layout `<this-repo>/../codetracer/src/db-backend/tests/fixtures/origin/`
+ *      used by the `.envrc` machinery in both repos.
+ *
+ * When neither resolves, the function logs a hint and returns — the M7
+ * specs SKIP-cleanly with a precise reason via
+ * `helpers/value-origin-fixtures.ts::valueOriginSpecSkipReason`.
+ *
+ * Linking strategy:
+ *   - POSIX (Linux, macOS): symlink the catalogue root. Zero-copy and
+ *     edits in the codetracer checkout flow through immediately.
+ *   - Windows: copy with `fs.cpSync`. Symlinks require admin privileges
+ *     on a default Windows install, and CI agents are not admin.
+ *
+ * Document the new env var alongside the existing `CODETRACER_PATH` used
+ * by the smoke tests — both are honored by the helper.
+ */
+function syncValueOriginFixtures(): void {
+  const explicit = process.env.CT_REPO?.trim()
+  const candidateRoots: string[] = []
+  if (explicit && explicit.length > 0) {
+    candidateRoots.push(
+      path.join(explicit, 'src', 'db-backend', 'tests', 'fixtures', 'origin'),
+    )
+  }
+  // Conventional sibling layout — same one `.envrc` uses to discover the
+  // codetracer checkout when no override is set.
+  candidateRoots.push(
+    path.resolve(__dirname, '..', 'codetracer', 'src', 'db-backend', 'tests', 'fixtures', 'origin'),
+  )
+
+  const sourceRoot = candidateRoots.find((p) => {
+    try {
+      return fs.statSync(p).isDirectory()
+    } catch {
+      return false
+    }
+  })
+
+  const destRoot = path.join(__dirname, 'test', 'wdio', 'fixtures', 'origin')
+  // The destination's parent must exist regardless — the helpers introspect
+  // it even when no fixtures land (the per-spec SKIP probe then fires).
+  try {
+    fs.mkdirSync(path.dirname(destRoot), { recursive: true })
+  } catch {
+    /* ignore — diagnostics handler will flag this */
+  }
+
+  if (!sourceRoot) {
+    console.warn(
+      '[M7] Value Origin fixtures NOT synced — set CT_REPO to a codetracer ' +
+      'checkout containing src/db-backend/tests/fixtures/origin/ ' +
+      '(or place a sibling codetracer/ checkout next to this repo). ' +
+      'M7 specs that need fixtures will SKIP with this reason.',
+    )
+    return
+  }
+
+  try {
+    const existing = fs.lstatSync(destRoot)
+    if (existing.isSymbolicLink()) {
+      const current = fs.readlinkSync(destRoot)
+      if (path.resolve(current) === path.resolve(sourceRoot)) {
+        console.log(`[M7] Value Origin fixtures symlink already current → ${sourceRoot}`)
+        return
+      }
+    }
+    // Remove existing destination so we can replace it atomically. We
+    // never delete the source — only the local mirror.
+    fs.rmSync(destRoot, { recursive: true, force: true })
+  } catch {
+    // not present yet — fine
+  }
+
+  if (process.platform === 'win32') {
+    // Recursive copy. fs.cpSync requires Node ≥ 16.7.0.
+    fs.cpSync(sourceRoot, destRoot, { recursive: true })
+    console.log(`[M7] Value Origin fixtures copied → ${destRoot} from ${sourceRoot}`)
+  } else {
+    fs.symlinkSync(sourceRoot, destRoot, 'dir')
+    console.log(`[M7] Value Origin fixtures symlinked → ${destRoot} → ${sourceRoot}`)
+  }
+}
+
 export const config: any = {
   runner: 'local',
 
@@ -185,6 +278,20 @@ export const config: any = {
       fs.mkdirSync(cacheDir, { recursive: true })
       console.log('Created .wdio-vscode-service cache directory')
     }
+
+    // M7 — sync Value Origin Tracking fixtures from $CT_REPO into the local
+    // tree the specs read. The source-of-truth catalogue lives in the
+    // codetracer repo (it ships with the recorder fixtures + ANSWERS.md
+    // files used by the M3 DAP-level tests). The VS Code extension repo
+    // does NOT vendor a copy — duplicating the fixtures would put us at
+    // risk of drift from the recorders' ground truth. Instead we resolve
+    // $CT_REPO (or the conventional sibling `<parent>/codetracer/` checkout
+    // used by `.envrc`) and symlink/copy the catalogue under
+    // `test/wdio/fixtures/origin/`.
+    //
+    // Symlink on POSIX (zero-copy, picks up edits to the source), copy on
+    // Windows (filesystem symlinks require elevation by default).
+    syncValueOriginFixtures()
 
     // Compile the extension
     try {

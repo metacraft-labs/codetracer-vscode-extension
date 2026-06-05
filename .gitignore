@@ -35,6 +35,14 @@ out-wdio/
 test/traces/
 test/fixtures/elixir-canonical-flow/
 test/wdio/diagnostics/
+# M7 Value Origin Tracking fixtures — synced/symlinked from $CT_REPO at
+# wdio onPrepare time. Source-of-truth lives in the codetracer repo at
+# src/db-backend/tests/fixtures/origin/; the WDIO setup hook
+# (syncValueOriginFixtures in wdio.conf.ts) populates this dir on every
+# test run, so we never commit it. We ignore the parent fixtures/ dir
+# because the entry is a symlink (POSIX) or a copied tree (Windows) and
+# in either case it must not enter the index.
+test/wdio/fixtures/
 # Stylus trace fixture (generated, not committed — regenerate with scripts/prepare-stylus-fixture.sh)
 test/fixtures/stylus-fund-trace/trace.json
 test/fixtures/stylus-fund-trace/trace.bin

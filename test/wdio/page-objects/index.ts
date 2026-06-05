@@ -22,3 +22,9 @@ export {
   inspectWebviews,
 } from './panels'
 export type { PanelInfo } from './panels'
+
+export {
+  OriginChainPanelPageObject,
+  ORIGIN_SELECTORS,
+} from './originChainPanel'
+export type { HopDescriptor } from './originChainPanel'
