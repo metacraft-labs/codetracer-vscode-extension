@@ -3,6 +3,60 @@ import fs from 'fs'
 import os from 'os'
 import { execSync } from 'child_process'
 
+/**
+ * Garbage-collect any chromedriver / electron / wdio-vscode-service
+ * processes left behind by a previous run.  Self-hosted runners reuse
+ * the same machine across jobs, and an electron crash or a forcibly
+ * cancelled run leaves the per-run user-data-dir lease in place — the
+ * next session-create then fails with
+ *   ``session not created: probably user data directory is already in use``
+ * even though *this* run's user-data-dir is brand new.  Idempotent on
+ * a fresh runner.  We deliberately match by command-line substring
+ * rather than process tree because the previous run's parent shell is
+ * already gone; only the orphaned children survive.
+ *
+ * Linux / macOS use ``pkill``; on Windows we use ``taskkill``.  Both
+ * are non-fatal when no matching processes exist.
+ */
+function killLeftoverWdioProcesses(): void {
+  const isPosix = process.platform !== 'win32'
+  const kill = (pattern: string) => {
+    try {
+      if (isPosix) {
+        execSync(`pkill -9 -f ${JSON.stringify(pattern)}`, { stdio: 'ignore' })
+      } else {
+        // Windows wmic-style kill: match by command line containing the pattern.
+        execSync(
+          `wmic process where "CommandLine like '%${pattern.replace(/'/g, "''")}%'" call terminate`,
+          { stdio: 'ignore' },
+        )
+      }
+    } catch {
+      // No matching processes — that's the steady-state.  Ignore.
+    }
+  }
+
+  // Order matters: kill the orchestrators (wdio-vscode-service /
+  // electron) before chromedriver so chromedriver doesn't try to
+  // restart them while we're tearing down.
+  kill('wdio-vscode-service')
+  kill('--user-data-dir=/tmp/wdio-vscode-ct')
+  kill('--user-data-dir=' + path.join(os.tmpdir(), 'wdio-vscode-ct'))
+  kill('chromedriver')
+
+  // Reclaim the volatile storage root.  Per-run subdirs from prior
+  // pids are dead weight on a long-lived self-hosted runner and they
+  // can accumulate gigabytes.  Use ``rm -rf`` semantics that don't
+  // explode if the path is missing.
+  for (const dir of ['/tmp/wdio-vscode-ct', path.join(os.tmpdir(), 'wdio-vscode-ct')]) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // ignore — diagnostics handler will flag persistent failures
+    }
+  }
+}
+
 // Resolve chromedriver binary: prefer Nix-provided, fallback to npm package.
 // The npm chromedriver binary won't run on NixOS (dynamically linked), so
 // we look for a system chromedriver first.
@@ -272,6 +326,14 @@ export const config: any = {
   onPrepare: function (_config, _capabilities) {
     console.log('Starting WebdriverIO CodeTracer Extension Tests...')
 
+    // Reap chromedriver / electron / wdio-vscode-service leftovers from
+    // any prior crashed or cancelled run on this (self-hosted) machine.
+    // The per-run ``uniqueStorageRoot`` minted below is brand new, but
+    // chrome's "user data directory is already in use" check is sensitive
+    // to ANY peer process still holding ANY ``--user-data-dir=/tmp/
+    // wdio-vscode-ct/...`` lease, including ones from prior runs.
+    killLeftoverWdioProcesses()
+
     // Create wdio-vscode-service cache directory to avoid ENOENT errors
     const cacheDir = path.join(__dirname, '.wdio-vscode-service')
     if (!fs.existsSync(cacheDir)) {
@@ -358,6 +420,11 @@ export const config: any = {
     if (exitCode !== 0) {
       console.log('Tests failed. Check the logs above for details.')
     }
+    // Mirror onPrepare: kill any orphan chromedriver / electron / wdio
+    // processes this run started so the next run on the same self-hosted
+    // machine starts from a clean slate, even if the test runner itself
+    // crashes between onComplete and the next onPrepare.
+    killLeftoverWdioProcesses()
   },
 
   onReload: function (_oldSessionId, _newSessionId) {
