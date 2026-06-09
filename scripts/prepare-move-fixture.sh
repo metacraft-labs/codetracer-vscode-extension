@@ -80,13 +80,36 @@ mkdir -p "$FIXTURE_DIR"
 # Step 1: Run `sui move test --trace` to produce the NDJSON trace.
 # The trace files are written into <package>/build/<PackageName>/traces/.
 MOVE_PACKAGE_DIR="$MOVE_RECORDER_DIR/test-programs/move/flow_test"
-# The Sui CLI flag varies by version: newer versions use --trace, older
-# versions use --trace-execution.  Try --trace first (matches CI Nix dev shell),
-# fall back to --trace-execution if that fails.
+# The Sui CLI flag varies by version: newer versions accept ``--trace``,
+# older versions accept ``--trace-execution``.  Try the new spelling
+# first, and **only** fall back when the failure is specifically an
+# "unexpected argument" error from the CLI parser — every other failure
+# (test panic, build error, network glitch) must surface verbatim so we
+# don't accidentally re-run with the wrong flag and report a misleading
+# diagnostic.
 echo "Running sui move test --trace in $MOVE_PACKAGE_DIR ..."
-if ! recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace --path "$MOVE_PACKAGE_DIR" 2>/dev/null; then
-  echo "  --trace not recognized, trying --trace-execution..."
-  recorder_exec "$MOVE_RECORDER_DIR" sui move test --trace-execution --path "$MOVE_PACKAGE_DIR"
+TRACE_STDERR="$(mktemp)"
+trap 'rm -f "$TRACE_STDERR"' EXIT
+if recorder_exec "$MOVE_RECORDER_DIR" \
+   sui move test --trace --path "$MOVE_PACKAGE_DIR" 2> >(tee "$TRACE_STDERR" >&2)
+then
+  rm -f "$TRACE_STDERR"
+  trap - EXIT
+else
+  rc=$?
+  if grep -qE "unexpected argument '--trace'|unrecognized option.*--trace" "$TRACE_STDERR"; then
+    echo "  --trace not recognized by this sui build, retrying with --trace-execution..."
+    rm -f "$TRACE_STDERR"
+    trap - EXIT
+    recorder_exec "$MOVE_RECORDER_DIR" \
+      sui move test --trace-execution --path "$MOVE_PACKAGE_DIR"
+  else
+    rm -f "$TRACE_STDERR"
+    trap - EXIT
+    echo "ERROR: sui move test --trace failed (exit=$rc)." >&2
+    echo "  See stderr above for the real cause; not falling back to --trace-execution." >&2
+    exit "$rc"
+  fi
 fi
 
 # Step 2: Find the NDJSON trace file(s).
