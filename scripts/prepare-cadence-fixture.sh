@@ -52,8 +52,10 @@ echo "  Fixture output:    $FIXTURE_DIR"
 echo ""
 
 # Skip if fixture already exists and FORCE is not set
-if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "${FORCE:-}" ]; then
-  if [ -f "$FIXTURE_DIR/trace.json" ] || [ -f "$FIXTURE_DIR/trace.bin" ]; then
+if [ -d "$FIXTURE_DIR" ] && [ -z "${FORCE:-}" ]; then
+  if compgen -G "$FIXTURE_DIR/*.ct" >/dev/null \
+    || { [ -f "$FIXTURE_DIR/trace_metadata.json" ] && \
+         { [ -f "$FIXTURE_DIR/trace.json" ] || [ -f "$FIXTURE_DIR/trace.bin" ]; }; }; then
     echo "Fixture already exists (use FORCE=1 to re-record)."
     echo "  Location: $FIXTURE_DIR"
     exit 0
@@ -100,15 +102,20 @@ mkdir -p "$FIXTURE_DIR"
 echo "Recording Cadence trace..."
 recorder_exec "$CADENCE_RECORDER_DIR" "$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
 
-# Verify the fixture was created
-if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then
-  echo "ERROR: Fixture generation failed — trace_metadata.json not found."
+# Verify the fixture was created.  Recorders now emit CTFS
+# bundles (a *.ct directory or file) instead of the legacy
+# trace_metadata.json + trace.json/trace.bin shape.  Accept
+# either layout for backwards compatibility while consumers
+# migrate.
+if compgen -G "$FIXTURE_DIR/*.ct" >/dev/null; then
+  : # CTFS bundle present
+elif [ -f "$FIXTURE_DIR/trace_metadata.json" ] && \
+     { [ -f "$FIXTURE_DIR/trace.json" ] || [ -f "$FIXTURE_DIR/trace.bin" ]; }; then
+  : # legacy JSON / bin bundle present
+else
+  echo "ERROR: Fixture generation failed — no CTFS bundle (*.ct) and"
+  echo "  no legacy trace.json / trace.bin found in $FIXTURE_DIR."
   echo "  Check the recorder output above for errors."
-  exit 1
-fi
-
-if [ ! -f "$FIXTURE_DIR/trace.json" ] && [ ! -f "$FIXTURE_DIR/trace.bin" ]; then
-  echo "ERROR: Fixture generation failed — neither trace.json nor trace.bin found."
   exit 1
 fi
 

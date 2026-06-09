@@ -52,8 +52,10 @@ echo "  Fixture output:  $FIXTURE_DIR"
 echo ""
 
 # Skip if fixture already exists and FORCE is not set
-if [ -d "$FIXTURE_DIR" ] && [ -f "$FIXTURE_DIR/trace_metadata.json" ] && [ -z "${FORCE:-}" ]; then
-  if [ -f "$FIXTURE_DIR/trace.json" ] || [ -f "$FIXTURE_DIR/trace.bin" ]; then
+if [ -d "$FIXTURE_DIR" ] && [ -z "${FORCE:-}" ]; then
+  if compgen -G "$FIXTURE_DIR/*.ct" >/dev/null \
+    || { [ -f "$FIXTURE_DIR/trace_metadata.json" ] && \
+         { [ -f "$FIXTURE_DIR/trace.json" ] || [ -f "$FIXTURE_DIR/trace.bin" ]; }; }; then
     echo "Fixture already exists (use FORCE=1 to re-record)."
     echo "  Location: $FIXTURE_DIR"
     exit 0
