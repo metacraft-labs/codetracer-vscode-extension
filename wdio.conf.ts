@@ -269,7 +269,42 @@ function prepareVscodeCacheToBypassManifestFetch(): void {
     ensureSentinel(vscodeVersion)
     console.log(`[wdio-cache] versions.txt populated: ${vscodeChannel}=${vscodeVersion}/${chromedriverVersion}`)
   } catch (err: any) {
-    console.warn(`[wdio-cache] Failed to pre-populate versions.txt (${err.message?.slice(0, 120)}); wdio-vscode-service will fall back to its own live fetch.`)
+    // Fall back to a hardcoded version pair when both
+    // update.code.visualstudio.com and raw.githubusercontent.com
+    // are unreachable (intermittent network on self-hosted runners
+    // surfaces as ``curl: (28) Operation timed out``).  Without a
+    // fallback, wdio-vscode-service then runs its OWN live fetch on
+    // the same flaky network and dies with SevereServiceError.
+    //
+    // The fallback values track the current VS Code release at the
+    // time of writing -- they're refreshed organically every time
+    // the live fetch succeeds (the versions.txt this writes is then
+    // overwritten by the success path on the next run).  Pin to a
+    // known-recent insiders version + chromedriver 148; we already
+    // know the nix flake provides ``vscodeInsiders`` so the binary
+    // path that wdio-vscode-service will use is the same regardless
+    // of the version string we record here.
+    const fallbackVscode = vscodeChannel === 'insiders' ? '1.125.0-insider' : '1.125.0'
+    const fallbackChromedriver = '148'
+    try {
+      fs.writeFileSync(
+        versionsPath,
+        JSON.stringify(
+          { [vscodeChannel]: { vscode: fallbackVscode, chromedriver: fallbackChromedriver } },
+          null,
+          2,
+        ),
+      )
+      ensureSentinel(fallbackVscode)
+      console.warn(
+        `[wdio-cache] Live fetch failed (${err.message?.slice(0, 80)}); wrote fallback versions.txt ` +
+        `${vscodeChannel}=${fallbackVscode}/${fallbackChromedriver}.`,
+      )
+    } catch (writeErr: any) {
+      console.warn(
+        `[wdio-cache] Failed to pre-populate versions.txt (${err.message?.slice(0, 120)}); fallback write also failed (${writeErr.message?.slice(0, 80)}); wdio-vscode-service will fall back to its own live fetch.`,
+      )
+    }
   }
 }
 
