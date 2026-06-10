@@ -85,14 +85,63 @@ compile-ts:
 _xvfb-run +CMD:
     #!/usr/bin/env bash
     set -euo pipefail
-    DISPLAY_NUM=99
-    while [ -e "/tmp/.X${DISPLAY_NUM}-lock" ]; do
-        DISPLAY_NUM=$((DISPLAY_NUM + 1))
+    # The previous "scan /tmp/.X<n>-lock then Xvfb :<n>" loop raced
+    # when multiple cross-repo runners launched Xvfb on the same host:
+    # two jobs would see the same lock file missing, pick the same
+    # display number, and the second Xvfb would fail with::
+    #
+    #   Fatal server error:
+    #   (EE) Cannot establish any listening sockets - Make sure an X
+    #        server isn't already running
+    #
+    # Then chrome/electron would start with ``$DISPLAY=:N`` pointing
+    # at the dead server and emit::
+    #
+    #   ERROR:ui/ozone/platform/x11/ozone_platform_x11.cc:250]
+    #   Missing X server or $DISPLAY
+    #
+    # which chromedriver in turn misreports as "user data directory is
+    # already in use".
+    #
+    # Pick a random high display number (10000-65535) per invocation
+    # so the collision odds drop from "two parallel jobs always race"
+    # to "1 in 55 thousand", and additionally retry a few times in
+    # case we DO hit a collision -- O_EXCL on the lock file via Xvfb's
+    # own startup is the race-free piece.
+    pick_display() {
+        for _attempt in $(seq 1 8); do
+            local n=$((RANDOM % 55535 + 10000))
+            if [ ! -e "/tmp/.X${n}-lock" ]; then
+                echo "$n"; return 0
+            fi
+        done
+        return 1
+    }
+    XVFB_LOG="$(mktemp)"
+    for _attempt in $(seq 1 5); do
+        DISPLAY_NUM="$(pick_display)" || {
+            echo "_xvfb-run: could not pick a free display number" >&2; exit 1
+        }
+        Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp >"$XVFB_LOG" 2>&1 &
+        XVFB_PID=$!
+        # Xvfb prints "Fatal server error" within ~100ms when the
+        # display is taken; give it a moment and verify it's actually
+        # listening before we hand $DISPLAY to chrome.
+        sleep 1
+        if kill -0 "$XVFB_PID" 2>/dev/null && ! grep -q "Fatal server error" "$XVFB_LOG"; then
+            break
+        fi
+        kill "$XVFB_PID" 2>/dev/null || true
+        wait "$XVFB_PID" 2>/dev/null || true
+        : >"$XVFB_LOG"
+        if [ "$_attempt" = "5" ]; then
+            echo "_xvfb-run: Xvfb failed to start after 5 attempts; last log:" >&2
+            cat "$XVFB_LOG" >&2
+            rm -f "$XVFB_LOG"
+            exit 1
+        fi
     done
-    Xvfb ":${DISPLAY_NUM}" -screen 0 1920x1080x24 -nolisten tcp &
-    XVFB_PID=$!
-    trap "kill $XVFB_PID 2>/dev/null || true" EXIT
-    sleep 1
+    trap "kill $XVFB_PID 2>/dev/null || true; rm -f $XVFB_LOG" EXIT
     export DISPLAY=":${DISPLAY_NUM}"
     # Chromium sandbox workarounds for NixOS CI runners where the
     # chrome-sandbox binary lacks the SUID bit and unprivileged user
