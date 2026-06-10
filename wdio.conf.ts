@@ -109,18 +109,27 @@ function resolveVSCodeInsidersBinary(): string | undefined {
   return undefined
 }
 
-// VS Code channel to test against. Defaults to `stable`.
+// VS Code channel to test against.
 //
-// `stable` is the representative target for the suite: no WDIO spec
-// exercises the extension's sole proposed API (`editorInsets`, used only
-// by the interactive tracepoint / flow-inset commands), so the suite does
-// not require the Insiders channel. The renderer-crash investigation also
-// confirmed the crash reproduces identically on stable 1.121.0 and
-// Insiders 1.122.0, so it is not a pre-release-build instability.
+// On NixOS we MUST use ``insiders`` because the nix flake provides a
+// pre-patched ``vscodeInsiders`` derivation (with ``VSCODE_INSIDERS_PATH``
+// exported by the dev shell) and ``wdio-vscode-service``'s
+// auto-download path produces a generic-Linux dynamically linked binary
+// that NixOS's stub-ld refuses to execute -- the chrome process exits
+// immediately and chromedriver reports the misleading::
 //
-// Override with WDIO_VSCODE_VERSION (e.g. `insiders`, or a pinned version
-// like `1.96.4`) when a proposed-API run is genuinely needed.
-const vscodeChannel = process.env.WDIO_VSCODE_VERSION?.trim() || 'stable'
+//   ``session not created: probably user data directory is already
+//     in use``
+//
+// On macOS the auto-download works fine, and ``stable`` is the more
+// representative target -- so the channel only auto-switches to
+// insiders when ``VSCODE_INSIDERS_PATH`` is set (which is exactly the
+// "nix dev shell on Linux" case).
+//
+// Override either default with WDIO_VSCODE_VERSION (e.g. ``insiders``,
+// ``stable``, or a pinned version like ``1.96.4``).
+const vscodeChannelDefault = process.env.VSCODE_INSIDERS_PATH ? 'insiders' : 'stable'
+const vscodeChannel = process.env.WDIO_VSCODE_VERSION?.trim() || vscodeChannelDefault
 
 const vscodeInsidersBinary = vscodeChannel === 'insiders' ? resolveVSCodeInsidersBinary() : undefined
 if (vscodeChannel === 'insiders' && vscodeInsidersBinary) {
