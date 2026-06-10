@@ -129,6 +129,143 @@ if (vscodeChannel === 'insiders' && vscodeInsidersBinary) {
   console.log(`Using VS Code channel: ${vscodeChannel} (downloaded by wdio-vscode-service)`)
 }
 
+/**
+ * Pre-populate ``.wdio-vscode-service/versions.txt`` so the upstream
+ * ``VSCodeServiceLauncher`` skips its two HTTP fetches on
+ * ``onPrepare``.  Without this, every run hits:
+ *
+ *   1. ``https://update.code.visualstudio.com/api/releases/stable``
+ *      (``_fetchVSCodeVersion``) — usually fine.
+ *   2. ``https://raw.githubusercontent.com/Microsoft/vscode/<v>/cgmanifest.json``
+ *      (``_fetchChromedriverVersion``) — intermittently returns
+ *      non-JSON on our self-hosted runners and surfaces as
+ *      ``SevereServiceError: Couldn't fetch Chromedriver version:
+ *        Unexpected non-whitespace character after JSON at position 3``.
+ *
+ * Upstream's cache hit-path (see ``_setupVSCodeDesktop`` in
+ * ``wdio-vscode-service/src/launcher.ts``) is taken when:
+ *
+ *   * ``<cwd>/.wdio-vscode-service/versions.txt`` exists AND parses
+ *     to a record keyed by the channel/version, AND
+ *   * a sentinel at
+ *     ``<cachePath>/vscode-${platform}-${arch}-${vscodeVersion}``
+ *     exists.
+ *
+ * Resolve the two versions ourselves via ``curl`` with retry+backoff
+ * before wdio loads, write the cache, then ensure the sentinel dir
+ * exists.  When the cache is already populated for our channel, skip
+ * (idempotent across runs).
+ *
+ * If the resolve fails (offline / extended outage), log a warning and
+ * fall through — wdio-vscode-service will do its own live fetch and
+ * the original SevereServiceError still surfaces.  No behaviour
+ * regression.
+ */
+function prepareVscodeCacheToBypassManifestFetch(): void {
+  const cacheDir = path.join(__dirname, '.wdio-vscode-service')
+  const versionsPath = path.join(cacheDir, 'versions.txt')
+  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+
+  const ensureSentinel = (vscodeVersion: string): void => {
+    const sentinel = path.join(cacheDir, `vscode-${process.platform}-${process.arch}-${vscodeVersion}`)
+    if (!fs.existsSync(sentinel)) fs.mkdirSync(sentinel, { recursive: true })
+  }
+
+  // Already populated?  Skip.
+  if (fs.existsSync(versionsPath)) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(versionsPath, 'utf-8'))
+      const cached = existing[vscodeChannel]
+      if (cached?.vscode && cached?.chromedriver) {
+        ensureSentinel(cached.vscode)
+        console.log(`[wdio-cache] versions.txt already populated: ${vscodeChannel}=${cached.vscode}/${cached.chromedriver}`)
+        return
+      }
+    } catch { /* fall through and rewrite */ }
+  }
+
+  const fetchWithRetry = (url: string, attempts = 5): string => {
+    let lastErr: any
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return execSync(`curl -sSfL --max-time 30 ${JSON.stringify(url)}`, { encoding: 'utf-8' })
+      } catch (e: any) {
+        lastErr = e
+        if (i < attempts - 1) {
+          // Backoff: 1s, 2s, 4s, 8s
+          execSync(`sleep ${Math.min(2 ** i, 8)}`)
+        }
+      }
+    }
+    throw lastErr
+  }
+
+  try {
+    // Latest VS Code releases for the channel.  Some entries in the
+    // releases array don't have a matching cgmanifest.json upstream
+    // (point releases sometimes skip the tag-and-publish step) -- e.g.
+    // 1.123.2 returns HTTP 404, while 1.123.0 returns HTTP 200.  This
+    // is the actual root cause of the upstream
+    // ``_fetchChromedriverVersion`` failure: it always uses
+    // ``availableVersions[0]``, gets back a 404 HTML page, and chokes
+    // on JSON.parse.  Walk the list newest→older until we find a
+    // version whose cgmanifest.json fetches.
+    const releasesUrl = vscodeChannel === 'insiders'
+      ? 'https://update.code.visualstudio.com/api/releases/insider'
+      : 'https://update.code.visualstudio.com/api/releases/stable'
+    const releases = JSON.parse(fetchWithRetry(releasesUrl)) as string[]
+    if (!Array.isArray(releases) || releases.length === 0) {
+      throw new Error(`unexpected releases payload: ${JSON.stringify(releases).slice(0, 80)}`)
+    }
+
+    const candidates = vscodeChannel === 'insiders'
+      ? ['__insiders__'] // insiders always uses the main branch manifest
+      : releases.slice(0, 8) // try up to 8 most-recent versions
+
+    let vscodeVersion: string | undefined
+    let chromedriverVersion: string | undefined
+    let manifest:
+      | { registrations: Array<{ component?: { git?: { name?: string } }; version: string }> }
+      | undefined
+    let lastErr: any
+
+    for (const candidate of candidates) {
+      const manifestUrl = candidate === '__insiders__'
+        ? 'https://raw.githubusercontent.com/Microsoft/vscode/refs/heads/main/cgmanifest.json'
+        : `https://raw.githubusercontent.com/Microsoft/vscode/${candidate}/cgmanifest.json`
+      try {
+        manifest = JSON.parse(fetchWithRetry(manifestUrl)) as typeof manifest
+        const chromium = manifest!.registrations.find((r) => r.component?.git?.name === 'chromium')
+        if (!chromium) {
+          lastErr = new Error(`chromium registration missing in ${manifestUrl}`)
+          continue
+        }
+        vscodeVersion = candidate === '__insiders__' ? releases[0] : candidate
+        chromedriverVersion = chromium.version.split('.')[0]
+        break
+      } catch (e) {
+        lastErr = e
+        // 404 / non-JSON / other transient -- try next candidate.
+      }
+    }
+
+    if (!vscodeVersion || !chromedriverVersion) {
+      throw lastErr ?? new Error('no candidate version yielded a parseable cgmanifest')
+    }
+
+    fs.writeFileSync(
+      versionsPath,
+      JSON.stringify({ [vscodeChannel]: { vscode: vscodeVersion, chromedriver: chromedriverVersion } }, null, 2),
+    )
+    ensureSentinel(vscodeVersion)
+    console.log(`[wdio-cache] versions.txt populated: ${vscodeChannel}=${vscodeVersion}/${chromedriverVersion}`)
+  } catch (err: any) {
+    console.warn(`[wdio-cache] Failed to pre-populate versions.txt (${err.message?.slice(0, 120)}); wdio-vscode-service will fall back to its own live fetch.`)
+  }
+}
+
+prepareVscodeCacheToBypassManifestFetch()
+
 // Use a short tmp directory to avoid Unix socket path length issues.
 // On POSIX, wdio-vscode-service places its IPC socket under TMPDIR and the
 // 108-char sun_path limit can be exceeded by deep default temp paths, so we
