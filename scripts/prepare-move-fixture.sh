@@ -39,7 +39,17 @@ if [ -z "$MOVE_RECORDER_DIR" ] || [ ! -f "$MOVE_RECORDER_DIR/Cargo.toml" ]; then
   exit 1
 fi
 
-SOURCE_FILE="$MOVE_RECORDER_DIR/test-programs/move/flow_test/sources/flow_test.move"
+## The Move recorder ships two ``flow_test`` packages:
+##   * ``test-programs/move/flow_test``  — broad corpus including
+##     Aptos-only fixtures (friend/public(friend), ``aptos_std::table``)
+##     that Sui 1.68 rejects under edition 2024.
+##   * ``test-programs/move/sui_flow_test`` — Sui-clean single-source
+##     package containing only ``flow_test.move`` (same module name,
+##     same ``test_computation`` function the WDIO smoke test exercises).
+## We *must* point Sui at the dedicated package: compiling the broad
+## corpus fails on ``friend`` declarations regardless of which trace we
+## ultimately copy out.
+SOURCE_FILE="$MOVE_RECORDER_DIR/test-programs/move/sui_flow_test/sources/flow_test.move"
 if [ ! -f "$SOURCE_FILE" ]; then
   echo "ERROR: Move flow_test source not found at $SOURCE_FILE"
   exit 1
@@ -79,7 +89,7 @@ mkdir -p "$FIXTURE_DIR"
 
 # Step 1: Run `sui move test --trace` to produce the NDJSON trace.
 # The trace files are written into <package>/build/<PackageName>/traces/.
-MOVE_PACKAGE_DIR="$MOVE_RECORDER_DIR/test-programs/move/flow_test"
+MOVE_PACKAGE_DIR="$MOVE_RECORDER_DIR/test-programs/move/sui_flow_test"
 # The Sui CLI flag varies by version: newer versions accept ``--trace``,
 # older versions accept ``--trace-execution``.  Try the new spelling
 # first, and **only** fall back when the failure is specifically an
