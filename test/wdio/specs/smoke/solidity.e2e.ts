@@ -39,14 +39,25 @@ const TRACE_NAME = 'solidity-flow-test'
 const EXPECTED_FILE = 'FlowTest.sol'
 const LANG_ID = 'Solidity'
 
-// The EVM recorder produces synthetic function names based on source-map
-// resolution: "fn_at_<file_index>:<line>" (e.g. "fn_at_0:10").
-// We check for the "fn_at_" prefix as a substring match.
-const CALLTRACE_FUNCTION = 'fn_at_'
+// The EVM recorder now resolves source-map entries back to real
+// Solidity function names (verified via ``ct-print --full`` on the
+// recorder output: ``functions: ['compute', 'add']``).  The earlier
+// synthetic ``fn_at_<file>:<line>`` form was a fallback that ran
+// before the source-map plumbing landed -- the recorder still
+// emits ``fn_at_pc_<n>`` for dispatcher orphans that the JUMP
+// source-site walk can't resolve, but the user-level functions
+// (compute, add for FlowTest.sol) are now surfaced verbatim.
+const CALLTRACE_FUNCTION = 'compute'
 
-// The EVM recorder emits Solidity events as raw LOG operations.
-// The Computed(uint256) event is a LOG1 containing the event signature topic.
-const EVENT_LOG_TEXT = 'LOG1'
+// The recorder emits Solidity events as ``ioStderr`` IO records
+// whose ``text`` field carries the raw LOG topic+data payload, not
+// the opcode mnemonic.  For the ``Computed(uint256)`` event emitted
+// by FlowTest.sol's ``compute()`` the topic is
+// ``keccak256("Computed(uint256)") = 0xaccb7b7f216abc04…``.  Pin to
+// that signature substring -- it's the most specific stable
+// identifier of the event payload and surfaces in
+// ``ct-print --full``'s IO ``text`` field verbatim.
+const EVENT_LOG_TEXT = '0xaccb7b7f216abc04'
 
 // Local variable assigned on line 11 of FlowTest.sol: `uint256 a = 10;`
 // The EVM recorder emits source-level locals (not storage variables) in
