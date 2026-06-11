@@ -154,6 +154,13 @@ describe('CodeTracer Extension - MASM (Miden) Deep Test', () => {
   // ==================================================================
 
   it('loads locals with variable values including stack[0]', async () => {
+    // The initial trace position is the synthetic ``#exec::#main``
+    // entry — the MASM stack frame is not yet populated.  Advance one
+    // step so ``stack[0]`` is in scope, mirroring the existing smoke
+    // pattern (``assertStepWorks`` runs immediately before
+    // ``assertLocalsContainVariable`` in defineLanguageSmokeTests) and
+    // circom-deep's ``await session.stepOver(500)`` setup.
+    await session.stepOver(2000)
     const result = await session.loadLocals({ lang: 'MASM', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
     writeDiag('masm-deep-locals.json', result.data)

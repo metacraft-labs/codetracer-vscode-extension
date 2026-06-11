@@ -136,6 +136,14 @@ describe('CodeTracer Extension - PolkaVM Deep Test', () => {
   // ==================================================================
 
   it('loads locals with register values including arg0', async () => {
+    // The initial trace position is the synthetic <toplevel> Call —
+    // no program-level register frame is in scope yet (the smoke test
+    // sees the same empty payload here; that's why its own
+    // ``finds arg0 in local variables`` block runs immediately after
+    // ``can step-over via DAP``).  Advance one step so the recorder's
+    // arg0..arg5 register-rename frame is active, mirroring
+    // circom-deep's ``await session.stepOver(500)`` setup.
+    await session.stepOverDap()
     const result = await session.loadLocals({ lang: 'PolkaVM', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
     writeDiag('polkavm-deep-locals.json', result.data)
