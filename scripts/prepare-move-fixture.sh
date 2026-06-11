@@ -183,10 +183,16 @@ fi
 echo "Found trace file: $TRACE_FILE"
 
 # Step 3: Convert the NDJSON trace into CodeTracer format using the recorder.
+#
+# Note: the ``--format`` flag was removed in the CTFS-only rewrite —
+# the move recorder now always emits a CTFS bundle.  Passing
+# ``--format binary`` is rejected by clap with exit code 2.  Source
+# mapping is provided by ``--source`` and the output bundle directory
+# by ``--out-dir`` (or the ``CODETRACER_MOVE_RECORDER_OUT_DIR`` env
+# variable).
 echo "Recording Move trace..."
 recorder_exec "$MOVE_RECORDER_DIR" "$RECORDER_BIN" record \
   --source "$SOURCE_FILE" \
-  --format binary \
   -o "$FIXTURE_DIR" \
   "$TRACE_FILE"
 
