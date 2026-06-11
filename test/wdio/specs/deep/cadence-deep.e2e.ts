@@ -154,6 +154,30 @@ describe('CodeTracer Extension - Cadence (Flow) Deep Test', () => {
   // ==================================================================
 
   it('loads locals with variable values including a', async () => {
+    // The cadence recorder, like cairo, emits per-step delta variables --
+    // a local lands in the Step record's ``vars`` field only on the
+    // source line where the ``let`` binding executes, not on the
+    // function-entry / function-decl step.  ``flow_test.cdc`` defines
+    // ``compute()`` whose body lists ``let a: Int = 10`` first, and
+    // ``main()`` (the entrypoint) is a one-liner that returns
+    // ``compute()``.  At rrTicks=0 the debugger sits at ``main:1``
+    // (function declaration) with no live bindings yet -- which is
+    // why a bare ``loadLocals`` here returns ``locals=[]`` and the
+    // ``withValues > 0`` assertion fails.
+    //
+    // Walk to the ``compute()`` call site in main, step into compute,
+    // and advance one more step so the debugger settles on
+    // ``compute:line-of-let-a`` -- the step whose vars=[a={Int,10}]
+    // payload is what this test asserts on.  This mirrors the
+    // ``cairo-deep`` navigation (commit 246581f
+    // "walk to compute:2 (where ``a`` binds) before checking locals").
+    await session.stepOver(2000)
+    await session.stepOver(2000)
+    const stepInLoc = await session.stepIn(3000)
+    console.log('[Cadence] Stepped into:', JSON.stringify(stepInLoc))
+    const aLoc = await session.stepOver(2000)
+    console.log('[Cadence] Settled at:', JSON.stringify(aLoc))
+
     const result = await session.loadLocals({ lang: 'Cadence', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
     writeDiag('cadence-deep-locals.json', result.data)
