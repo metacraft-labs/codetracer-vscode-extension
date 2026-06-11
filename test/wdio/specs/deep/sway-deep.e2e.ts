@@ -153,6 +153,12 @@ describe('CodeTracer Extension - Sway (Fuel) Deep Test', () => {
   // ==================================================================
 
   it('loads locals with variable values including sum_val', async () => {
+    // The initial trace position is the synthetic ``<toplevel>`` /
+    // ``main`` merged entry — the FuelVM register frame
+    // (``r16``..``r23`` exposed as the recorder's local-variable
+    // surface) is not yet populated.  Advance one step so ``r18`` is
+    // in scope, mirroring polkavm-deep + masm-deep + circom-deep.
+    await session.stepOver(2000)
     const result = await session.loadLocals({ lang: 'Sway', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
     writeDiag('sway-deep-locals.json', result.data)
