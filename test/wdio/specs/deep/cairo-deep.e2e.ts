@@ -156,15 +156,37 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
   // ==================================================================
 
   it('loads locals with variable values including a (felt252)', async () => {
-    // The initial position is at main() which only calls compute(). Step into
-    // compute() and advance past the variable assignments so locals are populated.
-    const stepInLoc = await session.stepIn(3000)
+    // The cairo recorder emits per-step *delta* variables — only the new
+    // binding declared on that source line lands in the Step record's
+    // ``vars`` field (verified by ``ct-print --full`` on the recorder
+    // output: step at line 2 has ``vars=[a]``, line 3 ``vars=[b]``,
+    // line 4 ``vars=[sum_val]``, line 7 (the return tuple) ``vars=[]``).
+    //
+    // The recorder also emits a leading ``sekAbsoluteStep`` at line 1
+    // for main BEFORE main's actual body, so the initial DAP position
+    // is ``main:1`` (not ``main:11`` where ``compute()`` is invoked).
+    // A bare ``stepIn`` from line 1 has nothing to step into — it
+    // just advances to ``main:10``.  We must first walk to the
+    // ``compute()`` call site at line 11, *then* stepIn to enter
+    // compute, then advance one more step so the debugger settles on
+    // ``compute:2`` where ``a`` is bound.
+    await session.stepOver(2000) // step #1 (main:1) → #2 (main:10)
+    await session.stepOver(2000) // step #2 (main:10) → #3 (main:11 — compute() call site)
+    const stepInLoc = await session.stepIn(3000) // step #3 → #5 (compute:1 function decl)
     console.log('[Cairo] Stepped into:', JSON.stringify(stepInLoc))
-    // Step over a few lines inside compute() to reach variable assignments
-    for (let i = 0; i < 3; i++) {
-      const loc = await session.stepOver(2000)
-      console.log(`[Cairo] Step ${i + 1}:`, JSON.stringify(loc))
-    }
+    // One more stepOver lands at compute:2 where ``let a: felt252 = 10;``
+    // is bound and the Step record's ``vars`` field becomes
+    // ``[{varname: "a", value: {kind: Int, i: 10}}]`` — KNOWN_VARIABLE
+    // is exactly the binding emitted on this step.  We stop here on
+    // purpose: the cairo recorder's delta semantics mean that going
+    // further (line 3 ``b``, line 4 ``sum_val``, …) replaces ``vars``
+    // with the new single binding rather than accumulating, so any
+    // additional stepOver would drop ``a`` from the live payload.
+    // The follow-on ``performs multiple step-over operations and
+    // changes line`` block does its own 5 stepOvers from this position
+    // through lines 3..7 (4 unique additional lines).
+    const aLoc = await session.stepOver(2000)
+    console.log('[Cairo] Settled at:', JSON.stringify(aLoc))
 
     const result = await session.loadLocals({ lang: 'Cairo', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
