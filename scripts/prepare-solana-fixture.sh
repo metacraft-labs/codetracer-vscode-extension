@@ -114,18 +114,26 @@ mkdir -p "$FIXTURE_DIR"
 echo "Recording Solana trace..."
 recorder_exec "$SOLANA_RECORDER_DIR" "$RECORDER_BIN" record -o "$FIXTURE_DIR" "$ELF_FILE"
 
-# Verify the fixture was created
-if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then
-  echo "ERROR: Fixture generation failed — trace_metadata.json not found."
+# Verify the fixture was created.  The recorder may write either the
+# legacy JSON-only layout (``trace_metadata.json`` + ``trace.json|.bin``)
+# or the CTFS binary container layout (a single ``trace.bin`` or one or
+# more ``*.ct`` files with embedded meta.dat).  Accept either, matching
+# the early-skip check at the top of this script.
+if compgen -G "$FIXTURE_DIR/*.ct" >/dev/null; then
+  echo "Recorder produced CTFS trace container (*.ct)."
+elif [ -f "$FIXTURE_DIR/trace_metadata.json" ]; then
+  echo "Recorder produced legacy JSON metadata."
+  if [ ! -f "$FIXTURE_DIR/trace.json" ] && [ ! -f "$FIXTURE_DIR/trace.bin" ]; then
+    echo "NOTE: Solana recorder produced metadata only (placeholder mode)."
+    echo "  Full trace support requires a --regs register trace file."
+  fi
+elif [ -f "$FIXTURE_DIR/trace.bin" ]; then
+  echo "Recorder produced CTFS trace container (trace.bin with embedded meta.dat)."
+else
+  echo "ERROR: Fixture generation failed — no trace_metadata.json, *.ct, or trace.bin found in $FIXTURE_DIR."
   echo "  Check the recorder output above for errors."
+  ls -la "$FIXTURE_DIR" 2>&1 || true
   exit 1
-fi
-
-if [ ! -f "$FIXTURE_DIR/trace.json" ] && [ ! -f "$FIXTURE_DIR/trace.bin" ]; then
-  # The Solana recorder produces placeholder metadata without --regs, which is
-  # acceptable for now. Full trace support requires register trace data.
-  echo "NOTE: Solana recorder produced metadata only (placeholder mode)."
-  echo "  Full trace support requires a --regs register trace file."
 fi
 
 # Copy the source file alongside the trace so the DAP server can resolve
