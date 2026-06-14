@@ -39,7 +39,7 @@ if [ -z "$SOLANA_RECORDER_DIR" ] || [ ! -f "$SOLANA_RECORDER_DIR/Cargo.toml" ]; 
   exit 1
 fi
 
-SOURCE_FILE="$SOLANA_RECORDER_DIR/test-programs/src/lib.rs"
+SOURCE_FILE="$SOLANA_RECORDER_DIR/test-programs/src/solana_flow_test.rs"
 if [ ! -f "$SOURCE_FILE" ]; then
   echo "ERROR: Solana test program not found at $SOURCE_FILE"
   exit 1
