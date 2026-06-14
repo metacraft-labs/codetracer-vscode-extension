@@ -89,8 +89,26 @@ recorder_exec "$SOLANA_RECORDER_DIR" bash -c \
   exit 0
 }
 
-# Locate the compiled ELF. cargo-build-sbf writes to target/deploy/<name>.so
-ELF_FILE="$TEST_PROGRAM_DIR/target/deploy/test_programs.so"
+# Locate the compiled ELF.  Prefer the *unstripped* ELF under
+# ``target/sbpf-solana-solana/release/`` -- ``cargo-build-sbf`` runs
+# ``llvm-objcopy --strip-all`` to produce the smaller
+# ``target/deploy/test_programs.so`` it advertises for ``solana
+# program deploy``, but the strip removes ``.debug_info`` / line
+# tables and the recorder then can't map any PC back to
+# ``solana_flow_test.rs``.  The unstripped variant carries the full
+# DWARF (verified locally: ``llvm-dwarfdump --debug-info`` returns a
+# populated ``Compile Unit`` against
+# ``target/sbpf-solana-solana/release/test_programs.so`` while the
+# ``deploy/`` copy is empty), executes identically (same bytecode --
+# only debug sections differ), and is what the recorder needs to
+# emit step/locals/event events in the CTFS trace that the WDIO
+# smoke test expects.  Falls back to the stripped ``deploy/`` copy
+# if the unstripped artefact is not present (older builds or a
+# cargo-build-sbf version that doesn't write the intermediate path).
+ELF_FILE="$TEST_PROGRAM_DIR/target/sbpf-solana-solana/release/test_programs.so"
+if [ ! -f "$ELF_FILE" ]; then
+  ELF_FILE="$TEST_PROGRAM_DIR/target/deploy/test_programs.so"
+fi
 if [ ! -f "$ELF_FILE" ]; then
   # Try alternative locations
   ELF_FILE="$(find "$TEST_PROGRAM_DIR/target" -name "*.so" -path "*/deploy/*" 2>/dev/null | head -1)"
