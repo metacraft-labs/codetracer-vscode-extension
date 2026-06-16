@@ -44,30 +44,54 @@ export class DebugSession {
 
   /** Get the current stopped location (file + line from the editor cursor).
    *
-   * Reads from ``vscode.window.activeTextEditor`` when available; falls
-   * back to any visible text editor matching a ``.rs`` / ``.sol`` /
-   * source-shape file when focus has shifted to a side panel (e.g. the
-   * locals view or the calltrace tree).  The deep test suite triggers
-   * several non-step DAP queries (``loadLocals``, ``loadCalltrace``,
-   * ``loadFlow``) between session start and the first step-over;
-   * those steal editor focus in VS Code Insiders, leaving
-   * ``activeTextEditor`` undefined.  The fallback recovers the
-   * stopped-at location from the still-visible source editor so
-   * ``StepOver``/``StepIn``/``StepOut`` assertions can read a real
-   * file/line pair (cross-repo run 27593691346: smoke step-over
-   * passes because it runs before the focus-stealing queries; deep
-   * step-over previously failed with ``{file: '', line: -1}``).
+   * Reads from ``vscode.window.activeTextEditor`` when available;
+   * actively re-shows a source-shape editor from
+   * ``vscode.window.tabGroups`` when focus has shifted to a side panel
+   * (e.g. the locals view, calltrace tree, flow webview).  The deep
+   * test suite (``test/wdio/specs/deep/*.e2e.ts``) issues several
+   * non-step DAP queries between session start and the first
+   * step-over; under VS Code Insiders those steal editor focus,
+   * leaving ``activeTextEditor`` undefined and
+   * ``visibleTextEditors`` empty -- the smoke variant runs
+   * ``stepOver`` before those queries so it happens to keep focus.
+   *
+   * To recover the stopped-at location, walk ``tabGroups`` for a
+   * source-shape tab, ``showTextDocument`` it (which both makes it
+   * visible *and* makes it the active editor), and read the cursor
+   * from there.  VS Code's DAP integration moves the cursor to the
+   * stopped position on every ``stopped`` event regardless of focus,
+   * so showing the editor surfaces the post-step line without
+   * re-issuing the step.
    */
   async currentLocation(): Promise<StoppedLocation> {
     return browser.executeWorkbench(async (vscode) => {
-      const editor =
-        vscode.window.activeTextEditor ??
-        vscode.window.visibleTextEditors.find((e: any) =>
-          /\.(rs|sol|move|cairo|aiken|leo|sw|toml|circom|tact|tolk)$/i.test(
-            e.document.fileName,
-          ),
-        ) ??
-        vscode.window.visibleTextEditors[0]
+      let editor: any = vscode.window.activeTextEditor
+      if (!editor) {
+        const sourceRe = /\.(rs|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i
+        let candidateUri: any = null
+        for (const group of vscode.window.tabGroups.all) {
+          for (const tab of group.tabs) {
+            const input: any = tab.input
+            const fsPath: string | undefined = input?.uri?.fsPath
+            if (fsPath && sourceRe.test(fsPath)) {
+              candidateUri = input.uri
+              break
+            }
+          }
+          if (candidateUri) break
+        }
+        if (candidateUri) {
+          try {
+            editor = await vscode.window.showTextDocument(candidateUri, { preserveFocus: false })
+          } catch {
+            // ignore
+          }
+        }
+        editor =
+          editor ??
+          vscode.window.activeTextEditor ??
+          vscode.window.visibleTextEditors[0]
+      }
       if (!editor) return { file: '', line: -1 }
       return {
         file: editor.document.fileName,
@@ -157,26 +181,32 @@ export class DebugSession {
 
   /** Add a source breakpoint at the given 1-based line number.
    *
-   * Falls back to a visible source-shape editor when
-   * ``activeTextEditor`` is undefined -- same focus-loss case
-   * ``currentLocation`` handles.  Without the fallback the deep test
-   * suite's ``sets a breakpoint and continues to it`` returns
+   * Finds the source URI by walking ``tabGroups`` if
+   * ``activeTextEditor`` is undefined (same focus-loss case
+   * ``currentLocation`` handles).  Without the fallback the deep
+   * test suite's ``sets a breakpoint and continues to it`` returns
    * ``{added: false}`` because the locals/calltrace queries earlier
    * in the spec stole editor focus.
    */
   async addBreakpoint(line: number): Promise<{ total: number; added: boolean }> {
     return browser.executeWorkbench(async (vscode, targetLine: number) => {
-      const editor =
-        vscode.window.activeTextEditor ??
-        vscode.window.visibleTextEditors.find((e: any) =>
-          /\.(rs|sol|move|cairo|aiken|leo|sw|toml|circom|tact|tolk)$/i.test(
-            e.document.fileName,
-          ),
-        ) ??
-        vscode.window.visibleTextEditors[0]
-      if (!editor) return { total: 0, added: false }
+      let uri: any = vscode.window.activeTextEditor?.document.uri
+      if (!uri) {
+        const sourceRe = /\.(rs|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i
+        for (const group of vscode.window.tabGroups.all) {
+          for (const tab of group.tabs) {
+            const input: any = tab.input
+            const fsPath: string | undefined = input?.uri?.fsPath
+            if (fsPath && sourceRe.test(fsPath)) {
+              uri = input.uri
+              break
+            }
+          }
+          if (uri) break
+        }
+      }
+      if (!uri) return { total: 0, added: false }
 
-      const uri = editor.document.uri
       const bp = new vscode.SourceBreakpoint(
         new vscode.Location(uri, new vscode.Position(targetLine - 1, 0)),
       )
