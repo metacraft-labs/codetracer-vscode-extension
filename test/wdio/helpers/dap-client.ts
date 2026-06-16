@@ -238,7 +238,19 @@ export async function loadTerminal(): Promise<DapResult> {
   return dapRequest('ct/load-terminal', {})
 }
 
-/** Search the calltrace for a function name. */
+/** Search the calltrace for a function name.
+ *
+ * Uses a longer timeout (30s) than the default ``dapRequest`` budget
+ * because ``calltrace_search`` in the db-backend iterates the trace's
+ * full ``calls_iter()`` and ``functions_iter()`` set; large traces
+ * (e.g. the Solana fixture's 1277-snapshot trace with ~38k Value
+ * events) can exceed the 10s default on the org's self-hosted
+ * runners.  Cross-repo run 27593691346 documented this: the test
+ * passed on the sparse trace from commit ``6cb5552`` but timed out on
+ * the larger trace from ``7a3dccf`` (which surfaced 19 named locals
+ * at call_entry).  The work itself is cheap server-side; the
+ * walltime is dominated by the runner being busy.
+ */
 export async function searchCalltrace(query: string): Promise<DapResult> {
-  return dapRequest('ct/search-calltrace', { value: query })
+  return dapRequest('ct/search-calltrace', { value: query }, 30000)
 }
