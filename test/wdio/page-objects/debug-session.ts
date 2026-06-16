@@ -102,8 +102,42 @@ export class DebugSession {
 
   // ---- Step operations ----
 
+  /** Re-show a source-shape editor so VS Code's DAP integration can
+   * navigate it on the next ``stopped`` event.
+   *
+   * The deep test suite's non-step DAP queries
+   * (``loadLocals`` / ``loadCalltrace`` / ``loadFlow``) hide the
+   * source editor under a side panel.  When ``dap.stepOver`` /
+   * ``stepIn`` / ``stepOut`` then fires and VS Code's DAP client
+   * receives the ``stopped`` event, it has no editor to move the
+   * cursor in -- so subsequent calls all read the same stale cursor
+   * position and ``test/wdio/specs/deep/solana-deep.e2e.ts:performs
+   * multiple step-over operations and changes line`` fails the
+   * ``uniqueLines.size > 1`` assertion (cross-repo run
+   * 27593691346: step-over returned valid line numbers but they
+   * never changed).  Calling ``showTextDocument`` *before* the DAP
+   * step ensures VS Code has a visible editor to navigate.
+   */
+  private async ensureSourceEditorShown(): Promise<void> {
+    await browser.executeWorkbench(async (vscode) => {
+      if (vscode.window.activeTextEditor) return
+      const sourceRe = /\.(rs|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          const input: any = tab.input
+          const fsPath: string | undefined = input?.uri?.fsPath
+          if (fsPath && sourceRe.test(fsPath)) {
+            await vscode.window.showTextDocument(input.uri, { preserveFocus: false })
+            return
+          }
+        }
+      }
+    })
+  }
+
   /** Step over (next line) and wait for the move to complete. */
   async stepOver(settleMs = 2000): Promise<StoppedLocation> {
+    await this.ensureSourceEditorShown()
     await dap.stepOver()
     await browser.pause(settleMs)
     return this.currentLocation()
@@ -111,6 +145,7 @@ export class DebugSession {
 
   /** Step into and wait for the move to complete. */
   async stepIn(settleMs = 2000): Promise<StoppedLocation> {
+    await this.ensureSourceEditorShown()
     await dap.stepIn()
     await browser.pause(settleMs)
     return this.currentLocation()
@@ -118,6 +153,7 @@ export class DebugSession {
 
   /** Step out and wait for the move to complete. */
   async stepOut(settleMs = 2000): Promise<StoppedLocation> {
+    await this.ensureSourceEditorShown()
     await dap.stepOut()
     await browser.pause(settleMs)
     return this.currentLocation()
