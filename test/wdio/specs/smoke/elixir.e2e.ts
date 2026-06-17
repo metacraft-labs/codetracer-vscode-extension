@@ -32,4 +32,17 @@ defineLanguageSmokeTests({
   terminalText: '94',
   // The Elixir BEAM recorder is materialized (db-backend), not rr — so the
   // full locals payload is available and we don't need response-only mode.
+  //
+  // The trace starts at the top of the file; ``main/0`` (the runner) is
+  // recorded at ``depth=0`` and ``compute/0`` at ``depth=1``.  ``final_result``
+  // is a ``compute/0`` local — it only enters scope at line 9, ``inside`` the
+  // compute body.  A plain step-over from the entry skips over the
+  // ``result = compute()`` call (DAP semantics for ``next``) and lands at
+  // line 16 of main/0 where only the wrapper's ``result`` rebinding is in
+  // scope.  Use step-IN to enter compute, then step over the 4 intermediate
+  // ``let``-bindings (``a``, ``b``, ``sum_val``, ``doubled``) so the locals
+  // query at line 9 sees ``final_result`` bound to 94.  Mirrors the erlang
+  // counterpart spec.
+  useStepIn: true,
+  extraStepsForLocals: 4,
 })

@@ -28,4 +28,13 @@ defineLanguageSmokeTests({
   langId: 'Erlang',
   // canonical_flow:main/0 prints `94` via io:format/2.
   terminalText: '94',
+  // ``FinalResult`` is a ``compute/0`` local that only enters scope at line
+  // 9 inside the compute body.  Plain step-over from the entry skips over
+  // the ``Result = compute()`` call (DAP semantics for ``next``) and lands
+  // at line 14 of main/0 where only the wrapper's ``Result`` rebinding is in
+  // scope.  Use step-IN to enter compute, then step over the 4 intermediate
+  // bindings (``A``, ``B``, ``SumVal``, ``Doubled``) so the locals query at
+  // line 9 sees ``FinalResult`` bound to 94.  Mirrors the elixir spec.
+  useStepIn: true,
+  extraStepsForLocals: 4,
 })
