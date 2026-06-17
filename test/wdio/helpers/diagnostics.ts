@@ -156,39 +156,52 @@ export function captureTraceFingerprint(label: string, tracePath: string): void 
  * are captured in the diagnostic JSON, never thrown.
  */
 export async function captureDapStateSnapshot(label: string): Promise<void> {
+  // Why inlined / no const helper: ``browser.executeWorkbench`` ships the
+  // callback to the VS Code workbench by calling ``.toString()`` on the
+  // transpiled function.  ``tsx`` (the WDIO loader) inserts ``__name(fn,
+  // "fn")`` polyfill calls for every NAMED function expression — incl.
+  // ``const safeRequest = async () => {...}`` — and the workbench has no
+  // ``__name`` global, so the deserialised function throws ``__name is
+  // not defined`` (observed in cross-repo run 27709264564's
+  // ``dap-state-solana-before-locals.json``).  Inlining each DAP call
+  // sidesteps the polyfill.
   try {
     const snapshot = await browser.executeWorkbench(async (vscode: any) => {
       const session = vscode.debug.activeDebugSession
       if (!session) return { error: 'no active debug session' }
 
-      const safeRequest = async (cmd: string, args: any = {}, timeoutMs = 5000): Promise<any> => {
-        try {
-          return await Promise.race([
-            session.customRequest(cmd, args),
-            new Promise((_: any, reject: any) =>
-              setTimeout(() => reject(new Error(`${cmd} timeout`)), timeoutMs)),
-          ])
-        } catch (e: any) {
-          return { error: e.message }
-        }
-      }
+      let threads: any
+      try { threads = await session.customRequest('threads', {}) }
+      catch (e: any) { threads = { error: e.message } }
 
-      const threads = await safeRequest('threads')
       const threadId = threads?.threads?.[0]?.id ?? 1
-      const stackTrace = await safeRequest('stackTrace', {
-        threadId, startFrame: 0, levels: 20,
-      })
+
+      let stackTrace: any
+      try {
+        stackTrace = await session.customRequest('stackTrace', {
+          threadId, startFrame: 0, levels: 20,
+        })
+      } catch (e: any) { stackTrace = { error: e.message } }
+
       const frameId = stackTrace?.stackFrames?.[0]?.id ?? 0
-      const scopes = await safeRequest('scopes', { frameId })
+
+      let scopes: any
+      try { scopes = await session.customRequest('scopes', { frameId }) }
+      catch (e: any) { scopes = { error: e.message } }
+
       const variablesByScope: any = {}
-      if (scopes?.scopes && Array.isArray(scopes.scopes)) {
+      if (scopes && scopes.scopes && Array.isArray(scopes.scopes)) {
         for (const scope of scopes.scopes) {
           if (scope.variablesReference > 0) {
-            variablesByScope[scope.name ?? `ref-${scope.variablesReference}`] =
-              await safeRequest('variables', {
+            const key = scope.name ?? `ref-${scope.variablesReference}`
+            try {
+              variablesByScope[key] = await session.customRequest('variables', {
                 variablesReference: scope.variablesReference,
                 count: 64,
               })
+            } catch (e: any) {
+              variablesByScope[key] = { error: e.message }
+            }
           }
         }
       }
