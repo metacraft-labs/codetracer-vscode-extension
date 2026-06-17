@@ -17,7 +17,10 @@
 import path from 'path'
 import { browser, expect } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState } from '../page-objects'
-import { captureFullDiagnostics, screenshot, writeDiag } from './diagnostics'
+import {
+  captureDapStateSnapshot, captureFullDiagnostics, captureTraceFingerprint,
+  screenshot, writeDiag,
+} from './diagnostics'
 import { resolveTracePath, traceExists } from './trace-utils'
 
 // ---- Configuration ----
@@ -318,6 +321,20 @@ export function defineLanguageSmokeTests(config: LanguageSmokeConfig): void {
       const location = await session.currentLocation()
       console.log(`[${config.language}] Initial location:`, JSON.stringify(location))
       writeDiag(`${config.language.toLowerCase()}-session-start.json`, { location })
+
+      // Hash every regular file in the trace directory so a local vs CI
+      // failure can be byte-compared.  The recorder writes either
+      // ``trace.bin`` or ``<name>.ct`` (CTFS container) plus optional
+      // sidecar files; we just hash whatever is there to avoid making
+      // assumptions per language.
+      const fs = await import('fs')
+      const path = await import('path')
+      for (const entry of fs.readdirSync(traceDir)) {
+        const full = path.join(traceDir, entry)
+        if (fs.statSync(full).isFile()) {
+          captureTraceFingerprint(`${config.language.toLowerCase()}-${entry}`, full)
+        }
+      }
     })
 
     it(`opens ${config.expectedFileName} in the editor`, async () => {
@@ -354,6 +371,14 @@ export function defineLanguageSmokeTests(config: LanguageSmokeConfig): void {
           await session.stepOver(2000)
         }
       }
+      // Capture the DAP-side view of the current frame BEFORE the
+      // locals assertion runs, so the snapshot matches the failing
+      // call exactly.  Recorder regressions (e.g. column-aware steps
+      // landing on a position with no bound locals) show up as an
+      // empty ``variablesByScope`` here while ``stackTrace`` reports
+      // the expected line number — distinguishing a recorder problem
+      // from a step-navigation problem.
+      await captureDapStateSnapshot(`${config.language.toLowerCase()}-before-locals`)
       if (config.localsResponseOnly) {
         // Verify loadLocals returns a valid DAP response. Variable content
         // is not asserted because rr soft-mode replay currently returns

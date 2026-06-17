@@ -118,3 +118,84 @@ export async function captureFullDiagnostics(label: string): Promise<void> {
   await captureBrowserLogs(label)
   await captureExtHostLog(label)
 }
+
+/**
+ * Hash a fixture file so local vs CI runs can be byte-compared.
+ * Captures SHA-256, size, and the first 64 bytes (hex) which include
+ * the CTFS magic + meta.dat header.  Diagnostic-only.
+ */
+export function captureTraceFingerprint(label: string, tracePath: string): void {
+  try {
+    if (!fs.existsSync(tracePath)) {
+      writeDiag(`trace-fingerprint-${label}.json`, { error: 'missing', path: tracePath })
+      return
+    }
+    const buf = fs.readFileSync(tracePath)
+    const crypto = require('crypto')
+    const sha256 = crypto.createHash('sha256').update(buf).digest('hex')
+    writeDiag(`trace-fingerprint-${label}.json`, {
+      path: tracePath,
+      size: buf.length,
+      sha256,
+      first_64_hex: buf.subarray(0, 64).toString('hex'),
+    })
+  } catch (e: any) {
+    writeDiag(`trace-fingerprint-${label}.json`, { error: e.message, path: tracePath })
+  }
+}
+
+/**
+ * Capture every DAP query that touches the current step's state — what
+ * VS Code thinks the active frame is + what scopes/variables the debug
+ * adapter exposes for that frame.  Run this BEFORE the locals assertion
+ * so the captured payload matches the failing query exactly.
+ *
+ * The DAP `customRequest`s here are run inside the workbench context
+ * (`browser.executeWorkbench`) because they have to talk to VS Code's
+ * `debug.activeDebugSession`.  Every query is best-effort: failures
+ * are captured in the diagnostic JSON, never thrown.
+ */
+export async function captureDapStateSnapshot(label: string): Promise<void> {
+  try {
+    const snapshot = await browser.executeWorkbench(async (vscode: any) => {
+      const session = vscode.debug.activeDebugSession
+      if (!session) return { error: 'no active debug session' }
+
+      const safeRequest = async (cmd: string, args: any = {}, timeoutMs = 5000): Promise<any> => {
+        try {
+          return await Promise.race([
+            session.customRequest(cmd, args),
+            new Promise((_: any, reject: any) =>
+              setTimeout(() => reject(new Error(`${cmd} timeout`)), timeoutMs)),
+          ])
+        } catch (e: any) {
+          return { error: e.message }
+        }
+      }
+
+      const threads = await safeRequest('threads')
+      const threadId = threads?.threads?.[0]?.id ?? 1
+      const stackTrace = await safeRequest('stackTrace', {
+        threadId, startFrame: 0, levels: 20,
+      })
+      const frameId = stackTrace?.stackFrames?.[0]?.id ?? 0
+      const scopes = await safeRequest('scopes', { frameId })
+      const variablesByScope: any = {}
+      if (scopes?.scopes && Array.isArray(scopes.scopes)) {
+        for (const scope of scopes.scopes) {
+          if (scope.variablesReference > 0) {
+            variablesByScope[scope.name ?? `ref-${scope.variablesReference}`] =
+              await safeRequest('variables', {
+                variablesReference: scope.variablesReference,
+                count: 64,
+              })
+          }
+        }
+      }
+      return { threads, stackTrace, scopes, variablesByScope }
+    })
+    writeDiag(`dap-state-${label}.json`, snapshot)
+  } catch (e: any) {
+    writeDiag(`dap-state-${label}.json`, { error: e.message })
+  }
+}
