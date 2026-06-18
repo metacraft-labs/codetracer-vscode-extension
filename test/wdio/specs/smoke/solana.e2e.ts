@@ -12,16 +12,4 @@ defineLanguageSmokeTests({
   variableName: 'sum_val',
   langId: 'Solana',
   eventLogText: 'result',
-  // TODO(FU-Writer-redux): drop once
-  // codetracer-trace-format-nim's register_delta_column is
-  // collapsed into the prior step's position.  The column-aware
-  // writer currently emits each landing as a (line step, column
-  // delta step) pair on the wire — line-granular step-over from
-  // the call_entry lands on the empty line step and
-  // ``variables_at(self.step_id)`` returns ``[]``.  One extra
-  // ``next`` advances to the column-delta step that carries the
-  // per-snapshot r0..r10 + named-locals emission.  Matches what
-  // Ruby/Nim/Go set for the same class of issue.  See the
-  // FU-Writer-redux follow-up against codetracer-trace-format-nim.
-  extraStepsForLocals: 1,
 })
