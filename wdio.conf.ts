@@ -507,6 +507,20 @@ export const config: any = {
   onPrepare: function (_config, _capabilities) {
     console.log('Starting WebdriverIO CodeTracer Extension Tests...')
 
+    // Point the extension's DAP-message tracker
+    // (``vscode.debug.registerDebugAdapterTrackerFactory`` registered in
+    // ``activate()`` when this env var is set) at the diagnostics dir so
+    // every DAP request/response between VS Code and the db-backend
+    // replay-server is captured.  The path is propagated to spawned
+    // workers via the inherited environment.
+    const diagDir = path.resolve(__dirname, 'test', 'wdio', 'diagnostics')
+    if (!fs.existsSync(diagDir)) fs.mkdirSync(diagDir, { recursive: true })
+    process.env.CODETRACER_DAP_TRACE_PATH = path.join(diagDir, 'dap-trace.log')
+    // Truncate the file so each ``npm run test:wdio`` invocation gets a
+    // clean trace — appending across runs makes it impossible to tell
+    // which messages belong to which scenario.
+    try { fs.writeFileSync(process.env.CODETRACER_DAP_TRACE_PATH, '') } catch { /* best-effort */ }
+
     // Reap chromedriver / electron / wdio-vscode-service leftovers from
     // any prior crashed or cancelled run on this (self-hosted) machine.
     // The per-run ``uniqueStorageRoot`` minted below is brand new, but

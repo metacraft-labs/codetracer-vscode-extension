@@ -1619,6 +1619,48 @@ export interface CodeTracerExtensionExports {
 export async function activate(context: vscode.ExtensionContext): Promise<CodeTracerExtensionExports> {
   // initial (stub or real)
   await reinitCommands(context);
+  // Cross-repo test diagnostic: when ``CODETRACER_DAP_TRACE_PATH`` is
+  // set (the WDIO harness points it at
+  // ``test/wdio/diagnostics/dap-trace.log``) capture every DAP message
+  // between VS Code and the db-backend replay-server.  Local + CI runs
+  // diverged identically on the ct/load-locals response in cross-repo
+  // run 27710063852 — having the full request/response stream lets us
+  // pin the divergence to a specific message instead of inferring it
+  // from the empty ``variablesByScope`` in dap-state-*.json.
+  const dapTracePath = process.env.CODETRACER_DAP_TRACE_PATH;
+  if (dapTracePath) {
+    try {
+      fs.mkdirSync(path.dirname(dapTracePath), { recursive: true });
+      fs.appendFileSync(dapTracePath,
+        `\n=== DAP trace session started ${new Date().toISOString()} pid=${process.pid} ===\n`);
+    } catch { /* best-effort */ }
+    context.subscriptions.push(vscode.debug.registerDebugAdapterTrackerFactory('codetracer-debug', {
+      createDebugAdapterTracker(session) {
+        const sid = session.id;
+        const log = (direction: string, msg: any) => {
+          try {
+            // Truncate huge payloads (``locals`` can be 100s of KB)
+            // so the trace stays readable.  Keep the first 8 KB of
+            // any single message — enough for any locals response we
+            // care about while preventing log explosion on long runs.
+            let serialised = JSON.stringify(msg);
+            if (serialised.length > 8192) {
+              serialised = serialised.substring(0, 8192) + `…[+${serialised.length - 8192}B truncated]`;
+            }
+            fs.appendFileSync(dapTracePath, `${new Date().toISOString()} ${sid} ${direction} ${serialised}\n`);
+          } catch { /* best-effort */ }
+        };
+        return {
+          onWillStartSession: () => log('SESSION_START', { id: sid, type: session.type, name: session.name }),
+          onWillReceiveMessage: msg => log('-> adapter', msg),
+          onDidSendMessage:    msg => log('<- adapter', msg),
+          onError:             err => log('ERROR', { message: err.message, stack: err.stack }),
+          onExit:              (code, signal) => log('EXIT', { code, signal }),
+          onWillStopSession:   () => log('SESSION_STOP', { id: sid }),
+        };
+      },
+    }));
+  }
   context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('codetracer-debug', {
     provideDebugConfigurations(_folder) {
       return [{
