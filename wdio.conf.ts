@@ -2,6 +2,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { execSync } from 'child_process'
+import { safeArtifactLabel } from './test/wdio/helpers/artifact-labels'
 
 /**
  * Garbage-collect any chromedriver / electron / wdio-vscode-service
@@ -592,7 +593,7 @@ export const config: any = {
     // Capture diagnostics on test failure for all tests (individual specs
     // may also capture their own diagnostics in afterEach hooks)
     if (result.error) {
-      const label = `FAIL-${test.title.replace(/\s+/g, '-').substring(0, 40)}`
+      const label = safeArtifactLabel(`FAIL-${test.title}`, 'FAIL-unknown', 50)
       try {
         const diagDir = path.resolve(__dirname, 'test', 'wdio', 'diagnostics')
         if (!fs.existsSync(diagDir)) fs.mkdirSync(diagDir, { recursive: true })

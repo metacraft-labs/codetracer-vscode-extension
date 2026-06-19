@@ -9,6 +9,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { browser } from '@wdio/globals'
+import { safeArtifactLabel } from './artifact-labels'
 
 const DIAG_DIR = path.resolve(__dirname, '..', 'diagnostics')
 
@@ -41,38 +42,41 @@ export function writeDiag(filename: string, data: any): void {
 
 /** Capture a labeled screenshot. Returns true on success. */
 export async function screenshot(label: string): Promise<boolean> {
+  const safeLabel = safeArtifactLabel(label)
   try {
-    const filePath = path.join(DIAG_DIR, `screenshot-${label}.png`)
+    const filePath = path.join(DIAG_DIR, `screenshot-${safeLabel}.png`)
     await browser.saveScreenshot(filePath)
-    console.log(`[diag] Screenshot: ${label}`)
+    console.log(`[diag] Screenshot: ${safeLabel}`)
     return true
   } catch (e: any) {
-    console.log(`[diag] Screenshot ${label} failed: ${e.message?.substring(0, 80)}`)
+    console.log(`[diag] Screenshot ${safeLabel} failed: ${e.message?.substring(0, 80)}`)
     return false
   }
 }
 
 /** Capture browser console logs and save to a JSON file. */
 export async function captureBrowserLogs(label: string): Promise<any[]> {
+  const safeLabel = safeArtifactLabel(label)
   try {
     const logs = await browser.getLogs('browser')
-    writeDiag(`browser-console-${label}.json`, logs)
+    writeDiag(`browser-console-${safeLabel}.json`, logs)
     const errors = logs.filter((l: any) => l.level === 'SEVERE' || l.level === 'ERROR')
     if (errors.length > 0) {
-      console.log(`[diag] Browser console (${label}): ${logs.length} total, ${errors.length} errors`)
+      console.log(`[diag] Browser console (${safeLabel}): ${logs.length} total, ${errors.length} errors`)
       for (const e of errors.slice(0, 5)) {
         console.log(`  [error] ${JSON.stringify(e).substring(0, 200)}`)
       }
     }
     return logs
   } catch (e: any) {
-    console.log(`[diag] captureBrowserLogs(${label}) failed: ${e.message?.substring(0, 80)}`)
+    console.log(`[diag] captureBrowserLogs(${safeLabel}) failed: ${e.message?.substring(0, 80)}`)
     return []
   }
 }
 
 /** Read the VS Code extension host log and extract relevant lines. */
 export async function captureExtHostLog(label: string): Promise<any> {
+  const safeLabel = safeArtifactLabel(label)
   try {
     const result = await browser.executeWorkbench(async (vscode, storageRoot: string) => {
       const base = vscode.Uri.file(storageRoot)
@@ -101,10 +105,10 @@ export async function captureExtHostLog(label: string): Promise<any> {
       )
       return { total: lines.length, relevant: relevant.length, lines: relevant.slice(-80) }
     }, WDIO_STORAGE_ROOT)
-    writeDiag(`exthost-log-${label}.json`, result)
+    writeDiag(`exthost-log-${safeLabel}.json`, result)
     return result
   } catch (e: any) {
-    console.log(`[diag] captureExtHostLog(${label}) failed: ${e.message?.substring(0, 80)}`)
+    console.log(`[diag] captureExtHostLog(${safeLabel}) failed: ${e.message?.substring(0, 80)}`)
     return { error: e.message }
   }
 }
@@ -125,22 +129,23 @@ export async function captureFullDiagnostics(label: string): Promise<void> {
  * the CTFS magic + meta.dat header.  Diagnostic-only.
  */
 export function captureTraceFingerprint(label: string, tracePath: string): void {
+  const safeLabel = safeArtifactLabel(label)
   try {
     if (!fs.existsSync(tracePath)) {
-      writeDiag(`trace-fingerprint-${label}.json`, { error: 'missing', path: tracePath })
+      writeDiag(`trace-fingerprint-${safeLabel}.json`, { error: 'missing', path: tracePath })
       return
     }
     const buf = fs.readFileSync(tracePath)
     const crypto = require('crypto')
     const sha256 = crypto.createHash('sha256').update(buf).digest('hex')
-    writeDiag(`trace-fingerprint-${label}.json`, {
+    writeDiag(`trace-fingerprint-${safeLabel}.json`, {
       path: tracePath,
       size: buf.length,
       sha256,
       first_64_hex: buf.subarray(0, 64).toString('hex'),
     })
   } catch (e: any) {
-    writeDiag(`trace-fingerprint-${label}.json`, { error: e.message, path: tracePath })
+    writeDiag(`trace-fingerprint-${safeLabel}.json`, { error: e.message, path: tracePath })
   }
 }
 
@@ -156,6 +161,7 @@ export function captureTraceFingerprint(label: string, tracePath: string): void 
  * are captured in the diagnostic JSON, never thrown.
  */
 export async function captureDapStateSnapshot(label: string): Promise<void> {
+  const safeLabel = safeArtifactLabel(label)
   // Why inlined / no const helper: ``browser.executeWorkbench`` ships the
   // callback to the VS Code workbench by calling ``.toString()`` on the
   // transpiled function.  ``tsx`` (the WDIO loader) inserts ``__name(fn,
@@ -207,8 +213,8 @@ export async function captureDapStateSnapshot(label: string): Promise<void> {
       }
       return { threads, stackTrace, scopes, variablesByScope }
     })
-    writeDiag(`dap-state-${label}.json`, snapshot)
+    writeDiag(`dap-state-${safeLabel}.json`, snapshot)
   } catch (e: any) {
-    writeDiag(`dap-state-${label}.json`, { error: e.message })
+    writeDiag(`dap-state-${safeLabel}.json`, { error: e.message })
   }
 }
