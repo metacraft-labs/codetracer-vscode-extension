@@ -53,7 +53,7 @@ echo ""
 
 # Skip if fixture already exists and FORCE is not set
 if [ -d "$FIXTURE_DIR" ] && [ -z "${FORCE:-}" ]; then
-  if compgen -G "$FIXTURE_DIR/*.ct" >/dev/null \
+  if [ -n "$(find $FIXTURE_DIR/*.ct -maxdepth 0 -print -quit 2>/dev/null)" ] \
     || { [ -f "$FIXTURE_DIR/trace_metadata.json" ] && \
          { [ -f "$FIXTURE_DIR/trace.json" ] || [ -f "$FIXTURE_DIR/trace.bin" ]; }; }; then
     echo "Fixture already exists (use FORCE=1 to re-record)."
@@ -137,7 +137,7 @@ recorder_exec "$SOLANA_RECORDER_DIR" "$RECORDER_BIN" record -o "$FIXTURE_DIR" "$
 # or the CTFS binary container layout (a single ``trace.bin`` or one or
 # more ``*.ct`` files with embedded meta.dat).  Accept either, matching
 # the early-skip check at the top of this script.
-if compgen -G "$FIXTURE_DIR/*.ct" >/dev/null; then
+if [ -n "$(find $FIXTURE_DIR/*.ct -maxdepth 0 -print -quit 2>/dev/null)" ]; then
   echo "Recorder produced CTFS trace container (*.ct)."
 elif [ -f "$FIXTURE_DIR/trace_metadata.json" ]; then
   echo "Recorder produced legacy JSON metadata."

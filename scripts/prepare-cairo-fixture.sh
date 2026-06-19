@@ -53,7 +53,7 @@ echo ""
 
 # Skip if fixture already exists and FORCE is not set
 if [ -d "$FIXTURE_DIR" ] && [ -z "${FORCE:-}" ]; then
-  if compgen -G "$FIXTURE_DIR/*.ct" >/dev/null \
+  if [ -n "$(find $FIXTURE_DIR/*.ct -maxdepth 0 -print -quit 2>/dev/null)" ] \
     || { [ -f "$FIXTURE_DIR/trace_metadata.json" ] && \
          { [ -f "$FIXTURE_DIR/trace.json" ] || [ -f "$FIXTURE_DIR/trace.bin" ]; }; }; then
     echo "Fixture already exists (use FORCE=1 to re-record)."
@@ -86,7 +86,7 @@ recorder_exec "$CAIRO_RECORDER_DIR" "$RECORDER_BIN" record "$SOURCE_FILE" --out-
 # trace_metadata.json + trace.json/trace.bin shape.  Accept
 # either layout for backwards compatibility while consumers
 # migrate.
-if compgen -G "$FIXTURE_DIR/*.ct" >/dev/null; then
+if [ -n "$(find $FIXTURE_DIR/*.ct -maxdepth 0 -print -quit 2>/dev/null)" ]; then
   : # CTFS bundle present
 elif [ -f "$FIXTURE_DIR/trace_metadata.json" ] && \
      { [ -f "$FIXTURE_DIR/trace.json" ] || [ -f "$FIXTURE_DIR/trace.bin" ]; }; then
