@@ -156,11 +156,10 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
   // ==================================================================
 
   it('loads locals with variable values including a (felt252)', async () => {
-    // The cairo recorder emits per-step *delta* variables — only the new
-    // binding declared on that source line lands in the Step record's
-    // ``vars`` field (verified by ``ct-print --full`` on the recorder
-    // output: step at line 2 has ``vars=[a]``, line 3 ``vars=[b]``,
-    // line 4 ``vars=[sum_val]``, line 7 (the return tuple) ``vars=[]``).
+    // The cairo recorder exposes the variable written by the previous
+    // source line when the debugger settles on the following line. At
+    // compute:2, before ``let a`` has executed, locals are empty; after
+    // one more step to compute:3, ``a`` is visible with value ``10``.
     //
     // The recorder also emits a leading ``sekAbsoluteStep`` at line 1
     // for main BEFORE main's actual body, so the initial DAP position
@@ -168,24 +167,13 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
     // A bare ``stepIn`` from line 1 has nothing to step into — it
     // just advances to ``main:10``.  We must first walk to the
     // ``compute()`` call site at line 11, *then* stepIn to enter
-    // compute, then advance one more step so the debugger settles on
-    // ``compute:2`` where ``a`` is bound.
+    // compute.
     await session.stepOver(2000) // step #1 (main:1) → #2 (main:10)
     await session.stepOver(2000) // step #2 (main:10) → #3 (main:11 — compute() call site)
     const stepInLoc = await session.stepIn(3000) // step #3 → #5 (compute:1 function decl)
     console.log('[Cairo] Stepped into:', JSON.stringify(stepInLoc))
-    // One more stepOver lands at compute:2 where ``let a: felt252 = 10;``
-    // is bound and the Step record's ``vars`` field becomes
-    // ``[{varname: "a", value: {kind: Int, i: 10}}]`` — KNOWN_VARIABLE
-    // is exactly the binding emitted on this step.  We stop here on
-    // purpose: the cairo recorder's delta semantics mean that going
-    // further (line 3 ``b``, line 4 ``sum_val``, …) replaces ``vars``
-    // with the new single binding rather than accumulating, so any
-    // additional stepOver would drop ``a`` from the live payload.
-    // The follow-on ``performs multiple step-over operations and
-    // changes line`` block does its own 5 stepOvers from this position
-    // through lines 3..7 (4 unique additional lines).
-    const aLoc = await session.stepOver(2000)
+    await session.stepOver(2000) // step #5 → compute:2, before ``a`` is visible
+    const aLoc = await session.stepOver(2000) // compute:3, after ``a`` is visible
     console.log('[Cairo] Settled at:', JSON.stringify(aLoc))
 
     const result = await session.loadLocals({ lang: 'Cairo', countBudget: 100, depthLimit: 3 })
@@ -200,6 +188,10 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
       // Verify at least one variable has a non-empty value
       if (result.data.locals && Array.isArray(result.data.locals)) {
         console.log('[Cairo] Total locals:', result.data.locals.length)
+
+        const knownLocal = result.data.locals.find((l: any) => (l.name ?? l.variable_name) === KNOWN_VARIABLE)
+        expect(knownLocal).toBeDefined()
+        expect(String(knownLocal!.value ?? '').length).toBeGreaterThan(0)
 
         const withValues = result.data.locals.filter(
           (l: any) => l.value !== undefined && l.value !== null && String(l.value).length > 0,
@@ -227,7 +219,7 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
 
     const locations: Array<{ file: string; line: number }> = [current]
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       const loc = await session.stepOver(3000)
       locations.push(loc)
       // Each step should land in a source file with a valid line
@@ -238,11 +230,9 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
     writeDiag('cairo-deep-multi-step.json', locations)
     console.log('[Cairo] Multi-step locations:', JSON.stringify(locations))
 
-    // Verify we actually moved — not all locations should be the same line.
-    // Inside compute(), lines 2-7 have variable assignments, so step-overs
-    // should visit different lines.
-    const uniqueLines = new Set(locations.map(l => l.line))
-    expect(uniqueLines.size).toBeGreaterThan(1)
+    // Starting from compute:3 after the locals test, the deterministic
+    // compute-body path advances through lines 4-7.
+    expect(locations.map(l => l.line)).toEqual([3, 4, 5, 6, 7])
   })
 
   it('step-in enters a callee and step-out returns', async () => {
