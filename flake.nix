@@ -38,23 +38,32 @@
             pname = "vscode-insiders";
             name = "${pname}-${version}";
           });
-        # Chromedriver pinned to match VS Code Insiders' Electron
-        # (currently Electron 33 → Chrome 148). The system chromedriver
-        # from nixpkgs tracks latest Chromium and won't match. When VS
-        # Code Insiders bumps Electron, bump this pin too:
-        #   1. `code-insiders --version` to see the Electron+Chromium combo
-        #   2. lookup the matching release in
+        # Chromedriver pinned to match the NIX-PACKAGED VS Code
+        # Insiders' bundled Electron (NOT the latest apt-installed
+        # code-insiders). The flake.lock pin → nixpkgs determines
+        # which Insiders version we get; with the current pin (March
+        # 2026 nixpkgs / NixOS 25.11) Insiders 1.104.0-insider ships
+        # Electron 37.3.1 → Chromium 138.0.7204.x.
+        #
+        # When bumping flake.lock past a nixpkgs that bumps
+        # vscode-insiders, also bump this pin:
+        #   1. `code-insiders --version` in the dev shell
+        #   2. inspect the bundled Electron via
+        #      `cat resources/app/package.json | jq .devDependencies.electron`
+        #      (path comes from `readlink -f $(command -v code-insiders)`)
+        #   3. map Electron → Chromium via the releases page or
+        #      https://www.electronjs.org/docs/latest/tutorial/electron-timelines
+        #   4. find the matching chromedriver in
         #      https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json
-        #   3. recompute the hash with
-        #      `nix-prefetch-url --type sha256 --unpack <url>`
+        #   5. recompute the hash with `nix-prefetch-url <url>`
         chromedriver-pinned = pkgs.stdenv.mkDerivation rec {
           pname = "chromedriver";
-          version = "148.0.7778.97";
+          version = "138.0.7204.94";
           src =
             if pkgs.stdenv.hostPlatform.system == "x86_64-linux" then
               pkgs.fetchurl {
                 url = "https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chromedriver-linux64.zip";
-                hash = "sha256-rTJGeQhlcrY4oDiKlvIRhWFUgsVar8RfPwGt8TT6+/U=";
+                sha256 = "sha256-WdtqWZR/b2I81mxWzmUy35axTz6DUBRKOiRvm1H/wow=";
               }
             else if pkgs.stdenv.hostPlatform.system == "aarch64-linux" then
               pkgs.fetchurl {
@@ -69,8 +78,7 @@
             else throw "Unsupported platform for chromedriver-pinned";
 
           nativeBuildInputs = [ pkgs.unzip pkgs.autoPatchelfHook ];
-          # Chrome 148+ adds a runtime libdbus dep that wasn't there in 138.
-          buildInputs = [ pkgs.glib pkgs.nss pkgs.xorg.libX11 pkgs.dbus ];
+          buildInputs = [ pkgs.glib pkgs.nss pkgs.xorg.libX11 ];
 
           unpackPhase = "unzip $src";
           installPhase = ''
