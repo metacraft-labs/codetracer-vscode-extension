@@ -38,17 +38,23 @@
             pname = "vscode-insiders";
             name = "${pname}-${version}";
           });
-        # Chromedriver pinned to match VS Code Insiders' Electron (Chrome 138).
-        # The system chromedriver from nixpkgs tracks latest Chromium and won't
-        # match the pinned VS Code Insiders Electron version.
-        chromedriver-138 = pkgs.stdenv.mkDerivation rec {
+        # Chromedriver pinned to match VS Code Insiders' Electron
+        # (currently Electron 33 → Chrome 148). The system chromedriver
+        # from nixpkgs tracks latest Chromium and won't match. When VS
+        # Code Insiders bumps Electron, bump this pin too:
+        #   1. `code-insiders --version` to see the Electron+Chromium combo
+        #   2. lookup the matching release in
+        #      https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json
+        #   3. recompute the hash with
+        #      `nix-prefetch-url --type sha256 --unpack <url>`
+        chromedriver-pinned = pkgs.stdenv.mkDerivation rec {
           pname = "chromedriver";
-          version = "138.0.7204.94";
+          version = "148.0.7778.97";
           src =
             if pkgs.stdenv.hostPlatform.system == "x86_64-linux" then
               pkgs.fetchurl {
                 url = "https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chromedriver-linux64.zip";
-                sha256 = "sha256-WdtqWZR/b2I81mxWzmUy35axTz6DUBRKOiRvm1H/wow=";
+                hash = "sha256-rTJGeQhlcrY4oDiKlvIRhWFUgsVar8RfPwGt8TT6+/U=";
               }
             else if pkgs.stdenv.hostPlatform.system == "aarch64-linux" then
               pkgs.fetchurl {
@@ -60,10 +66,11 @@
                 url = "https://storage.googleapis.com/chrome-for-testing-public/${version}/mac-x64/chromedriver-mac-x64.zip";
                 sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # TODO: fill in for macOS
               }
-            else throw "Unsupported platform for chromedriver-138";
+            else throw "Unsupported platform for chromedriver-pinned";
 
           nativeBuildInputs = [ pkgs.unzip pkgs.autoPatchelfHook ];
-          buildInputs = [ pkgs.glib pkgs.nss pkgs.xorg.libX11 ];
+          # Chrome 148+ adds a runtime libdbus dep that wasn't there in 138.
+          buildInputs = [ pkgs.glib pkgs.nss pkgs.xorg.libX11 pkgs.dbus ];
 
           unpackPhase = "unzip $src";
           installPhase = ''
@@ -107,7 +114,7 @@
             vsce
             # WebdriverIO testing dependencies
             chromium
-            chromedriver-138     # must match VS Code Insiders' Electron (Chrome 138)
+            chromedriver-pinned  # must match VS Code Insiders' Electron (currently Chrome 148)
             xorg.xorgserver      # provides Xvfb for headless VS Code on Linux
             vscodeInsiders
           ] ++ chromiumLibs;
@@ -119,7 +126,7 @@
             export VSCODE_INSIDERS_PATH="${vscodeInsiders}/bin/code-insiders"
             # Use nix-provided chromedriver for WDIO (npm binary won't run on NixOS).
             # Must match the Chrome version embedded in VS Code Insiders' Electron.
-            export CHROMEDRIVER_PATH="${chromedriver-138}/bin/chromedriver"
+            export CHROMEDRIVER_PATH="${chromedriver-pinned}/bin/chromedriver"
             export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
           '';
