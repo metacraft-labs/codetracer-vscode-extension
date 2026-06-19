@@ -13,12 +13,39 @@ export interface DapResult<T = any> {
   error?: string
 }
 
+async function ensureMoveTracker(): Promise<void> {
+  await browser.executeWorkbench(async (vscode) => {
+    const g = globalThis as any;
+    if (g.__ctWdioMoveTrackerInstalled) {
+      return;
+    }
+
+    g.__ctWdioMoveTrackerInstalled = true;
+    g.__ctWdioMoveTrackerDisposable = vscode.debug.onDidReceiveDebugSessionCustomEvent(
+      (event: any) => {
+        if (event?.event === 'ct/complete-move' && event.body?.location) {
+          g.__ctWdioLastLocation = event.body.location;
+        }
+      },
+    );
+  });
+}
+
+async function resetLatestTraceTick(): Promise<void> {
+  await browser.executeWorkbench(async () => {
+    const g = globalThis as any;
+    g.__ctWdioLastLocation = undefined;
+  });
+}
+
 /** Send a custom DAP request to the active debug session. */
 export async function dapRequest<T = any>(
   command: string,
   args: any = {},
   timeoutMs = 10000
 ): Promise<DapResult<T>> {
+  await ensureMoveTracker();
+
   return browser.executeWorkbench(async (vscode, cmd, a, t) => {
     const session = vscode.debug.activeDebugSession
     if (!session) return { ok: false, error: 'no active debug session' }
@@ -32,6 +59,17 @@ export async function dapRequest<T = any>(
       return { ok: false, error: e.message }
     }
   }, command, args, timeoutMs) as DapResult<T>
+}
+
+/** Return the latest trace tick observed through ct/complete-move. */
+async function latestTraceTick(): Promise<number | undefined> {
+  await ensureMoveTracker();
+
+  return browser.executeWorkbench(async () => {
+    const g = globalThis as any;
+    const ticks = g.__ctWdioLastLocation?.rrTicks;
+    return typeof ticks === 'number' ? ticks : undefined;
+  }) as Promise<number | undefined>
 }
 
 /** Start a CodeTracer debug session with the given trace folder.
@@ -52,6 +90,9 @@ export async function startDebugSession(traceFolder: string): Promise<boolean> {
   const path = await import('path')
   const isRr = fs.existsSync(path.join(traceFolder, 'rr'))
 
+  await resetLatestTraceTick();
+  await ensureMoveTracker();
+
   return browser.executeWorkbench(
     async (vscode, folder: string, rrTrace: boolean) => {
       const config: any = {
@@ -65,7 +106,7 @@ export async function startDebugSession(traceFolder: string): Promise<boolean> {
 
       if (rrTrace) {
         const cfg = vscode.workspace.getConfiguration('codetracer')
-        const rrWorkerPath = cfg.get<string>('rrWorkerPath')?.trim() ?? ''
+        const rrWorkerPath = (cfg.get('rrWorkerPath') as string | undefined)?.trim() ?? '';
         if (rrWorkerPath) {
           config.ctRRWorkerExe = rrWorkerPath
           config.rawDiffIndex = null
@@ -99,6 +140,7 @@ export async function waitForDebugSession(timeoutMs = 30000): Promise<void> {
 /** Stop the active debug session. */
 export async function stopDebugSession(): Promise<void> {
   try {
+    await resetLatestTraceTick();
     await browser.executeWorkbench(async (vscode) => {
       if (vscode.debug.activeDebugSession) {
         await vscode.commands.executeCommand('workbench.action.debug.stop')
@@ -212,8 +254,9 @@ export async function loadLocals(opts: {
   // The `lang` field is a repr(u8) enum and must be sent as a number.
   const langName = opts.lang ?? 'Rust'
   const langId = LANG_IDS[langName] ?? LANG_IDS.Unknown
+  const rrTicks = opts.rrTicks ?? (await latestTraceTick()) ?? 0;
   return dapRequest('ct/load-locals', {
-    rrTicks: opts.rrTicks ?? 0,
+    rrTicks,
     countBudget: opts.countBudget ?? 100,
     minCountLimit: 10,
     lang: langId,
