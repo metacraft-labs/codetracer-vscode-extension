@@ -28,6 +28,41 @@ const TRACE_NAME = 'cairo-flow-test'
 // executes Sierra IR with debug info mapping back to source locations.
 const KNOWN_FUNCTIONS = ['compute']
 const KNOWN_VARIABLE = 'a' // felt252 type
+const KNOWN_VARIABLE_VALUE = '10'
+const LOCAL_NAME_FIELDS = ['name', 'variable_name', 'expression'] as const
+const CAIRO_SCALAR_VALUE_FIELDS = ['i', 'text', 'cText', 'c', 'r', 'f'] as const
+
+function localNames(local: Record<string, unknown>): string[] {
+  return LOCAL_NAME_FIELDS
+    .map(field => local[field])
+    .filter((value): value is string | number => typeof value === 'string' || typeof value === 'number')
+    .map(String)
+    .filter(value => value.length > 0)
+}
+
+function scalarValueStrings(value: unknown): string[] {
+  if (value === undefined || value === null) {
+    return []
+  }
+
+  if (typeof value !== 'object') {
+    const scalar = String(value)
+    return scalar.length > 0 ? [scalar] : []
+  }
+
+  const objectValue = value as Record<string, unknown>
+  return CAIRO_SCALAR_VALUE_FIELDS
+    .map(field => objectValue[field])
+    .filter((fieldValue): fieldValue is string | number => {
+      return typeof fieldValue === 'string' || typeof fieldValue === 'number'
+    })
+    .map(String)
+    .filter(fieldValue => fieldValue.length > 0)
+}
+
+function localValueStrings(local: Record<string, unknown>): string[] {
+  return scalarValueStrings(local.value)
+}
 
 const session = new DebugSession()
 const editor = new EditorPane()
@@ -189,19 +224,22 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
       if (result.data.locals && Array.isArray(result.data.locals)) {
         console.log('[Cairo] Total locals:', result.data.locals.length)
 
-        const knownLocal = result.data.locals.find((l: any) => (l.name ?? l.variable_name) === KNOWN_VARIABLE)
+        const knownLocal = result.data.locals.find((l: Record<string, unknown>) => localNames(l).includes(KNOWN_VARIABLE))
         expect(knownLocal).toBeDefined()
-        expect(String(knownLocal!.value ?? '').length).toBeGreaterThan(0)
+        const knownLocalValueStrings = localValueStrings(knownLocal!)
+        expect(knownLocalValueStrings.length).toBeGreaterThan(0)
+        expect(knownLocalValueStrings).toContain(KNOWN_VARIABLE_VALUE)
 
         const withValues = result.data.locals.filter(
-          (l: any) => l.value !== undefined && l.value !== null && String(l.value).length > 0,
+          (l: Record<string, unknown>) => localValueStrings(l).length > 0,
         )
         console.log(`[Cairo] Locals with values: ${withValues.length}/${result.data.locals.length}`)
         expect(withValues.length).toBeGreaterThan(0)
 
         // Log first few for diagnostics
         for (const v of withValues.slice(0, 5)) {
-          console.log(`  ${v.name ?? v.variable_name}: ${JSON.stringify(v.value).substring(0, 80)}`)
+          const displayName = localNames(v).join('/') || '<unnamed>'
+          console.log(`  ${displayName}: ${JSON.stringify(localValueStrings(v)).substring(0, 80)}`)
         }
       }
     }
