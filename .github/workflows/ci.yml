@@ -76,18 +76,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
+      # setup-dev-env installs Nix, materialises this repo's nix dev env,
+      # and installs the `dev-exec` wrapper (replacing the open-coded
+      # setup-nix step). This job needs no cross-repo siblings.
+      - name: Setup dev env
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
 
       - name: Install dependencies
-        run: nix develop -c just install
+        run: dev-exec just install
 
       - name: Compile TypeScript
-        run: nix develop -c just compile-ts
+        run: dev-exec just compile-ts
 
       - name: Restore Nim-compiled ct_vscode.js
         run: |
@@ -99,7 +103,7 @@ jobs:
           fi
 
       - name: Run WDIO smoke tests
-        run: nix develop -c just test-wdio-smoke
+        run: dev-exec just test-wdio-smoke
 
       - name: Upload diagnostics on failure
         if: failure()
@@ -134,142 +138,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: ./.github/actions/setup-nix
+      # setup-dev-env installs Nix, materialises this repo's nix dev env,
+      # installs the `dev-exec` wrapper, and clones the cross-repo siblings
+      # this job needs at workspace-lock-pinned revisions (replacing the
+      # former setup-nix + manifest/resolve/clone steps). codetracer and the
+      # lock-managed recorder/backend siblings resolve from the workspace
+      # lock; codetracer-rr-backend is a legacy repo outside the workspace
+      # manifest, so it is pinned to its integration-branch tip via `name=ref`.
+      - name: Setup dev env
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
-          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
-          substituters: ${{ vars.SUBSTITUTERS }}
+          env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
-
-      - name: Install just
-        uses: extractions/setup-just@v2
-
-      - name: Checkout metacraft-manifests (workspace locks)
-        uses: actions/checkout@v5
-        with:
-          repository: metacraft-labs/metacraft-manifests
-          ref: latest
-          path: _manifests
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Resolve cross-repo workspace-lock SHA
-        shell: bash
-        run: |
-          case "${{ github.event_name }}" in
-            pull_request) CANDS="${{ github.event.pull_request.base.sha }}" ;;
-            push) CANDS="${{ github.sha }} ${{ github.event.before }}" ;;
-            *) CANDS="${{ github.sha }}" ;;
-          esac
-          LOCK_SHA=""
-          for c in $CANDS; do
-            [ -z "$c" ] && continue
-            [ "$c" = "0000000000000000000000000000000000000000" ] && continue
-            if "${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-                 --repo codetracer-vscode-extension --sibling codetracer \
-                 --manifest-dir "${{ github.workspace }}/_manifests" \
-                 --sha "$c" --no-walk >/dev/null 2>&1; then
-              LOCK_SHA="$c"; break
-            fi
-          done
-          if [ -z "$LOCK_SHA" ]; then
-            echo "::error::No repo-workspaces workspace lock for codetracer-vscode-extension (candidates: $CANDS). The commit must be published through the workspace tooling."
-            exit 1
-          fi
-          echo "CT_MANIFEST_DIR=${{ github.workspace }}/_manifests" >> "$GITHUB_ENV"
-          echo "CT_LOCK_SHA=$LOCK_SHA" >> "$GITHUB_ENV"
-          echo "Resolved cross-repo lock SHA for codetracer-vscode-extension: $LOCK_SHA"
-
-      # Resolve the codetracer ref from the workspace lock.
-      - name: Resolve codetracer ref
-        id: resolve-codetracer-ref
-        shell: bash
-        run: |
-          REF="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-            --repo codetracer-vscode-extension --sibling codetracer \
-            --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "Resolved codetracer ref: $REF"
-
-      # Clone codetracer with submodules. Uses git clone directly (rather
-      # than clone-repo action) because --recurse-submodules propagates
-      # credentials to all submodules including private ones like
-      # tree-sitter-nim.
-      - name: Clone codetracer
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          CT_REF="${{ steps.resolve-codetracer-ref.outputs.ref }}"
-          DEST="$GITHUB_WORKSPACE/../codetracer"
-          rm -rf "$DEST"
-          # CT_REF is a commit SHA resolved from the workspace lock; the
-          # default-branch shallow clone + ``fetch origin <sha>`` + checkout
-          # is SHA-safe.
-          git clone --depth 1 --recurse-submodules --shallow-submodules \
-            "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/codetracer.git" \
-            "$DEST"
-          git -C "$DEST" fetch origin "$CT_REF"
-          git -C "$DEST" checkout "$CT_REF"
-          git -C "$DEST" submodule update --init --recursive
-
-      # Clone the sibling recorder/backend repos needed for trace recording.
-      # Their revisions come from the repo-workspaces workspace lock via
-      # scripts/resolve-sibling-rev.sh.  codetracer-rr-backend is the one
-      # exception: it is a legacy repo that is NOT part of the workspace
-      # manifest / lock, so it is cloned at its integration-branch tip.
-      # Each clone is optional — the
-      # downstream build steps already guard on ``[ -d ../<name> ]`` and warn
-      # rather than fail when a sibling is absent.
-      - name: Restore sibling repos
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          # Rewrite GitHub HTTPS URLs to include the access token so that
-          # --recurse-submodules can clone private submodules.
-          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-
-          # Clone a sibling at a specific commit SHA (SHA-safe: shallow
-          # default-branch clone, then fetch + detach onto the SHA).
-          clone_sibling_sha() {
-            local name="$1" ref="$2" dest="${GITHUB_WORKSPACE}/../$1"
-            if [ -d "$dest" ]; then
-              echo "[$name] Already exists — ensuring submodules are initialized"
-              git -C "$dest" submodule update --init --recursive 2>/dev/null || true
-              return 0
-            fi
-            echo "[$name] Cloning at $ref"
-            git clone --no-checkout --recurse-submodules \
-              "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/${name}.git" \
-              "$dest"
-            git -C "$dest" fetch --recurse-submodules origin "$ref"
-            git -C "$dest" checkout --detach FETCH_HEAD
-            git -C "$dest" submodule update --init --recursive 2>/dev/null || true
-          }
-
-          # Lock-managed siblings — resolve each from the workspace lock.
-          for name in \
-            codetracer-native-backend \
-            codetracer-ruby-recorder \
-            codetracer-python-recorder \
-          ; do
-            ref="$("${{ github.workspace }}/scripts/resolve-sibling-rev.sh" \
-              --repo codetracer-vscode-extension --sibling "$name" \
-              --manifest-dir "$CT_MANIFEST_DIR" --sha "$CT_LOCK_SHA" --no-walk)"
-            clone_sibling_sha "$name" "$ref"
-          done
-
-          # codetracer-rr-backend is a legacy repo outside the workspace
-          # manifest, so it has no lock entry; clone its integration branch
-          # tip directly.  It is only used as a fallback when
-          # codetracer-native-backend is unavailable.
-          RR_BACKEND_BRANCH="mcr-backend-integration"
-          rr_dest="${GITHUB_WORKSPACE}/../codetracer-rr-backend"
-          if [ ! -d "$rr_dest" ]; then
-            echo "[codetracer-rr-backend] Cloning branch $RR_BACKEND_BRANCH"
-            git clone --depth 1 --branch "$RR_BACKEND_BRANCH" --single-branch \
-              --recurse-submodules --shallow-submodules \
-              "https://x-access-token:${GH_TOKEN}@github.com/metacraft-labs/codetracer-rr-backend.git" \
-              "$rr_dest" || echo "[codetracer-rr-backend] clone failed (non-fatal)"
-          fi
+          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          siblings: |
+            codetracer
+            codetracer-native-backend
+            codetracer-ruby-recorder
+            codetracer-python-recorder
+            codetracer-rr-backend=mcr-backend-integration
 
       - name: Build codetracer (ct + db-backend binaries)
         run: |
@@ -328,10 +216,10 @@ jobs:
           fi
 
       - name: Install dependencies
-        run: nix develop -c just install
+        run: dev-exec just install
 
       - name: Compile TypeScript
-        run: nix develop -c just compile-ts
+        run: dev-exec just compile-ts
 
       - name: Restore Nim-compiled ct_vscode.js
         run: |
@@ -483,17 +371,17 @@ jobs:
           ; do
             if [ -x "$script" ]; then
               echo "=== Running $script ==="
-              nix develop -c bash "$script" || echo "WARNING: $script failed (non-fatal)"
+              dev-exec bash "$script" || echo "WARNING: $script failed (non-fatal)"
             else
               echo "WARNING: $script not found or not executable"
             fi
           done
 
       - name: Run per-language smoke tests
-        run: nix develop -c just test-wdio-smoke-langs
+        run: dev-exec just test-wdio-smoke-langs
 
       - name: Run deep integration tests
-        run: nix develop -c just test-wdio-deep
+        run: dev-exec just test-wdio-deep
 
       - name: Upload diagnostics on failure
         if: failure()
