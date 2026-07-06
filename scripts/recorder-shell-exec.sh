@@ -43,3 +43,12 @@ recorder_exec() {
   # e.g., from an outer nix develop wrapper in the CI workflow).
   "$@"
 }
+
+recorder_target_dir() {
+  local repo_dir="$1"
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    printf '%s\n' "$CARGO_TARGET_DIR"
+  else
+    printf '%s\n' "$repo_dir/target"
+  fi
+}

@@ -63,10 +63,12 @@ if [ -d "$FIXTURE_DIR" ] && [ -z "${FORCE:-}" ]; then
 fi
 
 echo "Building codetracer-ton-recorder..."
-recorder_exec "$TOLK_RECORDER_DIR" cargo build --manifest-path "$TOLK_RECORDER_DIR/Cargo.toml"
+RECORDER_TARGET_DIR="$(recorder_target_dir "$TOLK_RECORDER_DIR")"
+recorder_exec "$TOLK_RECORDER_DIR" env CARGO_TARGET_DIR="$RECORDER_TARGET_DIR" \
+  cargo build --manifest-path "$TOLK_RECORDER_DIR/Cargo.toml"
 
 # Locate the built binary
-RECORDER_BIN="$TOLK_RECORDER_DIR/target/debug/codetracer-ton-recorder"
+RECORDER_BIN="$RECORDER_TARGET_DIR/debug/codetracer-ton-recorder"
 if [ ! -x "$RECORDER_BIN" ]; then
   echo "ERROR: Recorder binary not found at $RECORDER_BIN"
   echo "  Build may have failed — check the cargo output above."

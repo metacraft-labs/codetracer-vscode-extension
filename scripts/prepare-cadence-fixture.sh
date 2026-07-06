@@ -86,8 +86,10 @@ if [ -d "$CADENCE_RECORDER_DIR/go-helper" ]; then
 fi
 
 echo "Building codetracer-flow-recorder (Rust)..."
-recorder_exec "$CADENCE_RECORDER_DIR" cargo build --manifest-path "$CADENCE_RECORDER_DIR/Cargo.toml"
-RECORDER_BIN="$CADENCE_RECORDER_DIR/target/debug/codetracer-flow-recorder"
+RECORDER_TARGET_DIR="$(recorder_target_dir "$CADENCE_RECORDER_DIR")"
+recorder_exec "$CADENCE_RECORDER_DIR" env CARGO_TARGET_DIR="$RECORDER_TARGET_DIR" \
+  cargo build --manifest-path "$CADENCE_RECORDER_DIR/Cargo.toml"
+RECORDER_BIN="$RECORDER_TARGET_DIR/debug/codetracer-flow-recorder"
 
 if [ ! -x "$RECORDER_BIN" ]; then
   echo "ERROR: Recorder binary not found at $RECORDER_BIN"

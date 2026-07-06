@@ -63,10 +63,12 @@ if [ -d "$FIXTURE_DIR" ] && [ -z "${FORCE:-}" ]; then
 fi
 
 echo "Building codetracer-circom-recorder..."
-recorder_exec "$CIRCOM_RECORDER_DIR" cargo build --manifest-path "$CIRCOM_RECORDER_DIR/Cargo.toml"
+RECORDER_TARGET_DIR="$(recorder_target_dir "$CIRCOM_RECORDER_DIR")"
+recorder_exec "$CIRCOM_RECORDER_DIR" env CARGO_TARGET_DIR="$RECORDER_TARGET_DIR" \
+  cargo build --manifest-path "$CIRCOM_RECORDER_DIR/Cargo.toml"
 
 # Locate the built binary
-RECORDER_BIN="$CIRCOM_RECORDER_DIR/target/debug/codetracer-circom-recorder"
+RECORDER_BIN="$RECORDER_TARGET_DIR/debug/codetracer-circom-recorder"
 if [ ! -x "$RECORDER_BIN" ]; then
   echo "ERROR: Recorder binary not found at $RECORDER_BIN"
   echo "  Build may have failed — check the cargo output above."
