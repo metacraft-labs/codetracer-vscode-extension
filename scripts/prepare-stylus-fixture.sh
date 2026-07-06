@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
 # Prepare a pre-recorded Stylus trace fixture for WDIO tests.
 #
-# This script runs the Tier 1+2 Stylus integration test in the codetracer repo
-# with STYLUS_FIXTURE_OUTPUT_DIR set, so the trace is exported to the fixture
-# directory used by the VS Code extension's WDIO tests.
+# This script repacks CodeTracer's committed Stylus event stream into the CTFS
+# fixture directory used by the VS Code extension's WDIO tests.
 #
 # Prerequisites:
-#   - Arbitrum devnode running at localhost:8547
-#   - cargo-stylus, cast (Foundry), wazero on PATH
-#   - wasm32-unknown-unknown Rust target installed
 #   - codetracer repo at ../codetracer (relative to this script's location)
 #
 # Usage:
@@ -33,30 +29,39 @@ echo "  CodeTracer repo: $CODETRACER_DIR"
 echo "  Fixture output:  $FIXTURE_DIR"
 echo ""
 
-# Check devnode is running
-if ! curl -sf -o /dev/null --max-time 2 http://localhost:8547; then
-  echo "ERROR: Arbitrum devnode not reachable at http://localhost:8547"
-  echo "Start the devnode first (see docs/book/src/getting_started/stylus.md)."
+# Repack the committed Stylus event stream into the canonical .ct container.
+# The extension WDIO tests load this fixture; live Arbitrum deployment belongs
+# to CodeTracer's recording-tier tests.
+echo "Regenerating Stylus CTFS fixture from committed event data..."
+if ! command -v direnv >/dev/null 2>&1; then
+  echo "ERROR: direnv is required to run the Stylus fixture command in $CODETRACER_DIR"
+  exit 1
+fi
+if [ ! -f "$CODETRACER_DIR/.envrc" ]; then
+  echo "ERROR: codetracer repo has no .envrc; refusing bare cargo execution."
   exit 1
 fi
 
-# Create the fixture directory
+direnv allow "$CODETRACER_DIR" 2>/dev/null || true
+direnv exec "$CODETRACER_DIR" bash -c '
+  set -euo pipefail
+  cd "$1/src/db-backend"
+  cargo test --test stylus_fixture_rebuild -- --ignored --nocapture rebuild_stylus_ctfs_fixture
+' _ "$CODETRACER_DIR"
+
+SOURCE_FIXTURE_DIR="$CODETRACER_DIR/src/db-backend/tests/fixtures/stylus-fund-trace"
+SOURCE_CT="$SOURCE_FIXTURE_DIR/stylus_fund_tracking_demo.ct"
+if [ ! -f "$SOURCE_CT" ]; then
+  echo "ERROR: CodeTracer Stylus fixture generation did not produce $SOURCE_CT"
+  exit 1
+fi
+
+rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
+cp -a "$SOURCE_FIXTURE_DIR/." "$FIXTURE_DIR/"
 
-# Run the Tier 1+2 test with fixture export
-echo "Running Stylus integration test with fixture export..."
-cd "$CODETRACER_DIR/src/db-backend"
-STYLUS_FIXTURE_OUTPUT_DIR="$FIXTURE_DIR" \
-  cargo nextest run --no-capture --run-ignored all test_stylus_dap_analysis
-
-# Verify the fixture was created
-if [ ! -f "$FIXTURE_DIR/trace_metadata.json" ]; then
-  echo "ERROR: Fixture generation failed — trace_metadata.json not found"
-  exit 1
-fi
-
-if [ ! -f "$FIXTURE_DIR/trace.json" ] && [ ! -f "$FIXTURE_DIR/trace.bin" ]; then
-  echo "ERROR: Fixture generation failed — neither trace.json nor trace.bin found"
+if [ -z "$(find "$FIXTURE_DIR" -maxdepth 1 -name '*.ct' -type f -print -quit)" ]; then
+  echo "ERROR: Fixture generation failed — no CTFS bundle (*.ct) found in $FIXTURE_DIR"
   exit 1
 fi
 

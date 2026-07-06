@@ -2,45 +2,96 @@
 # Shared helper for fixture preparation scripts.
 #
 # Provides `recorder_exec` which runs a command inside the recorder repo's
-# dev shell. It tries multiple strategies in order:
-#   1. direnv exec (fast — uses cached nix dev shell)
-#   2. nix develop (slower — builds the dev shell from the repo's flake.nix)
-#   3. bare execution (assumes tools are already on PATH)
+# dev shell. Repos with an .envrc must run through `direnv exec`; if direnv
+# cannot enter that shell, fixture preparation fails instead of falling back to
+# whatever happens to be on PATH.
+#
+# Repos without an .envrc are allowed a strict bare fallback only when the
+# caller is already inside a known dev shell and the obvious required tool(s)
+# for the command are present. This keeps legacy repos usable without hiding a
+# failed/interrupted dev-shell setup as a later "command not found" error.
 #
 # Usage:
 #   source "$(dirname "${BASH_SOURCE[0]}")/recorder-shell-exec.sh"
 #   recorder_exec "$RECORDER_DIR" cargo build --manifest-path "$RECORDER_DIR/Cargo.toml"
 #   recorder_exec "$RECORDER_DIR" "$RECORDER_DIR/target/debug/my-binary" record ...
 
+recorder_fail() {
+  echo "ERROR: $*" >&2
+  return 1
+}
+
+recorder_in_known_dev_shell() {
+  [ -n "${IN_NIX_SHELL:-}" ] || [ -n "${DIRENV_DIR:-}" ]
+}
+
+recorder_required_tools() {
+  local cmd="$1"
+  local script="${2:-}"
+
+  case "$cmd" in
+    bash|sh)
+      [ -n "$script" ] || return 0
+      case "$script" in *cargo*) echo cargo ;; esac
+      case "$script" in *"cargo build-sbf"*) echo cargo-build-sbf ;; esac
+      case "$script" in *"go "*) echo go ;; esac
+      case "$script" in *"sui "*) echo sui ;; esac
+      ;;
+    cargo)
+      echo cargo
+      [ "${2:-}" = "build-sbf" ] && echo cargo-build-sbf
+      ;;
+    sui|go|solc|anvil|cast|cargo-stylus|wazero)
+      echo "$cmd"
+      ;;
+  esac
+}
+
+recorder_require_bare_fallback_tools() {
+  local cmd="$1"
+  local arg2="${2:-}"
+  local script=""
+  if { [ "$cmd" = "bash" ] || [ "$cmd" = "sh" ]; } && [ "$arg2" = "-c" ]; then
+    script="${3:-}"
+    arg2="$script"
+  fi
+
+  local tool
+  local missing=()
+  while IFS= read -r tool; do
+    [ -n "$tool" ] || continue
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      missing+=("$tool")
+    fi
+  done < <(recorder_required_tools "$cmd" "$arg2")
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    recorder_fail "repo has no .envrc and current dev shell is missing required tool(s): ${missing[*]}"
+    return 1
+  fi
+}
+
 recorder_exec() {
   local repo_dir="$1"
   shift
 
-  # Strategy 1: direnv exec (fast — uses cached nix dev shell).
-  # Falls through if direnv or the dev shell evaluation fails (e.g., in CI
-  # where mcl-blockchain flake attributes may not be available).
   if command -v direnv >/dev/null 2>&1 && [ -f "$repo_dir/.envrc" ]; then
     direnv allow "$repo_dir" 2>/dev/null || true
-    if direnv exec "$repo_dir" "$@"; then
-      return 0
-    fi
-    echo "  (direnv exec failed, falling back to bare execution)" >&2
+    direnv exec "$repo_dir" "$@"
+    return $?
   fi
 
-  # Strategy 2: nix develop (slower — builds the dev shell from flake.nix).
-  # Each recorder repo has its own flake.nix with the toolchain needed to
-  # build and run it.  In CI, the outer nix develop shell (from the extension
-  # repo) does NOT include these toolchains, so we must enter the recorder's
-  # dev shell to get the right tools.
-  if [ -f "$repo_dir/flake.nix" ] && command -v nix >/dev/null 2>&1; then
-    if nix develop "$repo_dir" --accept-flake-config -c "$@"; then
-      return 0
-    fi
-    echo "  (nix develop failed, falling back to bare execution)" >&2
+  if [ -f "$repo_dir/.envrc" ]; then
+    recorder_fail "direnv is required to run commands in $repo_dir"
+    return 1
   fi
 
-  # Strategy 3: bare execution (assumes tools are already on PATH,
-  # e.g., from an outer nix develop wrapper in the CI workflow).
+  if ! recorder_in_known_dev_shell; then
+    recorder_fail "$repo_dir has no .envrc; refusing bare execution outside a known dev shell"
+    return 1
+  fi
+
+  recorder_require_bare_fallback_tools "$@" || return $?
   "$@"
 }
 

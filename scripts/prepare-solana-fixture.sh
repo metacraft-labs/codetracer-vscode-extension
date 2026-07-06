@@ -80,16 +80,7 @@ fi
 echo "Compiling Solana test program to SBF ELF..."
 TEST_PROGRAM_DIR="$SOLANA_RECORDER_DIR/test-programs"
 recorder_exec "$SOLANA_RECORDER_DIR" bash -c \
-  "cd \"$TEST_PROGRAM_DIR\" && cargo build-sbf 2>&1" || {
-  echo "WARNING: cargo build-sbf failed — Solana SDK may not be available."
-  echo "  The Solana fixture requires cargo-build-sbf to compile test programs."
-  if [ -n "$FORCE" ]; then
-    echo "  FORCE is set — treating as fatal error."
-    exit 1
-  fi
-  echo "  Skipping Solana fixture generation (non-fatal)."
-  exit 0
-}
+  "cd \"$TEST_PROGRAM_DIR\" && cargo build-sbf 2>&1"
 
 # Locate the compiled ELF.  Prefer the *unstripped* ELF under
 # ``target/sbpf-solana-solana/release/`` -- ``cargo-build-sbf`` runs
@@ -115,13 +106,10 @@ if [ ! -f "$ELF_FILE" ]; then
   # Try alternative locations
   ELF_FILE="$(find "$TEST_PROGRAM_DIR/target" -name "*.so" -path "*/deploy/*" 2>/dev/null | head -1)"
   if [ -z "$ELF_FILE" ] || [ ! -f "$ELF_FILE" ]; then
-    echo "WARNING: Compiled .so ELF not found after cargo build-sbf."
-    if [ -n "$FORCE" ]; then
-      echo "  FORCE is set — treating as fatal error."
-      exit 1
-    fi
-    echo "  Skipping Solana fixture generation (non-fatal)."
-    exit 0
+    echo "ERROR: Compiled .so ELF not found after cargo build-sbf."
+    echo "  Expected: $TEST_PROGRAM_DIR/target/sbpf-solana-solana/release/test_programs.so"
+    echo "  Fallback: $TEST_PROGRAM_DIR/target/deploy/test_programs.so"
+    exit 1
   fi
 fi
 

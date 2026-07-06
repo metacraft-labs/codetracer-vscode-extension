@@ -120,6 +120,11 @@
             nodePackages.typescript
             nodePackages.eslint
             vsce
+            ruby_3_4
+            rustc
+            cargo
+            gcc
+            rr
             # WebdriverIO testing dependencies
             chromium
             chromedriver-pinned  # must match VS Code Insiders' Electron (currently Chrome 148)
@@ -137,6 +142,9 @@
             export CHROMEDRIVER_PATH="${chromedriver-pinned}/bin/chromedriver"
             export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+            if [ -d "$PWD/.ct-bin" ]; then
+              export PATH="$PWD/.ct-bin:$PATH"
+            fi
           '';
         };
       });

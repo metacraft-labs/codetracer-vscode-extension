@@ -32,6 +32,9 @@ jobs:
       - name: Compile TypeScript
         run: just compile-ts
 
+      - name: Typecheck WDIO tests
+        run: just compile-wdio
+
   windows-build:
     runs-on: windows-latest
 
@@ -56,6 +59,9 @@ jobs:
 
       - name: Compile TypeScript
         run: npm run compile:ts
+
+      - name: Typecheck WDIO tests
+        run: npm run compile:wdio
 
       - name: Verify compiled output exists
         run: if not exist out\extension.js exit 1
@@ -93,6 +99,9 @@ jobs:
       - name: Compile TypeScript
         run: dev-exec just compile-ts
 
+      - name: Typecheck WDIO tests
+        run: dev-exec just compile-wdio
+
       - name: Restore Nim-compiled ct_vscode.js
         run: |
           if [ -f media/ct_vscode.js ]; then
@@ -104,6 +113,9 @@ jobs:
 
       - name: Run WDIO smoke tests
         run: dev-exec just test-wdio-smoke
+
+      - name: Run VS Code extension host tests
+        run: dev-exec just test-vscode
 
       - name: Upload diagnostics on failure
         if: failure()
@@ -142,9 +154,7 @@ jobs:
       # installs the `dev-exec` wrapper, and clones the cross-repo siblings
       # this job needs at workspace-lock-pinned revisions (replacing the
       # former setup-nix + manifest/resolve/clone steps). codetracer and the
-      # lock-managed recorder/backend siblings resolve from the workspace
-      # lock; codetracer-rr-backend is a legacy repo outside the workspace
-      # manifest, so it is pinned to its integration-branch tip via `name=ref`.
+      # lock-managed recorder/backend siblings resolve from the workspace lock.
       - name: Setup dev env
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
@@ -157,7 +167,6 @@ jobs:
             codetracer-native-backend
             codetracer-ruby-recorder
             codetracer-python-recorder
-            codetracer-rr-backend=mcr-backend-integration
 
       - name: Build codetracer (ct + db-backend binaries)
         run: |
@@ -221,6 +230,9 @@ jobs:
       - name: Compile TypeScript
         run: dev-exec just compile-ts
 
+      - name: Typecheck WDIO tests
+        run: dev-exec just compile-wdio
+
       - name: Restore Nim-compiled ct_vscode.js
         run: |
           if [ -f media/ct_vscode.js ]; then
@@ -265,9 +277,9 @@ jobs:
                     || realpath ../codetracer-rr-backend/result-rr-support/bin/ct-rr-support 2>/dev/null || true)"
           if [ -x "$RR_SRC" ]; then
             ln -sf "$RR_SRC" "$COMBINED_BIN/ct-native-replay"
-            echo "ct-rr-support: $RR_SRC"
+            echo "ct-native-replay: $RR_SRC"
           else
-            echo "WARNING: ct-rr-support not found — native language recording will fail"
+            echo "WARNING: ct-native-replay not found — native language recording will fail"
           fi
           # rr is resolved later in the "Record test traces" step (which
           # enters the rr-backend dev shell) and symlinked into COMBINED_BIN.
@@ -281,14 +293,14 @@ jobs:
           fi
           echo "Combined bin directory:"
           ls -la "$COMBINED_BIN"
-          # Write workspace settings pointing at ct and ct-rr-support.
+          # Write workspace settings pointing at ct and ct-native-replay.
           # - runnablePath: ct binary for db-based traces (Python, Ruby, blockchain)
-          # - rrWorkerPath: ct-rr-support binary for rr-based traces (Rust, C, Go, Nim)
+          # - rrWorkerPath: ct-native-replay binary for rr-based traces (Rust, C, Go, Nim)
           # rrExePath is omitted — the extension falls back to a sibling "rr"
-          # next to ct-rr-support, or PATH lookup. Both work since COMBINED_BIN
+          # next to ct-native-replay, or PATH lookup. Both work since COMBINED_BIN
           # contains rr and is on PATH.
           mkdir -p test/wdio/projects/stylus-test/.vscode
-          printf '{\n  "codetracer.runnablePath": "%s/ct",\n  "codetracer.rrWorkerPath": "%s/ct-rr-support"\n}\n' \
+          printf '{\n  "codetracer.runnablePath": "%s/ct",\n  "codetracer.rrWorkerPath": "%s/ct-native-replay"\n}\n' \
             "$COMBINED_BIN" "$COMBINED_BIN" \
             > test/wdio/projects/stylus-test/.vscode/settings.json
           cat test/wdio/projects/stylus-test/.vscode/settings.json
@@ -300,29 +312,29 @@ jobs:
           fi
 
       # Record test traces for standard languages (Python, Ruby, Rust, C, Go, Nim).
-      # This step runs inside the codetracer-rr-backend dev shell because:
-      #   - ct record → ct-rr-support build needs compilers (gcc, rustc, go, nim)
-      #   - ct record → ct-rr-support record needs rr for native language replay
+      # This step runs inside the native-backend dev shell because:
+      #   - ct record → ct-native-replay build needs compilers (gcc, rustc, go, nim)
+      #   - ct record → ct-native-replay record needs rr for native language replay
       # The extension's own dev shell only has Node.js/VS Code tooling.
       - name: Record test traces
         run: |
-          cd ../codetracer-rr-backend
+          cd ../codetracer-native-backend
           nix develop ".?submodules=1" --accept-flake-config -c bash -c "
             cd '$GITHUB_WORKSPACE'
             just record-test-traces
           "
 
-      # Symlink rr, dlv, and gdb into COMBINED_BIN so ct-rr-support can
-      # find them at replay time. The rr-backend dev shell's shellHook
+      # Symlink rr, dlv, and gdb into COMBINED_BIN so ct-native-replay can
+      # find them at replay time. The native-backend dev shell's shellHook
       # creates symlinks at target/debug/{rr,dlv,gdb}. These were
       # created during the "Record test traces" step's `nix develop`.
       - name: Symlink replay tools (rr, dlv, gdb)
         run: |
           COMBINED_BIN="$GITHUB_WORKSPACE/.ct-bin"
-          RR_BACKEND="../codetracer-rr-backend"
+          RR_BACKEND="../codetracer-native-backend"
           # rr is required — fail if missing.
           RR_PATH="$(realpath "$RR_BACKEND/target/debug/rr" 2>/dev/null || true)"
-          echo "rr-backend target/debug/rr resolves to: '$RR_PATH'"
+          echo "native-backend target/debug/rr resolves to: '$RR_PATH'"
           if [ -n "$RR_PATH" ] && [ -x "$RR_PATH" ]; then
             ln -sf "$RR_PATH" "$COMBINED_BIN/rr"
             echo "rr symlinked: $RR_PATH → $COMBINED_BIN/rr"
@@ -352,36 +364,19 @@ jobs:
           ls -la "$COMBINED_BIN"
 
       - name: Prepare blockchain trace fixtures
-        run: |
-          # Run each fixture preparation script. These are idempotent and skip
-          # if the fixture already exists (unless FORCE=1 is set).
-          for script in \
-            scripts/prepare-masm-fixture.sh \
-            scripts/prepare-sway-fixture.sh \
-            scripts/prepare-move-fixture.sh \
-            scripts/prepare-solana-fixture.sh \
-            scripts/prepare-aiken-fixture.sh \
-            scripts/prepare-cadence-fixture.sh \
-            scripts/prepare-cairo-fixture.sh \
-            scripts/prepare-circom-fixture.sh \
-            scripts/prepare-leo-fixture.sh \
-            scripts/prepare-polkavm-fixture.sh \
-            scripts/prepare-solidity-fixture.sh \
-            scripts/prepare-tolk-fixture.sh \
-          ; do
-            if [ -x "$script" ]; then
-              echo "=== Running $script ==="
-              dev-exec bash "$script" || echo "WARNING: $script failed (non-fatal)"
-            else
-              echo "WARNING: $script not found or not executable"
-            fi
-          done
+        run: dev-exec just prepare-wdio-blockchain-fixtures
+
+      - name: Verify value-origin fixture prerequisites
+        run: dev-exec just prepare-wdio-value-origin-fixtures
 
       - name: Run per-language smoke tests
         run: dev-exec just test-wdio-smoke-langs
 
       - name: Run deep integration tests
         run: dev-exec just test-wdio-deep
+
+      - name: Run value-origin integration tests
+        run: dev-exec just test-wdio-value-origin
 
       - name: Upload diagnostics on failure
         if: failure()

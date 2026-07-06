@@ -1,18 +1,21 @@
 build:
     #!/usr/bin/env bash
+    set -euo pipefail
     mkdir -p ./media
     mkdir -p ./backend
     npm install
 
-    pushd libs/codetracer && \
+    rm -f ./backend/db-backend
+    (
+        cd libs/codetracer
         nix develop \
             --extra-experimental-features nix-command \
             --extra-experimental-features flakes \
-            .#devShells.x86_64-linux.default --command ./build_for_extension.sh ../../media/ui.js ../../media/ct_vscode.js ../../backend/db-backend && \
-        popd;
+            .#devShells.x86_64-linux.default --command ./build_for_extension.sh ../../media/ui.js ../../media/ct_vscode.js ../../backend/db-backend
+    )
     # Re-build the webpack frontend bundle with `--devtool false`.
     #
-    # `build_for_extension.sh` builds `frontend_bundle.js` via codetracer's
+    # `build_for_extension.sh` builds the frontend entry via codetracer's
     # `webpack.config.js`, which runs in `mode: development`. Webpack's
     # development mode defaults `devtool` to `eval`, which wraps every one
     # of ~3500 modules in a separate `eval()` call. Five CodeTracer webview
@@ -21,22 +24,47 @@ build:
     # shared VS Code renderer process and crashed it ("renderer closed the
     # MessagePort"). A `devtool: false` build emits an ordinary
     # function-wrapped bundle that V8 can lazily parse, removing the crash.
-    pushd libs/codetracer && \
-        node node_modules/webpack-cli/bin/cli.js --config webpack.config.js --devtool false && \
-        popd;
-    # Copy the complete webpack output — `frontend_bundle.js` AND every
-    # code-split chunk (`*.frontend_bundle.js`) plus the emitted asset
+    (
+        cd libs/codetracer
+        node node_modules/webpack-cli/bin/cli.js --config webpack.config.js --devtool false
+    )
+    # Copy the complete webpack output — the frontend entry AND every
+    # code-split chunk (`*.frontend_imports.js`) plus the emitted asset
     # files (Monaco web-workers, the oniguruma .wasm, fonts, …). The
     # bundle's runtime resolves async `import()` chunks relative to its own
-    # script URL, so the chunks must sit next to `frontend_bundle.js` in
+    # script URL, so the chunks must sit next to the frontend entry in
     # `media/` or Monaco / Nim-language loading 404s ("Error using
     # fileReader"). The previous symlink-only step copied just the entry
     # bundle and left every chunk missing.
     rm -f ./media/frontend_bundle.js
-    cp -f libs/codetracer/src/public/dist/*.frontend_bundle.js ./media/
+    if [[ -f libs/codetracer/src/public/dist/frontend_imports.js ]]; then
+        cp -f libs/codetracer/src/public/dist/frontend_imports.js ./media/frontend_bundle.js
+    elif [[ -f libs/codetracer/src/public/dist/frontend_bundle.js ]]; then
+        cp -f libs/codetracer/src/public/dist/frontend_bundle.js ./media/frontend_bundle.js
+    else
+        echo "codetracer webpack frontend entry is missing from libs/codetracer/src/public/dist" >&2
+        exit 1
+    fi
+    node -e '
+      const fs = require("fs");
+      const bundle = "./media/frontend_bundle.js";
+      const text = fs.readFileSync(bundle, "utf8");
+      const publicPath = [
+        "var scriptUrl;",
+        "/******/     if (document.currentScript) scriptUrl = document.currentScript.src;",
+        "/******/     __webpack_require__.p = scriptUrl.replace(/#.*$/, \"\").replace(/\\\\?.*$/, \"\").replace(/\\\\/[^\\\\/]+$/, \"/\");"
+      ].join(String.fromCharCode(10));
+      fs.writeFileSync(
+        bundle,
+        text
+          .replace(/__webpack_require__\.p = "[^"]*\/src\/public\/dist";/g, publicPath)
+          .replace(/__webpack_require__\.p = "";?/g, publicPath)
+      );
+    '
     for asset in libs/codetracer/src/public/dist/*; do
         case "$asset" in
-            *.frontend_bundle.js) ;;
+            */frontend_imports.js) ;;
+            */frontend_bundle.js) ;;
             *.LICENSE.txt) ;;
             *) cp -f "$asset" ./media/ ;;
         esac
@@ -78,6 +106,14 @@ lint:
 compile-ts:
     npm run compile:ts
     test -f out/extension.js
+
+# Compile/typecheck WDIO config, helpers, and specs.
+compile-wdio:
+    npm run compile:wdio
+
+# Run the VS Code extension host tests from src/test under Xvfb.
+test-vscode:
+    just _xvfb-run "npx vscode-test"
 
 # Helper: start Xvfb and run a command with DISPLAY set.
 # Usage: just _xvfb-run "npx wdio run wdio.conf.ts --spec ..."
@@ -159,6 +195,9 @@ _xvfb-run +CMD:
     # binary, but that alone is insufficient when user namespaces are
     # unavailable.
     export CHROME_DEVEL_SANDBOX=""
+    if [ -d "$(pwd)/.ct-bin" ]; then
+        export PATH="$(pwd)/.ct-bin:$PATH"
+    fi
     {{CMD}}
 
 # Run WDIO hello-world smoke test (no sibling repos needed)
@@ -171,12 +210,35 @@ record-test-traces *LANGS:
     set -euo pipefail
     bash scripts/record-test-traces.sh {{LANGS}}
 
+# Prepare all fixture inputs needed by the full WDIO suite. Missing fixture
+# prerequisites are fatal here so `just test` cannot pass via skipped suites.
+prepare-wdio-fixtures:
+    scripts/prepare-wdio-fixtures.sh all
+
+prepare-wdio-traces:
+    scripts/prepare-wdio-fixtures.sh traces
+
+prepare-wdio-blockchain-fixtures:
+    scripts/prepare-wdio-fixtures.sh blockchain
+
+prepare-wdio-beam-fixtures:
+    scripts/prepare-beam-fixture.sh
+
+prepare-wdio-solidity-fixture:
+    scripts/prepare-solidity-fixture.sh
+
+prepare-wdio-stylus-fixture:
+    scripts/prepare-stylus-fixture.sh
+
+prepare-wdio-value-origin-fixtures:
+    scripts/prepare-wdio-fixtures.sh value-origin
+
 # Run per-language smoke tests (requires sibling repos + recorded traces)
-test-wdio-smoke-langs: record-test-traces
+test-wdio-smoke-langs: prepare-wdio-traces
     just _xvfb-run "npx wdio run wdio.conf.ts --spec 'test/wdio/specs/smoke/*.e2e.ts'"
 
 # Run WDIO Elixir trace smoke test (generates fixture through the recorder script)
-test-wdio-elixir:
+test-wdio-elixir: prepare-wdio-beam-fixtures
     #!/usr/bin/env bash
     set -euo pipefail
     scripts/prepare-wdio-codetracer-bin.sh
@@ -184,13 +246,37 @@ test-wdio-elixir:
     just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/elixir.e2e.ts"
 
 # Run WDIO Stylus trace tests (requires fixture + Xvfb)
-test-wdio-stylus:
+test-wdio-stylus: prepare-wdio-stylus-fixture
     just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/stylus-trace-load.e2e.ts"
 
+# Run individual smoke/deep specs used by package.json aliases.
+test-wdio-solidity: prepare-wdio-solidity-fixture
+    just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/solidity.e2e.ts"
+
+test-wdio-solidity-deep: prepare-wdio-solidity-fixture
+    just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/solidity-storage.e2e.ts"
+
+test-wdio-erlang: prepare-wdio-beam-fixtures
+    just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/smoke/erlang.e2e.ts"
+
+test-wdio-beam-deep: prepare-wdio-beam-fixtures
+    just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/beam-deep.e2e.ts"
+
 # Run WDIO deep tests (requires traces + Xvfb)
-test-wdio-deep:
+test-wdio-deep: prepare-wdio-traces prepare-wdio-blockchain-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts --spec 'test/wdio/specs/deep/*.e2e.ts'"
 
+# Run WDIO value-origin tests (requires codetracer value-origin fixtures + Xvfb)
+test-wdio-value-origin: prepare-wdio-value-origin-fixtures
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for spec in test/wdio/specs/value-origin/*.e2e.ts; do
+        just _xvfb-run "npx wdio run wdio.conf.ts --spec $spec"
+    done
+
 # Run all WDIO tests
-test-wdio:
+test-wdio: prepare-wdio-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts"
+
+# Run every repo-local test/check entrypoint; full WDIO needs siblings/fixtures.
+test: lint compile-ts compile-wdio test-vscode test-wdio

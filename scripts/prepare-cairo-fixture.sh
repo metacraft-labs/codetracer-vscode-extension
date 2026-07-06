@@ -39,6 +39,35 @@ if [ -z "$CAIRO_RECORDER_DIR" ] || [ ! -f "$CAIRO_RECORDER_DIR/Cargo.toml" ]; th
   exit 1
 fi
 
+resolve_cairo_corelib_dir() {
+  local candidate
+
+  if [ -n "${CAIRO_CORELIB_DIR:-}" ]; then
+    [ -f "$CAIRO_CORELIB_DIR/lib.cairo" ] || {
+      echo "ERROR: CAIRO_CORELIB_DIR does not contain lib.cairo: $CAIRO_CORELIB_DIR"
+      exit 1
+    }
+    printf '%s\n' "$CAIRO_CORELIB_DIR"
+    return 0
+  fi
+
+  for candidate in \
+    "$EXTENSION_DIR/../cairo-corelib-vendor/corelib/src" \
+    "$CAIRO_RECORDER_DIR/corelib/src"; do
+    if [ -f "$candidate/lib.cairo" ]; then
+      (cd "$candidate" && pwd -P)
+      return 0
+    fi
+  done
+
+  echo "ERROR: Cairo corelib not found." >&2
+  echo "  Checked:" >&2
+  echo "    $EXTENSION_DIR/../cairo-corelib-vendor/corelib/src" >&2
+  echo "    $CAIRO_RECORDER_DIR/corelib/src" >&2
+  echo "  Set CAIRO_CORELIB_DIR to a corelib/src directory containing lib.cairo." >&2
+  exit 1
+}
+
 SOURCE_FILE="$CAIRO_RECORDER_DIR/test-programs/cairo/flow_test.cairo"
 if [ ! -f "$SOURCE_FILE" ]; then
   echo "ERROR: Cairo test program not found at $SOURCE_FILE"
@@ -63,6 +92,8 @@ if [ -d "$FIXTURE_DIR" ] && [ -z "${FORCE:-}" ]; then
 fi
 
 echo "Building codetracer-cairo-recorder..."
+CAIRO_CORELIB_DIR="$(resolve_cairo_corelib_dir)"
+export CAIRO_CORELIB_DIR
 RECORDER_TARGET_DIR="$(recorder_target_dir "$CAIRO_RECORDER_DIR")"
 recorder_exec "$CAIRO_RECORDER_DIR" env CARGO_TARGET_DIR="$RECORDER_TARGET_DIR" \
   cargo build --manifest-path "$CAIRO_RECORDER_DIR/Cargo.toml"
@@ -80,7 +111,6 @@ rm -rf "$FIXTURE_DIR"
 mkdir -p "$FIXTURE_DIR"
 
 echo "Recording Cairo trace..."
-export CAIRO_CORELIB_DIR="$CAIRO_RECORDER_DIR/corelib/src"
 recorder_exec "$CAIRO_RECORDER_DIR" "$RECORDER_BIN" record "$SOURCE_FILE" --out-dir "$FIXTURE_DIR"
 
 # Verify the fixture was created.  Recorders now emit CTFS

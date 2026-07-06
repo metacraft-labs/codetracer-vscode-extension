@@ -115,8 +115,9 @@ elif command -v jq &>/dev/null; then
   mv "$tmp" "$FIXTURE_DIR/trace_metadata.json"
   echo "Patched trace_metadata.json workdir → $FIXTURE_DIR"
 else
-  echo "WARNING: neither python3 nor jq found — cannot patch trace_metadata.json workdir."
-  echo "  The DAP server may fail to resolve source files."
+  echo "ERROR: neither python3 nor jq found — cannot patch trace_metadata.json workdir."
+  echo "  The DAP server may fail to resolve source files without this patch."
+  exit 1
 fi
 
 echo ""
