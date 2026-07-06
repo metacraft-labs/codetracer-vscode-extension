@@ -63,6 +63,7 @@ export const ORIGIN_SELECTORS = {
  * embedded panel; a frame that contains none is skipped.
  */
 const CT_FRAME_MARKERS = [
+  "#stateComponent-0",
   "[data-variable-name]",
   ORIGIN_SELECTORS.sidePanel,
   ".ct-origin-badge",
@@ -141,34 +142,32 @@ async function descendIntoCodeTracerFrame(): Promise<boolean> {
   if (await frameContainsMarker(markerSelector)) {
     return true
   }
-  for (let depth = 0; depth < 4; depth++) {
-    const iframes = await browser.$$("iframe")
-    if (iframes.length === 0) {
-      return false
+  return descendIntoCodeTracerFrameFromHere(markerSelector, 0)
+}
+
+async function descendIntoCodeTracerFrameFromHere(
+  markerSelector: string,
+  depth: number,
+): Promise<boolean> {
+  if (depth >= 4) {
+    return false
+  }
+  const iframes = await browser.$$("iframe")
+  for (let i = 0; i < iframes.length && i < 12; i++) {
+    try {
+      await browser.switchToFrame(iframes[i])
+    } catch {
+      continue
     }
-    let descended = false
-    for (let i = 0; i < iframes.length && i < 12; i++) {
-      try {
-        await browser.switchToFrame(iframes[i])
-      } catch {
-        continue
-      }
-      if (await frameContainsMarker(markerSelector)) {
-        return true
-      }
-      // Marker not here — recurse one level via the outer loop.
-      const nested = await browser.$$("iframe")
-      if (nested.length > 0) {
-        descended = true
-        break
-      }
-      try {
-        await browser.switchToParentFrame()
-      } catch {
-        return false
-      }
+    if (await frameContainsMarker(markerSelector)) {
+      return true
     }
-    if (!descended) {
+    if (await descendIntoCodeTracerFrameFromHere(markerSelector, depth + 1)) {
+      return true
+    }
+    try {
+      await browser.switchToParentFrame()
+    } catch {
       return false
     }
   }
@@ -193,6 +192,8 @@ export interface HopDescriptor {
   text: string
   ariaLabel: string | null
   classification: string | null
+  kind?: string | null
+  confidence?: number | null
 }
 
 export class OriginChainPanelPageObject {
@@ -201,8 +202,7 @@ export class OriginChainPanelPageObject {
    * `data-variable-name` attribute equals `variableName`.
    *
    * Returns true if the click landed on a real button, false when no
-   * badge could be located (the panels probably aren't mounted yet —
-   * the caller should retry or SKIP).
+   * badge could be located (the panels probably aren't mounted yet).
    */
   async clickBadge(variableName: string): Promise<boolean> {
     return withCodeTracerFrame(
@@ -236,6 +236,17 @@ export class OriginChainPanelPageObject {
    * `executeWorkbench` / `execute` bridge.
    */
   async expandedChainHops(): Promise<HopDescriptor[]> {
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const hops = await this.expandedChainHopsOnce()
+      if (hops.length > 0 || attempt === 23) {
+        return hops
+      }
+      await browser.pause(250)
+    }
+    return []
+  }
+
+  private async expandedChainHopsOnce(): Promise<HopDescriptor[]> {
     return withCodeTracerFrame(
       () => {
         const collect = (nodes: NodeListOf<Element>) =>
@@ -246,6 +257,10 @@ export class OriginChainPanelPageObject {
             classification:
               el.getAttribute("data-origin-classification") ??
               el.getAttribute("data-classification"),
+            kind: el.getAttribute("data-origin-kind"),
+            confidence: el.getAttribute("data-origin-confidence") === null
+              ? null
+              : Number(el.getAttribute("data-origin-confidence")),
           }))
 
         const sidePanel = document.querySelector(
@@ -345,6 +360,64 @@ export class OriginChainPanelPageObject {
     }, false)
   }
 
+  async expandedOperandRowCount(): Promise<number> {
+    return withCodeTracerFrame(() => {
+      const sidePanel = document.querySelector(
+        "aside#ct-origin-chain-side-panel",
+      )
+      if (!sidePanel) {
+        return 0
+      }
+      return sidePanel.querySelectorAll("details[open] > div, details[open] li")
+        .length
+    }, 0)
+  }
+
+  async terminatorText(): Promise<string> {
+    return withCodeTracerFrame(() => {
+      const sidePanel = document.querySelector(
+        "aside#ct-origin-chain-side-panel",
+      )
+      if (!sidePanel) {
+        return ""
+      }
+      const term = sidePanel.querySelector(".ct-origin-terminator-row")
+      return (term?.textContent ?? "").trim()
+    }, "")
+  }
+
+  async hasFrameTransitionMarker(): Promise<boolean> {
+    return withCodeTracerFrame(() => {
+      const sidePanel = document.querySelector(
+        "aside#ct-origin-chain-side-panel",
+      )
+      if (!sidePanel) {
+        return false
+      }
+      return Boolean(
+        sidePanel.querySelector(
+          ".ct-origin-frame-transition, [data-origin-classification='FrameTransition']",
+        ),
+      )
+    }, false)
+  }
+
+  async axeViolations(axeSource: string): Promise<any[]> {
+    return withCodeTracerFrame<Promise<any[]>>(
+      async (source: string, selector: string) => {
+        const win = window as any
+        if (!win.axe) {
+          new Function(source).call(win)
+        }
+        const result = await win.axe.run(selector)
+        return result.violations
+      },
+      Promise.resolve([] as any[]),
+      axeSource,
+      ORIGIN_SELECTORS.sidePanel,
+    )
+  }
+
   /**
    * Click the footer's "Pin to scratchpad" button. The production
    * handler dispatches `OriginChainVM.onPinChain` →
@@ -403,20 +476,27 @@ export class OriginChainPanelPageObject {
    * `OriginChainVM.sidePanelOpen` per `ui/state.nim::ensureOriginSidePanelHost`.
    */
   async sidePanelVisible(): Promise<boolean> {
-    return withCodeTracerFrame(() => {
-      const sidePanel = document.querySelector(
-        "aside#ct-origin-chain-side-panel",
-      ) as HTMLElement | null
-      if (!sidePanel) {
-        return false
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const visible = await withCodeTracerFrame(() => {
+        const sidePanel = document.querySelector(
+          "aside#ct-origin-chain-side-panel",
+        ) as HTMLElement | null
+        if (!sidePanel) {
+          return false
+        }
+        const style = sidePanel.style.display
+        if (style === "none") {
+          return false
+        }
+        const rect = sidePanel.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+      }, false)
+      if (visible || attempt === 11) {
+        return visible
       }
-      const style = sidePanel.style.display
-      if (style === "none") {
-        return false
-      }
-      const rect = sidePanel.getBoundingClientRect()
-      return rect.width > 0 && rect.height > 0
-    }, false)
+      await browser.pause(250)
+    }
+    return false
   }
 
   /**
@@ -440,9 +520,8 @@ export class OriginChainPanelPageObject {
 
   /**
    * Locate the deepest iframe whose document contains a CodeTracer
-   * panel marker and return its `src` attribute. Diagnostic-only —
-   * the test logs this on SKIP so missing-frame failures are
-   * actionable without re-running the spec.
+   * panel marker and return its `src` attribute. Diagnostic-only so
+   * missing-frame failures are actionable without re-running the spec.
    */
   async describeFrame(): Promise<{ found: boolean; depth: number; src: string | null }> {
     let depth = 0

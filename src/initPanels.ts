@@ -59,6 +59,13 @@ interface DapMessage {
 }
 
 async function handleExtensionPanelMessage(message: any, panel?: vscode.WebviewPanel): Promise<boolean> {
+  if (message?.command === "ct-vscode-state-value-origin-ready") {
+    if (panel) {
+      replayLatestValueOriginUpdate(panel);
+    }
+    return true;
+  }
+
   if (message?.command === "ct-vscode-dap-request") {
     const requestId = String(message.requestId ?? "");
     const dapCommand = String(message.dapCommand ?? "");
@@ -148,7 +155,7 @@ function replayLatestValueOriginUpdate(panel: vscode.WebviewPanel): void {
   if (!latestValueOriginUpdate) {
     return;
   }
-  for (const delayMs of [0, 250, 1000]) {
+  for (const delayMs of [0, 250, 1000, 2000, 4000, 6000]) {
     setTimeout(() => {
       try {
         void panel.webview.postMessage(latestValueOriginUpdate);

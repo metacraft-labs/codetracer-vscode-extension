@@ -83,8 +83,11 @@ describe('M11 — C cross_thread_copy Value Origin (RR-backed)', () => {
       const doc = await vscode.workspace.openTextDocument(p)
       await vscode.window.showTextDocument(doc, { preview: true })
     }, fixturePath)
-    await debug.addBreakpoint(TARGET_LINE)
-    await debug.continue(3000)
+    const breakpoint = await debug.addBreakpoint(TARGET_LINE)
+    expect(breakpoint.added).toBe(true)
+    const stopped = await debug.continue(3000)
+    expect(stopped.line).toBe(TARGET_LINE)
+    expect(stopped.file).toBe(fixturePath)
     await openStatePanel()
   })
 
@@ -113,14 +116,14 @@ describe('M11 — C cross_thread_copy Value Origin (RR-backed)', () => {
       async (vscode, command: string) => {
         const extension = vscode.extensions.getExtension('metacraft-labs.ct-vscode')
         if (!extension) {
-          return { error: 'extension not found', commandMessage: null as any }
+          return { error: 'extension not found', delivered: 0, messages: [] as any[] }
         }
         if (!extension.isActive) {
           await extension.activate()
         }
         const exports = extension.exports as any
         if (!exports || typeof exports.registerPanelOverride !== 'function') {
-          return { error: 'M6 test seam missing', commandMessage: null as any }
+          return { error: 'M6 test seam missing', delivered: 0, messages: [] as any[] }
         }
         const messages: any[] = []
         const dispose = exports.registerPanelOverride('m11-c-cross-thread', {
@@ -132,31 +135,38 @@ describe('M11 — C cross_thread_copy Value Origin (RR-backed)', () => {
           },
         })
         try {
-          await vscode.commands.executeCommand(command)
+          const delivered = await vscode.commands.executeCommand(command)
+          return { error: null as string | null, delivered, messages }
         } finally {
           dispose()
         }
-        const commandMessage = messages.find((m) => m?.command === 'showValueOrigin')
-        return { error: null as string | null, commandMessage }
       },
       SHOW_VALUE_ORIGIN_COMMAND,
     )
 
     expect((result as any).error).toBeNull()
-    const msg = (result as any).commandMessage
-    expect(msg).toBeDefined()
-    expect(msg?.value?.expression).toBe('local')
+    expect(Number((result as any).delivered)).toBeGreaterThanOrEqual(1)
+    const commandMessage = (result as any).messages.find((m: any) => m?.command === 'showValueOrigin')
+    expect(commandMessage?.value?.expression).toBe('local')
+    const chainMessage = (result as any).messages.find((m: any) => m?.command === 'ct/updated-origin-chain')
+    expect(chainMessage).toBeDefined()
 
-    // The override above verifies command forwarding without rendering
-    // into the real panel. Re-run through the normal path so the embedded
-    // State/Origin side panel receives the DAP-backed chain and renders it.
-    await browser.executeWorkbench(async (vscode, command: string) => {
-      await vscode.commands.executeCommand(command)
-    }, SHOW_VALUE_ORIGIN_COMMAND)
+    const forwardedHops = chainMessage?.value?.hops ?? []
+
+    // The forwarded DAP-backed chain must contain a CrossThreadCopy hop with
+    // the 0.6 confidence badge value the embedded panel renders.
+    const crossThreadHops = forwardedHops.filter((h: any) => h?.kind === 'CrossThreadCopy' || h?.kind === 'crossThreadCopy')
+    expect(crossThreadHops.length).toBeGreaterThanOrEqual(1)
+    const confidences = crossThreadHops.map((h: any) => Number(h?.confidence))
+    expect(confidences.some((c: number) => Math.abs(c - 0.6) < 0.05)).toBe(true)
+
+    // The test override observes the message in addition to the real panels.
+    // Assert the production embedded State/Origin panel rendered the same
+    // DAP-backed hop without issuing a second origin query that would move the
+    // RR worker away from the query frame.
     await openStatePanel()
-
-    const hops = await origin.expandedChainHops()
-    if (hops.length === 0) {
+    const renderedHops = await origin.expandedChainHops()
+    if (renderedHops.length === 0) {
       const description = await origin.describeFrame()
       console.log(
         '[M11] Embedded panel hops not present — frame=' + JSON.stringify(description),
@@ -166,15 +176,12 @@ describe('M11 — C cross_thread_copy Value Origin (RR-backed)', () => {
         throw new Error(backendFailure)
       }
       throw new Error('Expected DOM-rendered CrossThreadCopy origin hops, but the embedded Origin Chain panel did not render any hops')
-      return
     }
-
-    // The chain must render at least one CrossThreadCopy hop with the
-    // 0.6 confidence badge — the panel exposes per-hop kind + confidence
-    // via test-ids the renderer emits.
-    const crossThreadHops = hops.filter((h: any) => h?.kind === 'CrossThreadCopy' || h?.kind === 'crossThreadCopy')
-    expect(crossThreadHops.length).toBeGreaterThanOrEqual(1)
-    const confidences = crossThreadHops.map((h: any) => Number(h?.confidence))
-    expect(confidences.some((c: number) => Math.abs(c - 0.6) < 0.05)).toBe(true)
+    const renderedCrossThreadHops = renderedHops.filter(
+      (h: any) => h?.kind === 'CrossThreadCopy' || h?.kind === 'crossThreadCopy',
+    )
+    expect(renderedCrossThreadHops.length).toBeGreaterThanOrEqual(1)
+    const renderedConfidences = renderedCrossThreadHops.map((h: any) => Number(h?.confidence))
+    expect(renderedConfidences.some((c: number) => Math.abs(c - 0.6) < 0.05)).toBe(true)
   })
 })

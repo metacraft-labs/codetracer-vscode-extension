@@ -65,6 +65,30 @@ export class DebugSession {
    */
   async currentLocation(): Promise<StoppedLocation> {
     return browser.executeWorkbench(async (vscode) => {
+      const session = vscode.debug.activeDebugSession
+      if (session) {
+        try {
+          const threads = await session.customRequest('threads')
+          const threadId = threads?.threads?.[0]?.id
+          if (typeof threadId === 'number') {
+            const trace = await session.customRequest('stackTrace', {
+              threadId,
+              startFrame: 0,
+              levels: 1,
+            })
+            const frame = trace?.stackFrames?.[0]
+            const file = frame?.source?.path ?? frame?.source?.sourceReference ?? ''
+            if (typeof frame?.line === 'number' && typeof file === 'string' && file.length > 0) {
+              return {
+                file,
+                line: frame.line,
+              }
+            }
+          }
+        } catch {
+          // Fall back to VS Code's editor cursor below.
+        }
+      }
       let editor: any = vscode.window.activeTextEditor
       if (!editor) {
         const sourceRe = /\.(rs|c|cc|cpp|cxx|h|hpp|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i

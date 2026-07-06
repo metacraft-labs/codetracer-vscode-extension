@@ -1,11 +1,11 @@
 /**
- * M7 — Value Origin Tracking fixture-discovery + skip-probe helpers
+ * M7 — Value Origin Tracking fixture-discovery + prerequisite helpers
  * for the VS Code WebdriverIO suite.
  *
  * This is the WDIO mirror of the Electron-side helper at
  * `codetracer/src/tests/gui/lib/value-origin-fixtures.ts`. The shape and
- * skip-discipline are intentionally identical so the same environment
- * gates SKIP both layers cleanly.
+ * prerequisite discipline are intentionally identical so the same environment
+ * gates both layers cleanly.
  *
  * Three responsibilities:
  *
@@ -21,14 +21,14 @@
  * 2. **Recorder availability probes.**  Same heuristics the Playwright
  *    helper uses: python3 imports `codetracer_python_recorder`, ruby +
  *    `codetracer-ruby-recorder` on PATH, node + `codetracer-js-recorder`
- *    on PATH.  When a probe fails, the spec SKIPs with a precise reason
+ *    on PATH.  When a probe fails, the spec fails with a precise reason
  *    instead of throwing a timeout 30s later.
  *
  * 3. **VS Code-specific prerequisite probe.**  The VS Code path needs
  *    the extension's TypeScript compilation AND a `ct` binary on PATH
  *    (or a configured `codetracer.runnablePath`) so that
  *    `vscode.debug.startDebugging({type:"codetracer-debug",...})` can
- *    resolve a DAP server.  `ctBinaryReason()` reports a precise skip
+ *    resolve a DAP server.  `ctBinaryReason()` reports a precise failure
  *    string when neither is available.
  */
 import * as childProcess from "node:child_process"
@@ -76,6 +76,14 @@ export function codetracerFixtureRoot(): string {
   )
 }
 
+export function codetracerRepoRoot(): string {
+  const envPath = process.env.CT_REPO?.trim()
+  if (envPath && envPath.length > 0) {
+    return envPath
+  }
+  return path.join(repoRoot, "..", "codetracer")
+}
+
 export type SupportedLanguage = "python" | "ruby" | "javascript" | "rust" | "c" | "cpp" | "nim" | "go" | "d"
 
 /**
@@ -108,7 +116,94 @@ export function originFixturePath(
         return "main.d"
     }
   })()
-  return path.join(localFixtureRoot, language, scenario, fileName)
+  const fixturePath = path.join(localFixtureRoot, language, scenario, fileName)
+  try {
+    return fs.realpathSync(fixturePath)
+  } catch {
+    return fixturePath
+  }
+}
+
+export function originFixtureTracePath(
+  language: SupportedLanguage,
+  scenario: string,
+): string {
+  const traceRoot = path.join(localFixtureRoot, language, scenario, "trace")
+  if (traceFolderDirectlyMaterialized(traceRoot)) {
+    return traceRoot
+  }
+  try {
+    const child = fs.readdirSync(traceRoot)
+      .map((entry) => path.join(traceRoot, entry))
+      .filter((candidate) => {
+        try {
+          return fs.statSync(candidate).isDirectory()
+        } catch {
+          return false
+        }
+      })
+      .sort()
+      .find((candidate) => traceFolderDirectlyMaterialized(candidate))
+    if (child) {
+      return child
+    }
+  } catch {
+    // The caller's materialization check reports the precise missing path.
+  }
+  return traceRoot
+}
+
+export function crossProcessFixtureRoot(): string {
+  return path.join(
+    codetracerRepoRoot(),
+    "src",
+    "db-backend",
+    "tests",
+    "fixtures",
+    "cross_process",
+    "account-balance-with-wasm",
+  )
+}
+
+export function crossProcessTracePath(name: "frontend.ct" | "frontend-wasm.ct" | "backend.ct"): string {
+  return path.join(crossProcessFixtureRoot(), name)
+}
+
+function traceFolderDirectlyMaterialized(traceFolder: string): boolean {
+  try {
+    if (!fs.statSync(traceFolder).isDirectory()) {
+      return false
+    }
+  } catch {
+    return false
+  }
+  return (
+    fs.existsSync(path.join(traceFolder, "trace.json")) ||
+    fs.existsSync(path.join(traceFolder, "trace_metadata.json")) ||
+    fs.existsSync(path.join(traceFolder, "trace_db_metadata.json")) ||
+    fs.existsSync(path.join(traceFolder, "rr")) ||
+    fs.existsSync(path.join(traceFolder, "meta.dat")) ||
+    fs.readdirSync(traceFolder).some((entry) => entry.endsWith(".ct"))
+  )
+}
+
+export function traceFolderMaterialized(traceFolder: string): boolean {
+  if (traceFolderDirectlyMaterialized(traceFolder)) {
+    return true
+  }
+  try {
+    return fs.readdirSync(traceFolder).some((entry) => {
+      const candidate = path.join(traceFolder, entry)
+      try {
+        return fs.statSync(candidate).isDirectory() &&
+          traceFolderDirectlyMaterialized(candidate)
+      } catch {
+        return false
+      }
+    })
+  } catch {
+    return false
+  }
 }
 
 /** True when the locally synced fixture exists on disk. */
@@ -163,6 +258,30 @@ function findOnPath(binary: string): string | null {
  * null when prerequisites are met, or a human-readable reason string.
  */
 export function pythonRecorderUnavailableReason(): string | null {
+  const candidates = [
+    process.env.CODETRACER_PYTHON_INTERPRETER?.trim(),
+    "python3",
+    "python",
+    path.join(codetracerRepoRoot(), ".python-recorder-venv", "bin", "python"),
+  ].filter((candidate): candidate is string => Boolean(candidate && candidate.length > 0))
+
+  for (const python of candidates) {
+    if (
+      python.includes(path.sep) &&
+      !fs.existsSync(python)
+    ) {
+      continue
+    }
+    const r = childProcess.spawnSync(
+      python,
+      ["-c", "import codetracer_python_recorder"],
+      { encoding: "utf-8", timeout: 5_000, windowsHide: true },
+    )
+    if (r.status === 0) {
+      return null
+    }
+  }
+
   const r = childProcess.spawnSync(
     "python3",
     ["-c", "import codetracer_python_recorder"],
@@ -232,7 +351,19 @@ export function rrToolchainUnavailableReason(): string | null {
   if (findOnPath("rr") === null) {
     return "rr binary not on PATH (install rr to run RR-backed origin tests)"
   }
-  if (findOnPath("ct-native-replay") === null && findOnPath("ct-rr-support") === null) {
+  const rrWorkerFallback = path.resolve(
+    repoRoot,
+    "..",
+    "codetracer-native-backend",
+    "target",
+    "debug",
+    "ct-native-replay",
+  )
+  if (
+    findOnPath("ct-native-replay") === null &&
+    findOnPath("ct-rr-support") === null &&
+    !fs.existsSync(rrWorkerFallback)
+  ) {
     return "ct-native-replay not on PATH (M11 RR specs need the native-backend replay worker)"
   }
   return null
@@ -293,7 +424,7 @@ export function dRrRecorderUnavailableReason(): string | null {
 }
 
 /**
- * Aggregate SKIP probe used at the top of every M7 spec. Composes the
+ * Aggregate prerequisite probe used at the top of every M7 spec. Composes the
  * individual probes in the order a real spec runs them: fixture must be
  * synced first (no point checking recorders otherwise), then ct binary,
  * then language-specific recorder.
@@ -307,6 +438,10 @@ export function valueOriginSpecSkipReason(
       `Origin fixture ${language}/${scenario} not synced into ${localFixtureRoot} ` +
       `(set CT_REPO to a codetracer checkout containing the fixture catalogue)`
     )
+  }
+  const traceFolder = originFixtureTracePath(language, scenario)
+  if (!traceFolderMaterialized(traceFolder)) {
+    return `Origin fixture trace ${language}/${scenario} is not materialized at ${traceFolder}`
   }
   const ctReason = ctBinaryReason()
   if (ctReason !== null) {

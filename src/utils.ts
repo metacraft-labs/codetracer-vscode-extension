@@ -192,6 +192,9 @@ function getCommonHtml(
   const messageHandlerScript = messageHandler
     ? `\n        ${messageHandler}`
     : "";
+  const preComponentScript = componentId === "stateComponent"
+    ? `\n          ${stateValueOriginBridge}`
+    : "";
   let id = traceId ? traceId : 0;
   let script: string;
 
@@ -200,6 +203,7 @@ function getCommonHtml(
       <script>
         let component = null
         window.addEventListener('DOMContentLoaded', () => {
+          ${preComponentScript}
           window.component = ${componentFactory} ('${componentId}-${traceId}', ${fileLine}, '${fileName}', ${traceId});
           // for now the message handler/api setup code depends on
           // window.component/component being initialized
@@ -212,6 +216,7 @@ function getCommonHtml(
       <script>
         let component = null
         window.addEventListener('DOMContentLoaded', () => {
+          ${preComponentScript}
           window.component = ${componentFactory} ('${componentId}-0');
           // for now the message handler/api setup code depends on
           // window.component/component being initialized
@@ -478,6 +483,12 @@ const stateValueOriginBridge = `
          }
        });
 
+       try {
+         vscode.postMessage({ command: 'ct-vscode-state-value-origin-ready' });
+       } catch (err) {
+         console.warn('[CodeTracer] value-origin bridge ready postMessage failed', err);
+       }
+
        window.addEventListener('DOMContentLoaded', function() {
          scheduleAnnotate();
          observer = new MutationObserver(function() {
@@ -684,7 +695,7 @@ export function getStateWebviewContent(
     `let viewsApi = newVsCodeViewApi("state view api", vscode, window);
      window.viewsApi = viewsApi; // for easier debugging
      registerStateComponent(window.component, viewsApi);
-     ${stateValueOriginBridge}`
+     `
   );
 }
 
