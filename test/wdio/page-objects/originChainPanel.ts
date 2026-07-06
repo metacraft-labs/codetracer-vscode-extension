@@ -194,6 +194,9 @@ export interface HopDescriptor {
   classification: string | null
   kind?: string | null
   confidence?: number | null
+  path?: string | null
+  line?: number | null
+  stepId?: string | null
 }
 
 export class OriginChainPanelPageObject {
@@ -261,6 +264,11 @@ export class OriginChainPanelPageObject {
             confidence: el.getAttribute("data-origin-confidence") === null
               ? null
               : Number(el.getAttribute("data-origin-confidence")),
+            path: el.getAttribute("data-origin-path"),
+            line: el.getAttribute("data-origin-line") === null
+              ? null
+              : Number(el.getAttribute("data-origin-line")),
+            stepId: el.getAttribute("data-origin-step-id"),
           }))
 
         const sidePanel = document.querySelector(

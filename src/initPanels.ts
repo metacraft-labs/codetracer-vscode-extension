@@ -58,6 +58,20 @@ interface DapMessage {
   value: any;
 }
 
+function toNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 async function handleExtensionPanelMessage(message: any, panel?: vscode.WebviewPanel): Promise<boolean> {
   if (message?.command === "ct-vscode-state-value-origin-ready") {
     if (panel) {
@@ -100,6 +114,20 @@ async function handleExtensionPanelMessage(message: any, panel?: vscode.WebviewP
     return true;
   }
   try {
+    const session = vscode.debug.activeDebugSession;
+    const rrTicks = toNumber(message.value?.stepId ?? location?.rrTicks);
+    if (session?.type === "codetracer-debug" && typeof session.customRequest === "function" && typeof rrTicks === "number") {
+      try {
+        await session.customRequest("ct/history-jump", {
+          ...location,
+          path,
+          line,
+          rrTicks,
+        });
+      } catch (err) {
+        console.warn("[CodeTracer] origin hop click debugger seek failed:", err);
+      }
+    }
     const doc = await vscode.workspace.openTextDocument(path);
     const editor = await vscode.window.showTextDocument(doc, { preview: true });
     const pos = new vscode.Position(Math.max(0, line - 1), 0);

@@ -322,7 +322,10 @@ const stateValueOriginBridge = `
          try {
            vscode.postMessage({
              command: 'ct-vscode-origin-hop-click',
-             value: { location: hop.location },
+             value: {
+               location: hop.location,
+               stepId: hop.stepId,
+             },
            });
          } catch (err) {
            console.warn('[CodeTracer] origin hop click postMessage failed', err);
@@ -402,6 +405,15 @@ const stateValueOriginBridge = `
            }
            if (typeof hop.confidence === 'number') {
              row.setAttribute('data-origin-confidence', String(hop.confidence));
+           }
+           if (hop.location && typeof hop.location.path === 'string') {
+             row.setAttribute('data-origin-path', hop.location.path);
+           }
+           if (hop.location && typeof hop.location.line !== 'undefined') {
+             row.setAttribute('data-origin-line', String(hop.location.line));
+           }
+           if (typeof hop.stepId !== 'undefined') {
+             row.setAttribute('data-origin-step-id', String(hop.stepId));
            }
            const button = document.createElement('button');
            button.type = 'button';
