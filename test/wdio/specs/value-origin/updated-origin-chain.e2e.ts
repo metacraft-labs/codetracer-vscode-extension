@@ -27,16 +27,18 @@
  * session and, if one is present, exercises the end-to-end DAP path by
  * triggering a `ct/originChain` request and waiting for the matching
  * `ct/updated-origin-chain` event. In environments without a live
- * recorder + db-backend the probe SKIPs cleanly with a precise reason
+ * recorder + db-backend the probe fails explicitly with a precise reason
  * string — the same discipline the M3 / M5 specs use.
  *
  * Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org M6.
  */
 import { browser, expect } from '@wdio/globals'
-import { ExtensionState } from '../../page-objects'
+import { DebugSession, ExtensionState } from '../../page-objects'
 import { captureFullDiagnostics } from '../../helpers/diagnostics'
+import { crossProcessTracePath } from '../../helpers/value-origin-fixtures'
 
 const ext = new ExtensionState()
+const debug = new DebugSession()
 const UPDATED_ORIGIN_CHAIN_EVENT = 'ct/updated-origin-chain'
 
 describe('Value Origin Tracking M6 — ct/updated-origin-chain forwarding', () => {
@@ -51,6 +53,10 @@ describe('Value Origin Tracking M6 — ct/updated-origin-chain forwarding', () =
   before(async () => {
     await ext.ensureActivated()
     await ext.waitForCommands(15000)
+  })
+
+  after(async () => {
+    await debug.stop()
   })
 
   it('forwards the ct/updated-origin-chain payload to every embedded panel', async () => {
@@ -124,6 +130,12 @@ describe('Value Origin Tracking M6 — ct/updated-origin-chain forwarding', () =
   })
 
   it('end-to-end: forwards a real DAP ct/updated-origin-chain event when a codetracer-debug session is active', async function () {
+    const traceFolder = crossProcessTracePath('frontend.ct')
+    const started = await debug.start(traceFolder)
+    if (!started) {
+      throw new Error(`codetracer-debug session must start for ${traceFolder}`)
+    }
+
     // Probe: is a CodeTracer debug session live?
     const sessionState = await browser.executeWorkbench(async (vscode) => {
       const session = vscode.debug.activeDebugSession
@@ -133,11 +145,7 @@ describe('Value Origin Tracking M6 — ct/updated-origin-chain forwarding', () =
     })
 
     if (!(sessionState as any).active) {
-      // The CI environment with a live codetracer binary + recorder will
-      // exercise this path; here we SKIP honestly so the spec stays
-      // green in dev shells without the toolchain.
-      this.skip()
-      return
+      throw new Error(`codetracer-debug session was not active after starting ${traceFolder}`)
     }
 
     // With a session active, register a probe via the extension's test
@@ -164,7 +172,7 @@ describe('Value Origin Tracking M6 — ct/updated-origin-chain forwarding', () =
       try {
         const session = vscode.debug.activeDebugSession!
         await session.customRequest('ct/originChain', {
-          expression: 'total',
+          variableName: 'total',
           maxHops: 16,
         })
         // Give the adapter ~3s to emit the lazy continuation. The actual

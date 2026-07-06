@@ -16,40 +16,58 @@
  * command synchronously without depending on the embedded panels'
  * mount path. When no real panel is mounted *and* no test panel is
  * registered, axe scans the workbench (which is governed by VS Code's
- * own a11y testing) — in that case we SKIP rather than report
+ * own a11y testing) — in that case we fail rather than report
  * unrelated workbench-side violations.
  *
  * Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org M7.
  */
 import { browser, expect } from '@wdio/globals'
-import { ExtensionState, OriginChainPanelPageObject } from '../../page-objects'
+import { DebugSession, ExtensionState, OriginChainPanelPageObject, openStatePanel } from '../../page-objects'
 import { captureFullDiagnostics } from '../../helpers/diagnostics'
 import {
   originFixturePath,
+  originFixtureTracePath,
   valueOriginSpecSkipReason,
 } from '../../helpers/value-origin-fixtures'
-import {
-  ORIGIN_SELECTORS,
-} from '../../page-objects/originChainPanel'
 
 const ext = new ExtensionState()
+const debug = new DebugSession()
 const origin = new OriginChainPanelPageObject()
 
 const LANGUAGE = 'python' as const
 const SCENARIO = 'simple_trivial_chain'
+const TARGET_LINE = 12
 
 describe('M7 — Python simple_trivial_chain a11y', () => {
   let skipReason: string | null = null
+  const fixturePath = originFixturePath(LANGUAGE, SCENARIO)
+  const tracePath = originFixtureTracePath(LANGUAGE, SCENARIO)
 
   before(async function () {
     skipReason = valueOriginSpecSkipReason(LANGUAGE, SCENARIO)
     if (skipReason) {
-      console.log(`[M7 a11y] SKIP reason — ${skipReason}`)
-      this.skip()
+      console.log(`[M7 a11y] prerequisite failure — ${skipReason}`)
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
     await ext.ensureActivated()
     await ext.waitForCommands(15000)
+    const started = await debug.start(tracePath)
+    if (!started) {
+      throw new Error(`codetracer-debug session must start for ${tracePath}`)
+    }
+    await debug.waitForBackendReady()
+    await browser.executeWorkbench(async (vscode, p: string) => {
+      const doc = await vscode.workspace.openTextDocument(p)
+      await vscode.window.showTextDocument(doc, { preview: true })
+    }, fixturePath)
+    await debug.addBreakpoint(TARGET_LINE)
+    await debug.continue(3000)
+    await openStatePanel()
+  })
+
+  after(async function () {
+    await debug.stop()
   })
 
   afterEach(async function () {
@@ -62,19 +80,18 @@ describe('M7 — Python simple_trivial_chain a11y', () => {
 
   it('e2e_extension_origin_python_trivial_chain_a11y — no axe violations on the side panel', async function () {
     if (skipReason) {
-      this.skip()
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
 
     // Open the fixture so the editor has content for the command to
     // resolve an expression against.
-    const fixturePath = originFixturePath(LANGUAGE, SCENARIO)
     await browser.executeWorkbench(async (vscode, p: string) => {
       try {
         const doc = await vscode.workspace.openTextDocument(p)
         await vscode.window.showTextDocument(doc, { preview: true })
       } catch {
-        /* ignore — top-level SKIP handled this */
+        /* ignore — top-level prerequisite failure handled this */
       }
     }, fixturePath)
 
@@ -84,11 +101,12 @@ describe('M7 — Python simple_trivial_chain a11y', () => {
     await browser.executeWorkbench(async (vscode) => {
       await vscode.commands.executeCommand('ct-vscode.showValueOrigin')
     })
+    await openStatePanel()
 
     // Probe: is the side panel actually mounted? If no real panel and
     // no `aside#ct-origin-chain-side-panel` element is reachable, scoping
     // the axe scan to that selector returns zero nodes (axe reports
-    // "Selector did not match any elements"). SKIP cleanly rather than
+    // "Selector did not match any elements"). fail explicitly rather than
     // fail because the embedded panel doesn't exist in this env — the
     // mount path is covered by M3/M5/M6.
     const visible = await origin.sidePanelVisible()
@@ -99,26 +117,27 @@ describe('M7 — Python simple_trivial_chain a11y', () => {
           'frame probe: ' +
           JSON.stringify(description),
       )
-      this.skip()
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
 
-    // Run axe-core scoped to the side-panel host. Dynamic import keeps
-    // the workbench-only specs from paying the require cost. The package
-    // exposes `AxeBuilder` as both default and named export; we look up
-    // either form so we don't depend on a specific CJS/ESM interop shape.
-    const axeMod: any = await import('@axe-core/webdriverio')
-    const AxeBuilderCtor = axeMod.AxeBuilder ?? axeMod.default
-    const builder = new AxeBuilderCtor({ client: browser as any })
-    builder.include(ORIGIN_SELECTORS.sidePanel)
-    const results = await builder.analyze()
-    expect(
-      results.violations,
-      `a11y violations on embedded Origin Chain Panel: ${JSON.stringify(
-        results.violations,
-        null,
-        2,
-      )}`,
-    ).toEqual([])
+    // Run axe-core inside the CodeTracer webview frame, scoped to the
+    // side-panel host. The WDIO axe builder starts from the top VS Code
+    // frame, where this selector cannot exist.
+    const { readFileSync } = await import('node:fs')
+    const { createRequire } = await import('node:module')
+    const requireFromHere = createRequire(__filename)
+    const violations = await origin.axeViolations(
+      readFileSync(requireFromHere.resolve('axe-core/axe.min.js'), 'utf8'),
+    )
+    if (violations.length > 0) {
+      throw new Error(
+        `a11y violations on embedded Origin Chain Panel: ${JSON.stringify(
+          violations,
+          null,
+          2,
+        )}`,
+      )
+    }
   })
 })

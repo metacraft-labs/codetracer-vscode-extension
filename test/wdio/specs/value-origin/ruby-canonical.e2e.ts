@@ -16,32 +16,53 @@
  * Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org M7.
  */
 import { browser, expect } from '@wdio/globals'
-import { ExtensionState, OriginChainPanelPageObject } from '../../page-objects'
+import { DebugSession, ExtensionState, OriginChainPanelPageObject, openStatePanel } from '../../page-objects'
 import { captureFullDiagnostics } from '../../helpers/diagnostics'
+import { latestOriginChainFailure } from '../../helpers/origin-chain-diagnostics'
 import {
   originFixturePath,
+  originFixtureTracePath,
   valueOriginSpecSkipReason,
 } from '../../helpers/value-origin-fixtures'
 
 const ext = new ExtensionState()
+const debug = new DebugSession()
 const origin = new OriginChainPanelPageObject()
 
 const LANGUAGE = 'ruby' as const
 const SCENARIO = 'simple_trivial_chain'
+const TARGET_LINE = 6
 
 describe('M7 — Ruby simple_trivial_chain Value Origin', () => {
   let skipReason: string | null = null
   const fixturePath = originFixturePath(LANGUAGE, SCENARIO)
+  const tracePath = originFixtureTracePath(LANGUAGE, SCENARIO)
 
   before(async function () {
     skipReason = valueOriginSpecSkipReason(LANGUAGE, SCENARIO)
     if (skipReason) {
-      console.log(`[M7] SKIP reason — ${skipReason}`)
-      this.skip()
+      console.log(`[M7] prerequisite failure — ${skipReason}`)
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
     await ext.ensureActivated()
     await ext.waitForCommands(15000)
+    const started = await debug.start(tracePath)
+    if (!started) {
+      throw new Error(`codetracer-debug session must start for ${tracePath}`)
+    }
+    await debug.waitForBackendReady()
+    await browser.executeWorkbench(async (vscode, p: string) => {
+      const doc = await vscode.workspace.openTextDocument(p)
+      await vscode.window.showTextDocument(doc, { preview: true })
+    }, fixturePath)
+    await debug.addBreakpoint(TARGET_LINE)
+    await debug.continue(3000)
+    await openStatePanel()
+  })
+
+  after(async function () {
+    await debug.stop()
   })
 
   afterEach(async function () {
@@ -54,7 +75,7 @@ describe('M7 — Ruby simple_trivial_chain Value Origin', () => {
 
   it('e2e_extension_origin_ruby_canonical — three hops + literal terminator render', async function () {
     if (skipReason) {
-      this.skip()
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
 
@@ -63,7 +84,7 @@ describe('M7 — Ruby simple_trivial_chain Value Origin', () => {
         const doc = await vscode.workspace.openTextDocument(p)
         await vscode.window.showTextDocument(doc, { preview: true })
       } catch {
-        /* ignore — SKIP probe owns this */
+        /* ignore — prerequisite probe owns this */
       }
     }, fixturePath)
 
@@ -72,6 +93,7 @@ describe('M7 — Ruby simple_trivial_chain Value Origin', () => {
     await browser.executeWorkbench(async (vscode) => {
       await vscode.commands.executeCommand('ct-vscode.showValueOrigin')
     })
+    await openStatePanel()
 
     const hops = await origin.expandedChainHops()
     if (hops.length === 0) {
@@ -80,25 +102,17 @@ describe('M7 — Ruby simple_trivial_chain Value Origin', () => {
         '[M7] Embedded panel hops not present (probable: no DAP session); frame=' +
           JSON.stringify(description),
       )
-      this.skip()
+      const backendFailure = latestOriginChainFailure('c')
+      if (backendFailure) {
+        throw new Error(backendFailure)
+      }
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
     // Ruby canonical chain matches the Python canonical chain:
     // `c -> b -> a -> Literal(10)`.
     expect(hops.length).toBe(3)
-    const terminatorText = await browser.execute(() => {
-      const sidePanel = document.querySelector(
-        'aside#ct-origin-chain-side-panel',
-      )
-      if (!sidePanel) {
-        return ''
-      }
-      const term = sidePanel.querySelector('.ct-origin-terminator-row')
-      return (term?.textContent ?? '').trim()
-    })
-    expect(
-      String(terminatorText),
-      'terminator row must surface the literal value',
-    ).toContain('10')
+    const terminatorText = await origin.terminatorText()
+    expect(String(terminatorText)).toContain('10')
   })
 })

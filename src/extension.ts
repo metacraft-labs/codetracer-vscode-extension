@@ -462,6 +462,106 @@ function resolveValueOriginExpression(
   };
 }
 
+function inferValueOriginExpressionFromLine(
+  editor: vscode.TextEditor | undefined
+): { expression: string; location: { path: string; line: number; column: number } } | undefined {
+  if (!editor) {
+    return undefined;
+  }
+
+  const lines = editor.document.getText().split(/\r?\n/);
+  const patterns: RegExp[] = [
+    /\bprint\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/,
+    /\bconsole\.log\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/,
+    /\bputs\s+([A-Za-z_][A-Za-z0-9_]*)\b/,
+    /\bprintln!\s*\([^)]*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/,
+    /\bprintf\s*\([^)]*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/,
+  ];
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    for (const pattern of patterns) {
+      const match = line.match(pattern);
+      const expression = match?.[1]?.trim();
+      if (expression) {
+        const column = line.indexOf(expression) + 1;
+        return {
+          expression,
+          location: {
+            path: editor.document.uri.fsPath,
+            line: lineIndex + 1,
+            column: column > 0 ? column : 1,
+          },
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function shouldUseInferredOriginExpression(
+  editor: vscode.TextEditor | undefined,
+  resolved: { expression: string; location: { path: string; line: number; column: number } } | undefined
+): boolean {
+  if (!editor || !resolved) {
+    return true;
+  }
+  if (!editor.selection.isEmpty) {
+    return false;
+  }
+  const line = editor.document.lineAt(editor.selection.active.line).text.trim();
+  return line.startsWith("//") || line.startsWith("#") || line.length === 0;
+}
+
+type ValueOriginResolvedExpression = {
+  expression: string;
+  location: { path: string; line: number; column: number };
+};
+
+function currentOriginStepId(): number {
+  const location = lastFlowLocation as { rrTicks?: unknown } | undefined;
+  return typeof location?.rrTicks === "number" ? location.rrTicks : -1;
+}
+
+function isResolvedValueOriginExpression(value: unknown): value is ValueOriginResolvedExpression {
+  const candidate = value as ValueOriginResolvedExpression;
+  return (
+    typeof candidate?.expression === "string" &&
+    candidate.expression.length > 0 &&
+    typeof candidate.location?.path === "string" &&
+    typeof candidate.location?.line === "number" &&
+    typeof candidate.location?.column === "number"
+  );
+}
+
+function valueOriginHoverProvider(): vscode.HoverProvider {
+  return {
+    provideHover(document, position) {
+      const range = document.getWordRangeAtPosition(position, /[A-Za-z_][A-Za-z0-9_]*/);
+      if (!range) {
+        return undefined;
+      }
+      const expression = document.getText(range).trim();
+      if (!expression) {
+        return undefined;
+      }
+      const payload: ValueOriginResolvedExpression = {
+        expression,
+        location: {
+          path: document.uri.fsPath,
+          line: position.line + 1,
+          column: position.character + 1,
+        },
+      };
+      const args = encodeURIComponent(JSON.stringify([payload]));
+      const contents = new vscode.MarkdownString(`[↑ origin](command:ct-vscode.showValueOrigin?${args})`);
+      contents.isTrusted = { enabledCommands: ["ct-vscode.showValueOrigin"] };
+      return new vscode.Hover(contents, range);
+    },
+  };
+}
+
 /**
  * Handler for `ct-vscode.showValueOrigin` (M6, spec §8.2).
  *
@@ -477,9 +577,14 @@ function resolveValueOriginExpression(
  * suite can assert the forwarding actually fired even when the embedded
  * panels haven't fully mounted yet.
  */
-function showValueOriginHandler(): number {
+async function showValueOriginHandler(explicit?: unknown): Promise<number> {
   const editor = vscode.window.activeTextEditor;
-  const resolved = resolveValueOriginExpression(editor);
+  let resolved = isResolvedValueOriginExpression(explicit)
+    ? explicit
+    : resolveValueOriginExpression(editor);
+  if (shouldUseInferredOriginExpression(editor, resolved)) {
+    resolved = inferValueOriginExpressionFromLine(editor) ?? resolved;
+  }
   const message = {
     command: SHOW_VALUE_ORIGIN_COMMAND,
     value: resolved ?? { expression: "", location: null },
@@ -490,6 +595,39 @@ function showValueOriginHandler(): number {
       "[CodeTracer] ct-vscode.showValueOrigin: no embedded panels available; " +
       "the message was not delivered. Start a CodeTracer debug session first."
     );
+  }
+
+  const session = vscode.debug.activeDebugSession;
+  if (session?.type === "codetracer-debug" && resolved?.expression) {
+    try {
+      const chain = await session.customRequest("ct/originChain", {
+        variableName: resolved.expression,
+        variable_name: resolved.expression,
+        variablePath: [],
+        variable_path: [],
+        frameId: -1,
+        frame_id: -1,
+        stepId: currentOriginStepId(),
+        step_id: currentOriginStepId(),
+        threadId: 0,
+        thread_id: 0,
+        maxHops: 16,
+        max_hops: 16,
+        lazy: false,
+        continuationToken: null,
+        continuation_token: null,
+        sessionId: "",
+        session_id: "",
+        classifySource: true,
+        classify_source: true,
+      });
+      forwardToEmbeddedPanels({
+        command: UPDATED_ORIGIN_CHAIN_EVENT,
+        value: chain,
+      });
+    } catch (err) {
+      console.warn("[CodeTracer] ct-vscode.showValueOrigin: ct/originChain failed:", err);
+    }
   }
   return delivered;
 }
@@ -614,14 +752,20 @@ function resolveDapServerPath(context: vscode.ExtensionContext): string {
 function makeEnvWithBackend(context: vscode.ExtensionContext): NodeJS.ProcessEnv {
   const backendBin = getBackendBinPath(context);
   const rrEnv = resolveRrEnvironment();
-
-  // Prepend the backend bin dir using the platform PATH delimiter so the
-  // replay server can locate its sibling binaries (recorders, rr, …).
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...rrEnv,
     PATH: `${backendBin}${path.delimiter}${process.env.PATH ?? ''}`,
   };
+
+  // Prepend the backend bin dir using the platform PATH delimiter so the
+  // replay server can locate its sibling binaries (recorders, rr, ...).
+  if (process.platform === 'darwin') {
+    env.DYLD_LIBRARY_PATH = `${backendBin}${path.delimiter}${process.env.DYLD_LIBRARY_PATH ?? ''}`;
+  } else if (process.platform !== 'win32') {
+    env.LD_LIBRARY_PATH = `${backendBin}${path.delimiter}${process.env.LD_LIBRARY_PATH ?? ''}`;
+  }
+  return env;
 }
 
 function normalizeEnv(env: NodeJS.ProcessEnv): { [key: string]: string } {
@@ -1225,14 +1369,14 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
       const rrExePath = cfg.get<string>('rrExePath')?.trim() ?? "";
       if (!rrWorkerPath) {
         vscode.window.showErrorMessage(
-          "RR trace requires ct-rr-support. Set 'codetracer.rrWorkerPath' to the ct-rr-support executable."
+          "RR trace requires ct-native-replay. Set 'codetracer.rrWorkerPath' to the ct-native-replay executable."
         );
         return;
       }
       const rrWorkerExecutable = await isExecutable(rrWorkerPath);
       if (!rrWorkerExecutable) {
         vscode.window.showErrorMessage(
-          "Configured ct-rr-support path is not executable. Update 'codetracer.rrWorkerPath' to a valid ct-rr-support binary."
+          "Configured ct-native-replay path is not executable. Update 'codetracer.rrWorkerPath' to a valid ct-native-replay binary."
         );
         return;
       }
@@ -1431,7 +1575,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
     // an empty payload into any embedded panels that are mounted — this
     // preserves the post-message contract for tests that simulate trigger
     // before a real DAP session is alive.
-    register('ct-vscode.showValueOrigin', () => showValueOriginHandler());
+    register('ct-vscode.showValueOrigin', (payload?: unknown) => showValueOriginHandler(payload));
   } else {
     // ---- real registrations ----
     register('ct-vscode.toggleCT', async () => toggleCtReal(LoadMode.Trace));
@@ -1496,11 +1640,12 @@ async function reinitCommands(context: vscode.ExtensionContext) {
     // CodeTracer panels (spec §8.2). This handler is the thin command-plumbing
     // half of M6; the other half is the `ct/updated-origin-chain` DAP-event
     // forwarder registered below.
-    register('ct-vscode.showValueOrigin', () => showValueOriginHandler());
+    register('ct-vscode.showValueOrigin', (payload?: unknown) => showValueOriginHandler(payload));
   }
 
   if (miscDisposables.length === 0) {
     miscDisposables.push(
+      vscode.languages.registerHoverProvider({ scheme: "file" }, valueOriginHoverProvider()),
       vscode.debug.onDidStartDebugSession(async (session) => {
         console.log('[CodeTracer] onDidStartDebugSession:', session.type, session.name);
         console.log('[CodeTracer] pendingLaunchPanels=', pendingLaunchPanels, 'ctStarted=', ctStarted);

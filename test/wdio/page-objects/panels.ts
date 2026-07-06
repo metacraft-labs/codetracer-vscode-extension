@@ -58,6 +58,19 @@ export async function isPanelOpen(titlePattern: string): Promise<boolean> {
 
 /** Open a CodeTracer panel by executing its command. */
 export async function openPanel(panelCommand: string): Promise<void> {
+  await browser.waitUntil(
+    async () => {
+      return browser.executeWorkbench(async (vscode, cmd: string) => {
+        const commands = await vscode.commands.getCommands(true)
+        return commands.includes(cmd)
+      }, panelCommand)
+    },
+    {
+      timeout: 20_000,
+      interval: 500,
+      timeoutMsg: `${panelCommand} was not registered within 20000ms`,
+    },
+  )
   await browser.executeWorkbench(async (vscode, cmd: string) => {
     await vscode.commands.executeCommand(cmd)
   }, panelCommand)

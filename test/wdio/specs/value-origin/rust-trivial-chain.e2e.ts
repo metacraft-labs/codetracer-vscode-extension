@@ -11,24 +11,28 @@
  *
  * Fixture: `$CT_REPO/src/db-backend/tests/fixtures/origin/rust/simple_trivial_chain/`.
  *
- * Environment skip discipline mirrors the M7 specs: when the locally
+ * Environment prerequisite discipline mirrors the M7 specs: when the locally
  * synced fixture is missing or the RR toolchain (rr, ct-native-replay,
- * rustc) isn't available, SKIP cleanly with a precise reason.
+ * rustc) isn't available, fail explicitly with a precise reason.
  */
 import { browser, expect } from '@wdio/globals'
-import { ExtensionState, OriginChainPanelPageObject } from '../../page-objects'
+import { DebugSession, ExtensionState, OriginChainPanelPageObject, openStatePanel } from '../../page-objects'
 import { captureFullDiagnostics } from '../../helpers/diagnostics'
+import { latestOriginChainFailure } from '../../helpers/origin-chain-diagnostics'
 import {
   originFixturePath,
+  originFixtureTracePath,
   valueOriginSpecSkipReason,
 } from '../../helpers/value-origin-fixtures'
 
 const ext = new ExtensionState()
+const debug = new DebugSession()
 const origin = new OriginChainPanelPageObject()
 
 const SHOW_VALUE_ORIGIN_COMMAND = 'ct-vscode.showValueOrigin'
 const LANGUAGE = 'rust' as const
 const SCENARIO = 'simple_trivial_chain'
+const TARGET_LINE = 8
 
 /**
  * Drive the extension into the state the assertions need:
@@ -62,16 +66,33 @@ async function focusOnVariableC(fixturePath: string): Promise<boolean> {
 describe('M11 — Rust simple_trivial_chain Value Origin (RR-backed)', () => {
   let skipReason: string | null = null
   const fixturePath = originFixturePath(LANGUAGE, SCENARIO)
+  const tracePath = originFixtureTracePath(LANGUAGE, SCENARIO)
 
   before(async function () {
     skipReason = valueOriginSpecSkipReason(LANGUAGE, SCENARIO)
     if (skipReason) {
-      console.log(`[M11] SKIP reason — ${skipReason}`)
-      this.skip()
+      console.log(`[M11] prerequisite failure — ${skipReason}`)
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
     await ext.ensureActivated()
     await ext.waitForCommands(15000)
+    const started = await debug.start(tracePath)
+    if (!started) {
+      throw new Error(`codetracer-debug session must start for ${tracePath}`)
+    }
+    await debug.waitForBackendReady()
+    await browser.executeWorkbench(async (vscode, p: string) => {
+      const doc = await vscode.workspace.openTextDocument(p)
+      await vscode.window.showTextDocument(doc, { preview: true })
+    }, fixturePath)
+    await debug.addBreakpoint(TARGET_LINE)
+    await debug.continue(3000)
+    await openStatePanel()
+  })
+
+  after(async function () {
+    await debug.stop()
   })
 
   afterEach(async function () {
@@ -84,12 +105,12 @@ describe('M11 — Rust simple_trivial_chain Value Origin (RR-backed)', () => {
 
   it('e2e_extension_origin_rust_in_vscode — three hops render in the embedded panel', async function () {
     if (skipReason) {
-      this.skip()
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
 
     const focused = await focusOnVariableC(fixturePath)
-    expect(focused, 'fixture main.rs must contain `"{}", c`').toBe(true)
+    expect(focused).toBe(true)
 
     const result = await browser.executeWorkbench(
       async (vscode, command: string) => {
@@ -129,8 +150,15 @@ describe('M11 — Rust simple_trivial_chain Value Origin (RR-backed)', () => {
     expect(msg).toBeDefined()
     expect(msg?.value?.expression).toBe('c')
 
-    // Embedded panel probe — three hops in a recorder-equipped CI run;
-    // otherwise SKIP rather than fail.
+    // The override above intentionally captures the forwarded command
+    // without rendering the real panel. Re-run the command through the
+    // normal path so the embedded panel receives the DAP-backed payload.
+    await browser.executeWorkbench(async (vscode, command: string) => {
+      await vscode.commands.executeCommand(command)
+    }, SHOW_VALUE_ORIGIN_COMMAND)
+    await openStatePanel()
+
+    // Embedded panel probe — three hops in a recorder-equipped CI run.
     const hops = await origin.expandedChainHops()
     if (hops.length === 0) {
       const description = await origin.describeFrame()
@@ -138,7 +166,11 @@ describe('M11 — Rust simple_trivial_chain Value Origin (RR-backed)', () => {
         '[M11] Embedded Origin Chain Panel not visible; panel/frame probe: ' +
           JSON.stringify(description),
       )
-      this.skip()
+      const backendFailure = latestOriginChainFailure('c')
+      if (backendFailure) {
+        throw new Error(backendFailure)
+      }
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
     expect(hops.length).toBe(3)

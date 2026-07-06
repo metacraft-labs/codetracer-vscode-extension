@@ -19,32 +19,52 @@
  * Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org M7.
  */
 import { browser, expect } from '@wdio/globals'
-import { ExtensionState, OriginChainPanelPageObject } from '../../page-objects'
+import { DebugSession, ExtensionState, OriginChainPanelPageObject, openStatePanel } from '../../page-objects'
 import { captureFullDiagnostics } from '../../helpers/diagnostics'
 import {
   originFixturePath,
+  originFixtureTracePath,
   valueOriginSpecSkipReason,
 } from '../../helpers/value-origin-fixtures'
 
 const ext = new ExtensionState()
+const debug = new DebugSession()
 const origin = new OriginChainPanelPageObject()
 
 const LANGUAGE = 'python' as const
 const SCENARIO = 'parameter_pass'
+const TARGET_LINE = 9
 
 describe('M7 — Python parameter_pass Value Origin (frame transitions)', () => {
   let skipReason: string | null = null
   const fixturePath = originFixturePath(LANGUAGE, SCENARIO)
+  const tracePath = originFixtureTracePath(LANGUAGE, SCENARIO)
 
   before(async function () {
     skipReason = valueOriginSpecSkipReason(LANGUAGE, SCENARIO)
     if (skipReason) {
-      console.log(`[M7] SKIP reason — ${skipReason}`)
-      this.skip()
+      console.log(`[M7] prerequisite failure — ${skipReason}`)
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
     await ext.ensureActivated()
     await ext.waitForCommands(15000)
+    const started = await debug.start(tracePath)
+    if (!started) {
+      throw new Error(`codetracer-debug session must start for ${tracePath}`)
+    }
+    await debug.waitForBackendReady()
+    await browser.executeWorkbench(async (vscode, p: string) => {
+      const doc = await vscode.workspace.openTextDocument(p)
+      await vscode.window.showTextDocument(doc, { preview: true })
+    }, fixturePath)
+    await debug.addBreakpoint(TARGET_LINE)
+    await debug.continue(3000)
+    await openStatePanel()
+  })
+
+  after(async function () {
+    await debug.stop()
   })
 
   afterEach(async function () {
@@ -57,7 +77,7 @@ describe('M7 — Python parameter_pass Value Origin (frame transitions)', () => 
 
   it('embedded panel surfaces a frame-transition hop in the parameter_pass chain', async function () {
     if (skipReason) {
-      this.skip()
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
 
@@ -66,12 +86,13 @@ describe('M7 — Python parameter_pass Value Origin (frame transitions)', () => 
         const doc = await vscode.workspace.openTextDocument(p)
         await vscode.window.showTextDocument(doc, { preview: true })
       } catch {
-        /* ignore — SKIP probe owned that */
+        /* ignore — prerequisite probe owned that */
       }
     }, fixturePath)
     await browser.executeWorkbench(async (vscode) => {
       await vscode.commands.executeCommand('ct-vscode.showValueOrigin')
     })
+    await openStatePanel()
 
     const hops = await origin.expandedChainHops()
     if (hops.length === 0) {
@@ -80,7 +101,7 @@ describe('M7 — Python parameter_pass Value Origin (frame transitions)', () => 
         '[M7] Embedded panel hops not present (probable: no DAP session); frame=' +
           JSON.stringify(description),
       )
-      this.skip()
+      throw new Error(skipReason ?? 'Expected value-origin UI path was unavailable: no embedded Origin Chain panel, State rows, or DAP-backed origin payload was rendered')
       return
     }
 
@@ -91,33 +112,9 @@ describe('M7 — Python parameter_pass Value Origin (frame transitions)', () => 
     //   - aria-label that mentions "frame transition" (a11y label)
     // Any of the three is sufficient — they are alternative encodings
     // of the same wire-schema annotation.
-    const markerPresent = await browser.execute(() => {
-      const sidePanel = document.querySelector(
-        'aside#ct-origin-chain-side-panel',
-      )
-      if (!sidePanel) {
-        return false
-      }
-      const rows = Array.from(
-        sidePanel.querySelectorAll(
-          'section > ol > li:not(.ct-origin-terminator-row)',
-        ),
-      )
-      return rows.some((row) => {
-        const klass = (row as HTMLElement).className.toLowerCase()
-        const data = (row.getAttribute('data-origin-classification') ?? '').toLowerCase()
-        const aria = (row.getAttribute('aria-label') ?? '').toLowerCase()
-        return (
-          klass.includes('frame-transition') ||
-          data.includes('frametransition') ||
-          data.includes('frame_transition') ||
-          aria.includes('frame transition')
-        )
-      })
-    })
-    expect(
-      markerPresent,
-      'parameter_pass chain must include a frame-transition hop annotation',
-    ).toBe(true)
+    const markerPresent = await origin.hasFrameTransitionMarker()
+    if (!markerPresent) {
+      throw new Error('parameter_pass chain must include a frame-transition hop annotation')
+    }
   })
 })

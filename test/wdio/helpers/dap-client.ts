@@ -5,6 +5,8 @@
  * DAP requests and standard debug operations to the CodeTracer debug adapter.
  */
 import { browser } from '@wdio/globals'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
 
 /** Result of a DAP request — either success with data or failure with error. */
 export interface DapResult<T = any> {
@@ -48,29 +50,36 @@ export async function startDebugSession(traceFolder: string): Promise<boolean> {
   // Detect rr-based traces from the test runner (Node.js context).
   // We can't use require('fs') inside executeWorkbench because the
   // callback is serialized and executed in the VS Code browser context.
-  const fs = await import('fs')
-  const path = await import('path')
   const isRr = fs.existsSync(path.join(traceFolder, 'rr'))
+  const cwd = path.basename(traceFolder) === 'trace'
+    ? path.dirname(traceFolder)
+    : path.dirname(path.dirname(traceFolder))
+  const rrWorkerCandidate = [
+    process.env.CODETRACER_RR_WORKER_PATH,
+    process.env.CT_RR_WORKER_PATH,
+    path.resolve(__dirname, '..', '..', '..', '..', 'codetracer-native-backend', 'target', 'debug', 'ct-native-replay'),
+  ].find((candidate) => candidate && fs.existsSync(candidate))
 
   return browser.executeWorkbench(
-    async (vscode, folder: string, rrTrace: boolean) => {
+    async (vscode, folder: string, launchCwd: string, rrTrace: boolean, rrWorkerFallback: string | undefined) => {
       const config: any = {
         type: 'codetracer-debug',
         request: 'launch',
         name: 'WDIO Test Trace',
         program: 'main',
-        cwd: '',
+        cwd: launchCwd,
         traceFolder: folder
       }
 
       if (rrTrace) {
         const cfg = vscode.workspace.getConfiguration('codetracer')
-        const rrWorkerPath = cfg.get<string>('rrWorkerPath')?.trim() ?? ''
-        if (rrWorkerPath) {
-          config.ctRRWorkerExe = rrWorkerPath
+        const rrWorkerPath = (cfg.get('rrWorkerPath') as string | undefined)?.trim() ?? ''
+        const worker = rrWorkerPath || rrWorkerFallback || ''
+        if (worker) {
+          config.ctRRWorkerExe = worker
           config.rawDiffIndex = null
           config.restoreLocation = null
-          console.log('[WDIO] rr trace detected, ctRRWorkerExe:', rrWorkerPath)
+          console.log('[WDIO] rr trace detected, ctRRWorkerExe:', worker)
         } else {
           console.warn('[WDIO] rr trace detected but codetracer.rrWorkerPath is not set')
         }
@@ -79,7 +88,9 @@ export async function startDebugSession(traceFolder: string): Promise<boolean> {
       return await vscode.debug.startDebugging(undefined, config)
     },
     traceFolder,
-    isRr
+    cwd,
+    isRr,
+    rrWorkerCandidate,
   )
 }
 

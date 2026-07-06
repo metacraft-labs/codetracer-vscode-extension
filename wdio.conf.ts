@@ -436,6 +436,7 @@ export const config: any = {
   ],
 
   capabilities: [{
+    maxInstances: 1,
     browserName: 'vscode',
     browserVersion: vscodeChannel,
     'wdio:enforceWebDriverClassic': true,
@@ -492,6 +493,7 @@ export const config: any = {
 
   framework: 'mocha',
   maxInstances: 1,
+  maxInstancesPerCapability: 1,
 
   specFileRetries: 0,
   specFileRetriesDelay: 0,
@@ -516,6 +518,14 @@ export const config: any = {
     const diagDir = path.resolve(__dirname, 'test', 'wdio', 'diagnostics')
     if (!fs.existsSync(diagDir)) fs.mkdirSync(diagDir, { recursive: true })
     process.env.CODETRACER_DAP_TRACE_PATH = path.join(diagDir, 'dap-trace.log')
+    // Test-only native backend licensing bypass. The extension host inherits
+    // WDIO's environment, and extension-spawned replay workers inherit the
+    // extension host environment via `makeEnvWithBackend(...)`.
+    process.env.CODETRACER_IN_UI_TEST = '1'
+    // RR value-origin reverse-continue can exceed the production diagnostic
+    // cap on slow headless CI fixtures. The backend only honors this bounded
+    // override while CODETRACER_IN_UI_TEST=1 is present.
+    process.env.CT_RR_ORIGIN_PER_HOP_WALL_CLOCK_MS = '10000'
     // Truncate the file so each ``npm run test:wdio`` invocation gets a
     // clean trace — appending across runs makes it impossible to tell
     // which messages belong to which scenario.
