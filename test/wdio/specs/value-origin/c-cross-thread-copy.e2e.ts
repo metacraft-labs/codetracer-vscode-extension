@@ -15,19 +15,23 @@
  * isn't available, SKIP cleanly with a precise reason.
  */
 import { browser, expect } from '@wdio/globals'
-import { ExtensionState, OriginChainPanelPageObject } from '../../page-objects'
+import { DebugSession, ExtensionState, OriginChainPanelPageObject, openStatePanel } from '../../page-objects'
 import { captureFullDiagnostics } from '../../helpers/diagnostics'
+import { latestOriginChainFailure } from '../../helpers/origin-chain-diagnostics'
 import {
   originFixturePath,
+  originFixtureTracePath,
   valueOriginSpecSkipReason,
 } from '../../helpers/value-origin-fixtures'
 
 const ext = new ExtensionState()
+const debug = new DebugSession()
 const origin = new OriginChainPanelPageObject()
 
 const SHOW_VALUE_ORIGIN_COMMAND = 'ct-vscode.showValueOrigin'
 const LANGUAGE = 'c' as const
 const SCENARIO = 'cross_thread_copy'
+const TARGET_LINE = 43
 
 async function focusOnLocal(fixturePath: string): Promise<boolean> {
   return browser.executeWorkbench(async (vscode, p: string) => {
@@ -59,16 +63,33 @@ async function focusOnLocal(fixturePath: string): Promise<boolean> {
 describe('M11 — C cross_thread_copy Value Origin (RR-backed)', () => {
   let skipReason: string | null = null
   const fixturePath = originFixturePath(LANGUAGE, SCENARIO)
+  const tracePath = originFixtureTracePath(LANGUAGE, SCENARIO)
 
   before(async function () {
     skipReason = valueOriginSpecSkipReason(LANGUAGE, SCENARIO)
     if (skipReason) {
-      console.log(`[M11] SKIP reason — ${skipReason}`)
-      this.skip()
+      console.log(`[M11] prerequisite failure — ${skipReason}`)
+      throw new Error(skipReason)
       return
     }
     await ext.ensureActivated()
     await ext.waitForCommands(15000)
+    const started = await debug.start(tracePath)
+    if (!started) {
+      throw new Error(`codetracer-debug session must start for ${tracePath}`)
+    }
+    await debug.waitForBackendReady()
+    await browser.executeWorkbench(async (vscode, p: string) => {
+      const doc = await vscode.workspace.openTextDocument(p)
+      await vscode.window.showTextDocument(doc, { preview: true })
+    }, fixturePath)
+    await debug.addBreakpoint(TARGET_LINE)
+    await debug.continue(3000)
+    await openStatePanel()
+  })
+
+  after(async function () {
+    await debug.stop()
   })
 
   afterEach(async function () {
@@ -81,12 +102,12 @@ describe('M11 — C cross_thread_copy Value Origin (RR-backed)', () => {
 
   it('e2e_extension_origin_c_cross_thread_copy_in_vscode — CrossThreadCopy hop renders with 0.6 confidence', async function () {
     if (skipReason) {
-      this.skip()
+      throw new Error(skipReason)
       return
     }
 
     const focused = await focusOnLocal(fixturePath)
-    expect(focused, 'fixture main.c must contain `printf("%d\\n", local)`').toBe(true)
+    expect(focused).toBe(true)
 
     const result = await browser.executeWorkbench(
       async (vscode, command: string) => {
@@ -126,17 +147,25 @@ describe('M11 — C cross_thread_copy Value Origin (RR-backed)', () => {
     expect(msg).toBeDefined()
     expect(msg?.value?.expression).toBe('local')
 
-    // Probe for the embedded chain panel. When the DAP session hasn't
-    // produced the chain yet (no recorder in this environment), SKIP
-    // rather than fail — M11 verification rests on a recorder-equipped
-    // CI runner.
+    // The override above verifies command forwarding without rendering
+    // into the real panel. Re-run through the normal path so the embedded
+    // State/Origin side panel receives the DAP-backed chain and renders it.
+    await browser.executeWorkbench(async (vscode, command: string) => {
+      await vscode.commands.executeCommand(command)
+    }, SHOW_VALUE_ORIGIN_COMMAND)
+    await openStatePanel()
+
     const hops = await origin.expandedChainHops()
     if (hops.length === 0) {
       const description = await origin.describeFrame()
       console.log(
         '[M11] Embedded panel hops not present — frame=' + JSON.stringify(description),
       )
-      this.skip()
+      const backendFailure = latestOriginChainFailure('local')
+      if (backendFailure) {
+        throw new Error(backendFailure)
+      }
+      throw new Error('Expected DOM-rendered CrossThreadCopy origin hops, but the embedded Origin Chain panel did not render any hops')
       return
     }
 
@@ -144,7 +173,7 @@ describe('M11 — C cross_thread_copy Value Origin (RR-backed)', () => {
     // 0.6 confidence badge — the panel exposes per-hop kind + confidence
     // via test-ids the renderer emits.
     const crossThreadHops = hops.filter((h: any) => h?.kind === 'CrossThreadCopy' || h?.kind === 'crossThreadCopy')
-    expect(crossThreadHops.length, 'chain must contain at least one CrossThreadCopy hop').toBeGreaterThanOrEqual(1)
+    expect(crossThreadHops.length).toBeGreaterThanOrEqual(1)
     const confidences = crossThreadHops.map((h: any) => Number(h?.confidence))
     expect(confidences.some((c: number) => Math.abs(c - 0.6) < 0.05)).toBe(true)
   })

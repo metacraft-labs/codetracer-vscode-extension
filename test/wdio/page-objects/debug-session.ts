@@ -67,7 +67,7 @@ export class DebugSession {
     return browser.executeWorkbench(async (vscode) => {
       let editor: any = vscode.window.activeTextEditor
       if (!editor) {
-        const sourceRe = /\.(rs|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i
+        const sourceRe = /\.(rs|c|cc|cpp|cxx|h|hpp|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i
         let candidateUri: any = null
         for (const group of vscode.window.tabGroups.all) {
           for (const tab of group.tabs) {
@@ -121,7 +121,7 @@ export class DebugSession {
   private async ensureSourceEditorShown(): Promise<void> {
     await browser.executeWorkbench(async (vscode) => {
       if (vscode.window.activeTextEditor) return
-      const sourceRe = /\.(rs|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i
+      const sourceRe = /\.(rs|c|cc|cpp|cxx|h|hpp|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i
       for (const group of vscode.window.tabGroups.all) {
         for (const tab of group.tabs) {
           const input: any = tab.input
@@ -228,7 +228,7 @@ export class DebugSession {
     return browser.executeWorkbench(async (vscode, targetLine: number) => {
       let uri: any = vscode.window.activeTextEditor?.document.uri
       if (!uri) {
-        const sourceRe = /\.(rs|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i
+        const sourceRe = /\.(rs|c|cc|cpp|cxx|h|hpp|sol|move|cairo|aiken|leo|sw|circom|tact|tolk|stylus|wasm|nim|py|ts|js)$/i
         for (const group of vscode.window.tabGroups.all) {
           for (const tab of group.tabs) {
             const input: any = tab.input
