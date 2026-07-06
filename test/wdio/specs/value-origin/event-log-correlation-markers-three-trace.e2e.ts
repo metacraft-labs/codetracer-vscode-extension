@@ -5,41 +5,29 @@
  *
  * Mirrors the Playwright spec at
  * `codetracer/src/tests/gui/tests/value-origin/event-log-correlation-markers-three-trace.spec.ts`
- * — same fixture, same boundary IDs, same skip discipline, same DOM
+ * — same fixture, same boundary IDs, same prerequisite discipline, same DOM
  * selectors (the embedded webview renders the Nim-compiled Event Log
  * view verbatim, so selectors carry across).
  *
  * Covers M25b verification entry `e2e_event_log_jump_renders_in_vscode_extension`
  * per `codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org`.
  *
- * SKIPs cleanly when CT_REPO + sibling-codetracer probe both miss the
- * fixture catalogue, when any of the three `.ct` containers is absent,
- * or when the `ct` binary is missing.
+ * Fails when CT_REPO + sibling-codetracer probe both miss the fixture
+ * catalogue, when any of the three `.ct` containers is absent, or when
+ * the `ct` binary is missing. The fixture preparation target is the
+ * prerequisite gate; the WDIO path must not pass by silently skipping.
  */
 import * as fs from "node:fs"
 import * as path from "node:path"
 
 import { browser, expect } from "@wdio/globals"
 
-import { ExtensionState } from "../../page-objects"
-import { ctBinaryReason } from "../../helpers/value-origin-fixtures"
-
-const repoRoot = path.resolve(__dirname, "..", "..", "..", "..")
-
-/** Mirror of `codetracerFixtureRoot()` in helpers/value-origin-fixtures.ts. */
-function crossProcessFixtureRoot(): string {
-  const envPath = process.env.CT_REPO?.trim()
-  if (envPath && envPath.length > 0) {
-    return path.join(
-      envPath, "src", "db-backend", "tests", "fixtures",
-      "cross_process", "account-balance-with-wasm",
-    )
-  }
-  return path.join(
-    repoRoot, "..", "codetracer", "src", "db-backend", "tests", "fixtures",
-    "cross_process", "account-balance-with-wasm",
-  )
-}
+import { DebugSession, ExtensionState, openEventLogPanel } from "../../page-objects"
+import {
+  crossProcessFixtureRoot,
+  crossProcessTracePath,
+  ctBinaryReason,
+} from "../../helpers/value-origin-fixtures"
 
 const HTTP_BOUNDARY_ID = "account-balance-with-wasm"
 const JS_WASM_BOUNDARY_ID = "js-wasm-realm"
@@ -60,9 +48,9 @@ function specSkipReason(): string | null {
   const missing = firstMissingTraceContainer()
   if (missing !== null) {
     return (
-      `SKIPPED: account-balance-with-wasm fixture not materialized: ${missing} ` +
+      `account-balance-with-wasm fixture not materialized: ${missing} ` +
       "(regenerate.sh requires wasm-pack + codetracer_python_recorder + " +
-      "codetracer-js-recorder + browser_stream_receiver + Playwright)"
+      "ct record-web + Playwright)"
     )
   }
   return null
@@ -90,32 +78,36 @@ async function frameHasMarker(): Promise<boolean> {
 }
 
 async function descendIntoEventLogFrame(): Promise<boolean> {
-  if (await frameHasMarker()) return true
-  for (let depth = 0; depth < 4; depth++) {
+  async function descend(depth: number): Promise<boolean> {
+    if (await frameHasMarker()) return true
+    if (depth >= 4) return false
     const iframes = await browser.$$("iframe")
     if (iframes.length === 0) return false
-    let descended = false
     for (let i = 0; i < iframes.length && i < 12; i++) {
       try {
         await browser.switchToFrame(iframes[i])
       } catch {
         continue
       }
-      if (await frameHasMarker()) return true
-      const nested = await browser.$$("iframe")
-      if (nested.length > 0) {
-        descended = true
-        break
-      }
+      if (await descend(depth + 1)) return true
       try {
         await browser.switchToParentFrame()
       } catch {
         return false
       }
     }
-    if (!descended) return false
+    return false
   }
-  return false
+
+  try {
+    return await descend(0)
+  } finally {
+    if (!(await frameHasMarker())) {
+      try {
+        await browser.switchToFrame(null)
+      } catch { /* ignore */ }
+    }
+  }
 }
 
 async function withEventLogFrame<T>(
@@ -202,51 +194,47 @@ async function activeRecordingRole(): Promise<string | null> {
 
 describe("M25b §5.3 — Event Log correlation-marker rendering (three-trace, VS Code)", () => {
   const ext = new ExtensionState()
-  let skipReason: string | null = null
+  const debug = new DebugSession()
 
   before(async function () {
-    skipReason = specSkipReason()
-    if (skipReason !== null) {
-      console.log(`[M25b-WDIO] SKIP reason — ${skipReason}`)
-      this.skip()
-      return
-    }
+    const reason = specSkipReason()
+    expect(reason).toBe(null)
     await ext.ensureActivated()
     await ext.waitForCommands(15_000)
+    const traceFolder = crossProcessTracePath("frontend.ct")
+    const started = await debug.start(traceFolder)
+    if (!started) {
+      throw new Error(`codetracer-debug session must start for ${traceFolder}`)
+    }
+    await openEventLogPanel()
+    await browser.pause(1_500)
+  })
+
+  after(async function () {
+    await debug.stop()
   })
 
   it("e2e_event_log_jump_renders_in_vscode_extension — both boundary markers render with chip badges", async function () {
-    if (skipReason !== null) { this.skip(); return }
-
-    await browser.pause(1500)
-
     const httpRow = await readMarkerRow(HTTP_BOUNDARY_ID)
     if (!httpRow.found) {
-      // Embedded webview hasn't mounted the marker rows (no DAP session
-      // in this dev shell). SKIP narrowly with diagnostic; flips to a
-      // hard assertion once CI ships the full pipeline.
-      console.log(
-        "[M25b-WDIO] Event Log marker rows not visible; webview likely has no DAP session yet.",
-      )
-      this.skip()
-      return
+      throw new Error(`Event Log marker row ${HTTP_BOUNDARY_ID} must be visible`)
     }
     expect(httpRow.chipText).toBe(`[${HTTP_BOUNDARY_ID}]`)
     expect(httpRow.keyValue).toBe("620")
     expect(httpRow.hasDirectionIcon).toBe(true)
 
     const realmRow = await readMarkerRow(JS_WASM_BOUNDARY_ID)
-    expect(realmRow.found, "js-wasm-realm boundary marker row must render").toBe(true)
+    if (!realmRow.found) {
+      throw new Error(`Event Log marker row ${JS_WASM_BOUNDARY_ID} must be visible`)
+    }
     expect(realmRow.chipText).toBe(`[${JS_WASM_BOUNDARY_ID}]`)
     expect(realmRow.hasDirectionIcon).toBe(true)
 
     // §5.3 — click the chip; active recording must flip to frontend-js.
-    expect(await clickMarkerChip(HTTP_BOUNDARY_ID), "chip must be clickable").toBe(true)
+    expect(await clickMarkerChip(HTTP_BOUNDARY_ID)).toBe(true)
     await browser.pause(1500)
 
     const role = await activeRecordingRole()
-    expect(role, `expected active recording role frontend-js, got ${role ?? "null"}`).toBe(
-      "frontend-js",
-    )
+    expect(role).toBe("frontend-js")
   })
 })

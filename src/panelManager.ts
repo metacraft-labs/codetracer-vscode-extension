@@ -5,6 +5,7 @@ type PanelId = 'stateComponent' | 'calltraceComponent' | 'scratchpadComponent' |
 export interface PanelConfig {
     id: PanelId;
     title: string;
+    retainContextWhenHidden?: boolean;
     getContent?: (panel: vscode.Webview, context: vscode.ExtensionContext) => string;
     getFlowContent?: (panel: vscode.Webview, context: vscode.ExtensionContext, flowLine: number, flowFile: string) => string;
     getTraceContent?: (panel: vscode.Webview, context: vscode.ExtensionContext, traceLine: number, traceFile: string, traceId: number) => string;
@@ -112,7 +113,7 @@ export function getOrCreatePanel(
             // of all that resident in the VS Code renderer for each of the
             // five panels at once. With this off, only the visible panel
             // holds the bundle; hidden panels reload it when revealed.
-            retainContextWhenHidden: false,
+            retainContextWhenHidden: config.retainContextWhenHidden ?? false,
             localResourceRoots: [
                 vscode.Uri.joinPath(context.extensionUri, "media"),
                 vscode.Uri.joinPath(context.extensionUri, "public"),

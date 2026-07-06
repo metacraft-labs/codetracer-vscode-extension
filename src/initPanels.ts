@@ -39,7 +39,9 @@ function registerPanelCommand(
 ): vscode.Disposable {
   return vscode.commands.registerCommand("ct-vscode." + commandId, () => {
     const panel = (panelMap[idToPanelKey[commandId]] = createPanel(context));
+    ensureValueOriginReplayHook(panel);
     panel.reveal();
+    replayLatestValueOriginUpdate(panel);
   });
 }
 
@@ -54,6 +56,52 @@ interface CtMessage {
 interface DapMessage {
   command: string;
   value: any;
+}
+
+async function handleExtensionPanelMessage(message: any, panel?: vscode.WebviewPanel): Promise<boolean> {
+  if (message?.command === "ct-vscode-dap-request") {
+    const requestId = String(message.requestId ?? "");
+    const dapCommand = String(message.dapCommand ?? "");
+    const session = vscode.debug.activeDebugSession;
+    let value: unknown = {};
+    if (session?.type === "codetracer-debug" && typeof session.customRequest === "function" && dapCommand) {
+      try {
+        value = await session.customRequest(dapCommand, message.value ?? {});
+      } catch (err) {
+        console.warn(`[CodeTracer] ${dapCommand} from webview failed:`, err);
+      }
+    }
+    try {
+      await panel?.webview.postMessage({
+        command: "ct-vscode-dap-response",
+        requestId,
+        value,
+      });
+    } catch (err) {
+      console.warn("[CodeTracer] DAP response postMessage failed:", err);
+    }
+    return true;
+  }
+
+  if (message?.command !== "ct-vscode-origin-hop-click") {
+    return false;
+  }
+  const location = message.value?.location;
+  const path = typeof location?.path === "string" ? location.path : "";
+  const line = Number(location?.line ?? 1);
+  if (!path) {
+    return true;
+  }
+  try {
+    const doc = await vscode.workspace.openTextDocument(path);
+    const editor = await vscode.window.showTextDocument(doc, { preview: true });
+    const pos = new vscode.Position(Math.max(0, line - 1), 0);
+    editor.selection = new vscode.Selection(pos, pos);
+    editor.revealRange(new vscode.Range(pos, pos));
+  } catch (err) {
+    console.warn("[CodeTracer] origin hop click navigation failed:", err);
+  }
+  return true;
 }
 
 function dapRedirect(
@@ -86,6 +134,42 @@ export interface PostMessageTarget {
 // Internal map of test-installed panel overrides. Keyed by an opaque
 // caller-chosen name so multiple tests can install/uninstall independently.
 const panelOverrides: Map<string, PostMessageTarget> = new Map();
+const VALUE_ORIGIN_UPDATE_COMMAND = "ct/updated-origin-chain";
+let latestValueOriginUpdate: unknown | undefined;
+const panelsWithReplayHook = new WeakSet<vscode.WebviewPanel>();
+
+function rememberReplayablePanelMessage(message: unknown): void {
+  if ((message as any)?.command === VALUE_ORIGIN_UPDATE_COMMAND) {
+    latestValueOriginUpdate = message;
+  }
+}
+
+function replayLatestValueOriginUpdate(panel: vscode.WebviewPanel): void {
+  if (!latestValueOriginUpdate) {
+    return;
+  }
+  for (const delayMs of [0, 250, 1000]) {
+    setTimeout(() => {
+      try {
+        void panel.webview.postMessage(latestValueOriginUpdate);
+      } catch (err) {
+        console.warn("[CodeTracer] value-origin replay failed:", err);
+      }
+    }, delayMs);
+  }
+}
+
+function ensureValueOriginReplayHook(panel: vscode.WebviewPanel): void {
+  if (panelsWithReplayHook.has(panel)) {
+    return;
+  }
+  panelsWithReplayHook.add(panel);
+  panel.onDidChangeViewState((event) => {
+    if (event.webviewPanel.visible) {
+      replayLatestValueOriginUpdate(event.webviewPanel);
+    }
+  });
+}
 
 /**
  * Install a fake "panel" that captures `postMessage` calls from
@@ -125,6 +209,7 @@ export function _testRegisterPanelOverride(
  * rendering lives inside the embedded CodeTracer panels.
  */
 export function forwardToEmbeddedPanels(message: unknown): number {
+  rememberReplayablePanelMessage(message);
   let delivered = 0;
   for (const key of Object.keys(panelMap) as (keyof CodeTracerPanels)[]) {
     const panel = panelMap[key];
@@ -173,7 +258,10 @@ export function createStatePanel(
       getContent: utils.getStateWebviewContent,
     },
     context,
-    (message: CtMessage, panel: any) => {
+    async (message: CtMessage, panel: any) => {
+      if (await handleExtensionPanelMessage(message, panel)) {
+        return;
+      }
       console.log("received from webview: ", message);
       let webviewSubscriber = newWebviewSubscriber(panel.webview);
       receive(viewsApi, message.kind, message.value, webviewSubscriber);
@@ -192,7 +280,10 @@ function createCalltracePanel(
       getContent: utils.getCalltraceWebviewContent,
     },
     context,
-    (message: CtMessage, panel: any) => {
+    async (message: CtMessage, panel: any) => {
+      if (await handleExtensionPanelMessage(message, panel)) {
+        return;
+      }
       console.log("received from webview: ", message);
       let webviewSubscriber = newWebviewSubscriber(panel.webview);
       receive(viewsApi, message.kind, message.value, webviewSubscriber);
@@ -211,7 +302,10 @@ function createScratchpadPanel(
       getContent: utils.getScratchpadWebviewContent,
     },
     context,
-    (message: CtMessage, panel: any) => {
+    async (message: CtMessage, panel: any) => {
+      if (await handleExtensionPanelMessage(message, panel)) {
+        return;
+      }
       console.log("received from webview: ", message);
       let webviewSubscriber = newWebviewSubscriber(panel.webview);
       receive(viewsApi, message.kind, message.value, webviewSubscriber);
@@ -227,10 +321,14 @@ function createEventLogPanel(
     {
       id: "eventLogComponent",
       title: "Event Log",
+      retainContextWhenHidden: true,
       getContent: utils.getEventLogWebviewContent,
     },
     context,
-    (message: CtMessage, panel: any) => {
+    async (message: CtMessage, panel: any) => {
+      if (await handleExtensionPanelMessage(message, panel)) {
+        return;
+      }
       console.log("received from webview: ", message);
       let webviewSubscriber = newWebviewSubscriber(panel.webview);
       receive(viewsApi, message.kind, message.value, webviewSubscriber);
@@ -249,7 +347,10 @@ function createTerminalPanel(
       getContent: utils.getTerminalOutputWebviewContent,
     },
     context,
-    (message: CtMessage, panel: any) => {
+    async (message: CtMessage, panel: any) => {
+      if (await handleExtensionPanelMessage(message, panel)) {
+        return;
+      }
       console.log("received from webview: ", message);
       let webviewSubscriber = newWebviewSubscriber(panel.webview);
       receive(viewsApi, message.kind, message.value, webviewSubscriber);
@@ -337,6 +438,7 @@ export async function initPanels(
   const STEP_MS = 3000;
 
   const state = (panelMap.state = createStatePanel(context, viewsApi));
+  ensureValueOriginReplayHook(state);
   panelCommands.state = registerPanelCommand("openState", context, () =>
     createStatePanel(context, viewsApi)
   );
@@ -344,12 +446,14 @@ export async function initPanels(
   await delay(STEP_MS);
 
   const calltrace = (panelMap.calltrace = createCalltracePanel(context, viewsApi));
+  ensureValueOriginReplayHook(calltrace);
   panelCommands.calltrace = registerPanelCommand("openCalltrace", context, () =>
     createCalltracePanel(context, viewsApi)
   );
   await delay(STEP_MS);
 
   const scratchpad = (panelMap.scratchpad = createScratchpadPanel(context, viewsApi));
+  ensureValueOriginReplayHook(scratchpad);
   panelCommands.scratchpad = registerPanelCommand(
     "openScratchpad",
     context,
@@ -358,6 +462,7 @@ export async function initPanels(
   await delay(STEP_MS);
 
   const eventLog = (panelMap.eventLog = createEventLogPanel(context, viewsApi));
+  ensureValueOriginReplayHook(eventLog);
   panelCommands.eventLog = registerPanelCommand(
     "openEventLog",
     context,
@@ -367,6 +472,7 @@ export async function initPanels(
 
   const terminalOutput = (panelMap.terminalOutput =
     createTerminalPanel(context, viewsApi));
+  ensureValueOriginReplayHook(terminalOutput);
   panelCommands.terminalOutput = registerPanelCommand(
     "openTerminalOutput",
     context,
