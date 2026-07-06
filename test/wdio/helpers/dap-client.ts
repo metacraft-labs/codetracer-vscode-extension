@@ -135,7 +135,7 @@ export async function stepIn(threadId = 1): Promise<DapResult> {
 
 /** DAP step-out. */
 export async function stepOut(threadId = 1): Promise<DapResult> {
-  return dapRequest('stepOut', { threadId })
+  return dapRequest('stepOut', { threadId }, 45000)
 }
 
 /** DAP continue. */

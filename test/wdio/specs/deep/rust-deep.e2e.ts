@@ -5,7 +5,7 @@
  * interaction, and variable value inspection. Requires a recorded Rust
  * sudoku trace (recorded via scripts/record-test-traces.sh).
  */
-import { expect } from '@wdio/globals'
+import { browser, expect } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
 import { captureFullDiagnostics, screenshot, writeDiag } from '../../helpers/diagnostics'
 import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
@@ -23,8 +23,7 @@ describe('CodeTracer Extension - Rust Deep Test', () => {
       const message =
         `Rust deep tests: trace not found at ${traceDir}\n` +
         'Run scripts/record-test-traces.sh to generate it.'
-      console.warn(`SKIPPING ${message}`)
-      this.skip()
+      throw new Error(message)
     }
   })
 
@@ -41,6 +40,32 @@ describe('CodeTracer Extension - Rust Deep Test', () => {
     await ext.ensureActivated()
     const started = await session.start(traceDir)
     expect(started).toBe(true)
+  })
+
+  it('opens main.rs in the editor', async () => {
+    await browser.waitUntil(
+      async () => editor.hasOpenTab('main.rs'),
+      { timeout: 15000, timeoutMsg: 'main.rs tab did not open within 15s' },
+    )
+    const hasTab = await editor.hasOpenTab('main.rs')
+    expect(hasTab).toBe(true)
+
+    await browser.executeWorkbench(async (vscode) => {
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          const input = tab.input as any
+          if (input?.uri?.fsPath?.endsWith('main.rs')) {
+            await vscode.window.showTextDocument(input.uri, { preserveFocus: false })
+            return
+          }
+        }
+      }
+      throw new Error('main.rs tab is not available')
+    })
+
+    const state = await editor.state()
+    expect(state).not.toBeNull()
+    expect(state!.fileName).toContain('main.rs')
   })
 
   it('performs multiple step-over operations and stays in source', async () => {
@@ -61,28 +86,12 @@ describe('CodeTracer Extension - Rust Deep Test', () => {
     expect(uniqueLines.size).toBeGreaterThan(1)
   })
 
-  it('step-in enters a callee and step-out returns', async () => {
-    const before = await session.currentLocation()
-
-    const inLoc = await session.stepIn(3000)
-    expect(inLoc.file.length).toBeGreaterThan(0)
-    expect(inLoc.line).toBeGreaterThan(0)
-    writeDiag('rust-deep-step-in.json', { before, inLoc })
-
-    const outLoc = await session.stepOut(3000)
-    expect(outLoc.file.length).toBeGreaterThan(0)
-    expect(outLoc.line).toBeGreaterThan(0)
-    writeDiag('rust-deep-step-out.json', { inLoc, outLoc })
-  })
-
-  // rr soft-mode replay: LLDB variable extraction may fail or return empty
-  // locals for Rust traces. The test attempts a loadLocals request and logs
-  // the outcome, but does not hard-fail on error since the rr backend may
-  // be in a state where locals are unavailable after step-in/step-out.
-  it('attempts to load locals (rr replay — known limitation)', async () => {
+  it('loads locals through the Rust DAP path', async () => {
     const result = await session.loadLocals({ lang: 'Rust', countBudget: 100, depthLimit: 3 })
     writeDiag('rust-deep-locals.json', result.data ?? result.error)
     console.log(`[Rust deep] loadLocals ok=${result.ok}, error=${result.error ?? 'none'}`)
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
 
     if (result.ok && result.data?.locals && Array.isArray(result.data.locals)) {
       const withValues = result.data.locals.filter(
@@ -110,32 +119,50 @@ describe('CodeTracer Extension - Rust Deep Test', () => {
     expect(location.line).toBeGreaterThan(0)
   })
 
-  // Calltrace may fail after breakpoint navigation in rr soft-mode
-  // replay — the backend may not be able to reconstruct the calltrace
-  // at all positions. We log the result but don't hard-fail.
-  it('attempts calltrace after breakpoint navigation (rr replay)', async () => {
+  it('loads calltrace after breakpoint navigation', async () => {
     const result = await session.loadCalltrace({ depth: 100, height: 500 })
     writeDiag('rust-deep-calltrace.json', result.data ?? result.error)
     console.log(`[Rust deep] loadCalltrace ok=${result.ok}, error=${result.error ?? 'none'}`)
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
 
     if (result.ok && result.data) {
       const dataStr = JSON.stringify(result.data)
       const hasMain = dataStr.includes('main')
       const hasSolve = dataStr.includes('solve')
       console.log(`Calltrace functions: main=${hasMain}, solve=${hasSolve}`)
+      expect(hasMain || hasSolve).toBe(true)
     }
   })
 
   it('loads flow data and verifies structure', async () => {
     const result = await session.loadFlow(0)
     writeDiag('rust-deep-flow.json', result)
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
 
-    if (result.ok && result.data) {
-      console.log('Flow data keys:', Object.keys(result.data))
-      // Flow data should have some structure
-      const dataStr = JSON.stringify(result.data)
-      expect(dataStr.length).toBeGreaterThan(2)
-    }
+    console.log('Flow data keys:', Object.keys(result.data))
+    const dataStr = JSON.stringify(result.data)
+    expect(dataStr.length).toBeGreaterThan(2)
+  })
+
+  it('step-in and step-out complete without desynchronizing DAP replies', async () => {
+    const before = await session.currentLocation()
+
+    const inLoc = await session.stepIn(3000)
+    expect(inLoc.file.length).toBeGreaterThan(0)
+    expect(inLoc.line).toBeGreaterThan(0)
+    writeDiag('rust-deep-step-in.json', { before, inLoc })
+
+    const outLoc = await session.stepOut(3000)
+    expect(outLoc.file.length).toBeGreaterThan(0)
+    expect(outLoc.line).toBeGreaterThan(0)
+    writeDiag('rust-deep-step-out.json', { inLoc, outLoc })
+
+    const result = await session.loadCalltrace({ depth: 100, height: 500 })
+    writeDiag('rust-deep-post-step-out-calltrace.json', result.data ?? result.error)
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
   })
 
   after(async () => {
