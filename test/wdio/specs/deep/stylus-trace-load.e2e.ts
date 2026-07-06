@@ -22,10 +22,13 @@ import * as dap from '../../helpers/dap-client'
 const FIXTURE_DIR = path.resolve(__dirname, '..', '..', '..', 'fixtures', 'stylus-fund-trace')
 
 function fixtureExists(): boolean {
+  const ctFiles = fs.existsSync(FIXTURE_DIR)
+    ? fs.readdirSync(FIXTURE_DIR).some(name => name.endsWith('.ct'))
+    : false
   const traceJson = path.join(FIXTURE_DIR, 'trace.json')
   const traceBin = path.join(FIXTURE_DIR, 'trace.bin')
   const traceMetadata = path.join(FIXTURE_DIR, 'trace_metadata.json')
-  return (fs.existsSync(traceJson) || fs.existsSync(traceBin)) && fs.existsSync(traceMetadata)
+  return ctFiles || ((fs.existsSync(traceJson) || fs.existsSync(traceBin)) && fs.existsSync(traceMetadata))
 }
 
 // ---- Page object instances ----
@@ -51,8 +54,7 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
       const message =
         `Stylus trace tests: fixture not found at ${FIXTURE_DIR}\n` +
         'Run scripts/prepare-stylus-fixture.sh to generate it.'
-      console.warn(`SKIPPING ${message}`)
-      this.skip()
+      throw new Error(message)
     }
   })
 
@@ -196,23 +198,15 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
     const result = await session.loadCalltrace({ depth: 50, height: 200 })
     console.log('Calltrace response ok:', result.ok)
 
-    if (result.ok && result.data) {
-      const dataStr = JSON.stringify(result.data)
-      console.log('Calltrace data keys:', Object.keys(result.data))
-      writeDiag('dap-calltrace.json', result.data)
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
+    const dataStr = JSON.stringify(result.data)
+    console.log('Calltrace data keys:', Object.keys(result.data!))
+    writeDiag('dap-calltrace.json', result.data)
 
-      // Check if any of the known function names appear in the response.
-      // The calltrace may return data synchronously or trigger an async event,
-      // so we check both possibilities.
-      const foundFunctions = KNOWN_FUNCTIONS.filter(fn => dataStr.includes(fn))
-      console.log('Found functions in calltrace:', foundFunctions)
-      if (foundFunctions.length > 0) {
-        expect(foundFunctions.length).toBeGreaterThan(0)
-      }
-    } else {
-      // Calltrace may load asynchronously. Log but don't fail hard.
-      console.warn('Calltrace request did not return inline data:', result.error)
-    }
+    const foundFunctions = KNOWN_FUNCTIONS.filter(fn => dataStr.includes(fn))
+    console.log('Found functions in calltrace:', foundFunctions)
+    expect(foundFunctions.length).toBeGreaterThan(0)
   })
 
   // ==================================================================
@@ -223,19 +217,14 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
     const result = await session.loadEvents()
     console.log('Event load response ok:', result.ok)
 
-    if (result.ok && result.data) {
-      const dataStr = JSON.stringify(result.data)
-      writeDiag('dap-events.json', result.data)
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
+    const dataStr = JSON.stringify(result.data)
+    writeDiag('dap-events.json', result.data)
 
-      // Check if known EVM events appear in the response
-      const foundEvents = KNOWN_EVM_EVENTS.filter(ev => dataStr.includes(ev))
-      console.log('Found EVM events:', foundEvents)
-      if (foundEvents.length > 0) {
-        expect(foundEvents.length).toBeGreaterThan(0)
-      }
-    } else {
-      console.warn('Event load did not return inline data:', result.error)
-    }
+    const foundEvents = KNOWN_EVM_EVENTS.filter(ev => dataStr.includes(ev))
+    console.log('Found EVM events:', foundEvents)
+    expect(foundEvents.length).toBeGreaterThan(0)
   })
 
   // ==================================================================
@@ -246,26 +235,20 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
     const result = await session.loadLocals({ lang: 'Rust', countBudget: 100, depthLimit: 3 })
     console.log('Load locals response ok:', result.ok)
 
-    if (result.ok && result.data) {
-      writeDiag('dap-locals.json', result.data)
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
+    writeDiag('dap-locals.json', result.data)
 
-      // Extract variable names from the response (format varies by DAP version)
-      const dataStr = JSON.stringify(result.data)
-      const foundVars = KNOWN_VARIABLES.filter(v => dataStr.includes(v))
-      console.log('Found variables:', foundVars)
-      if (foundVars.length > 0) {
-        expect(foundVars.length).toBeGreaterThan(0)
-      }
+    const dataStr = JSON.stringify(result.data)
+    const foundVars = KNOWN_VARIABLES.filter(v => dataStr.includes(v))
+    console.log('Found variables:', foundVars)
+    expect(foundVars.length).toBeGreaterThan(0)
 
-      // If locals are returned as an array, verify structure
-      if (result.data.locals && Array.isArray(result.data.locals)) {
-        console.log('Locals count:', result.data.locals.length)
-        for (const local of result.data.locals.slice(0, 10)) {
-          console.log(`  ${local.name ?? local.variable_name}: ${JSON.stringify(local).substring(0, 120)}`)
-        }
+    if (result.data!.locals && Array.isArray(result.data!.locals)) {
+      console.log('Locals count:', result.data!.locals.length)
+      for (const local of result.data!.locals.slice(0, 10)) {
+        console.log(`  ${local.name ?? local.variable_name}: ${JSON.stringify(local).substring(0, 120)}`)
       }
-    } else {
-      console.warn('Load locals did not return inline data:', result.error)
     }
   })
 
@@ -337,12 +320,10 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
     const result = await session.loadFlow(0)
     console.log('Flow load response ok:', result.ok)
 
-    if (result.ok && result.data) {
-      writeDiag('dap-flow.json', result.data)
-      console.log('Flow data keys:', Object.keys(result.data))
-    } else {
-      console.warn('Flow request did not return inline data:', result.error)
-    }
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
+    writeDiag('dap-flow.json', result.data)
+    console.log('Flow data keys:', Object.keys(result.data!))
   })
 
   // ==================================================================
