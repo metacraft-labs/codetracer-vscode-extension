@@ -307,9 +307,9 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
     const location = await session.continue(3000)
     console.log('Stopped at:', JSON.stringify(location))
 
-    // For offline traces, breakpoint behavior may differ from live debugging.
-    // Log the result for diagnostic purposes rather than asserting exact line.
     writeDiag('breakpoint-continue.json', { bpResult, breakpoints, location })
+    expect(location.file).toContain('lib.rs')
+    expect(location.line).toBe(59)
   })
 
   // ==================================================================
@@ -330,13 +330,15 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
   // Terminal output
   // ==================================================================
 
-  it('can load terminal output from the trace', async () => {
+  it('returns the terminal output payload for the trace', async () => {
     const result = await session.loadTerminal()
     console.log('Terminal load response ok:', result.ok)
 
-    if (result.ok && result.data) {
-      writeDiag('dap-terminal.json', result.data)
-    }
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
+    expect(Array.isArray(result.data)).toBe(true)
+    expect(result.data).toEqual([])
+    writeDiag('dap-terminal.json', result.data)
   })
 
   // ==================================================================
@@ -348,9 +350,10 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
     console.log('Panel status:', JSON.stringify(panels))
     writeDiag('panel-status.json', panels)
 
-    // Even if panels aren't visible (they may be in inactive tab groups),
-    // the tab groups API should show that webview panels were created.
-    // Note: in some configurations, panels are opened on-demand via commands.
+    const panelIds = panels.map(panel => panel.id)
+    expect(panelIds).toContain('state')
+    expect(panelIds).toContain('calltrace')
+    expect(panelIds).toContain('event-log')
   })
 
   // ==================================================================
@@ -370,9 +373,10 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
     const result = await session.searchCalltrace('fund')
     console.log('Search calltrace result:', result.ok)
 
-    if (result.ok && result.data) {
-      writeDiag('dap-search-fund.json', result.data)
-    }
+    expect(result.ok).toBe(true)
+    expect(result.data).toBeDefined()
+    writeDiag('dap-search-fund.json', result.data)
+    expect(JSON.stringify(result.data)).toContain('fund')
   })
 
   // ==================================================================
