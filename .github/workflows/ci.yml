@@ -8,6 +8,11 @@ on:
 
 jobs:
   build:
+    # HOLD (CIP-5 Wave 4): STEP-RISKY. DIY toolchain (actions/setup-node +
+    # extractions/setup-just download dynamically-linked prebuilt binaries)
+    # is not portable to the NixOS `incus` class. Kept on ubuntu-latest
+    # until this job moves to the nix dev env; see the nix-based
+    # `wdio-smoke`/`wdio-integration` jobs which already run on incus.
     runs-on: ubuntu-latest
 
     steps:
@@ -36,7 +41,9 @@ jobs:
         run: just compile-wdio
 
   windows-build:
-    runs-on: windows-latest
+    # CIP-5: windows-latest → Windows runner classes (DIY setup-node/setup-just
+    # is Windows-native here; win-arm queues until that class is live).
+    runs-on: [win-ephemeral, win-arm]
 
     steps:
       - name: Check out repository
@@ -68,7 +75,7 @@ jobs:
         shell: cmd
 
   wdio-smoke:
-    runs-on: [self-hosted, nixos]
+    runs-on: incus  # CIP-5: nix job (setup-dev-env) → incus
 
     steps:
       - name: Generate CI token
@@ -129,7 +136,7 @@ jobs:
   # Runs on self-hosted NixOS runners with workspace sibling restoration.
   # Runs by default; add the 'skip-integration' label to a PR to skip.
   wdio-integration:
-    runs-on: [self-hosted, nixos]
+    runs-on: incus  # CIP-5: nix job (setup-dev-env) → incus
     if: github.event_name == 'push' || !contains(github.event.pull_request.labels.*.name, 'skip-integration')
 
     # CI runners typically lack hardware performance counters, so use rr's
