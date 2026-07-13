@@ -10,9 +10,9 @@ jobs:
   build:
     # HOLD (CIP-5 Wave 4): STEP-RISKY. DIY toolchain (actions/setup-node +
     # extractions/setup-just download dynamically-linked prebuilt binaries)
-    # is not portable to the NixOS `incus` class. Kept on ubuntu-latest
+    # is not portable to the NixOS `eph-linux-x64` class. Kept on ubuntu-latest
     # until this job moves to the nix dev env; see the nix-based
-    # `wdio-smoke`/`wdio-integration` jobs which already run on incus.
+    # `wdio-smoke`/`wdio-integration` jobs which already run on eph-linux-x64.
     runs-on: ubuntu-latest
 
     steps:
@@ -42,8 +42,8 @@ jobs:
 
   windows-build:
     # CIP-5: windows-latest → Windows runner classes (DIY setup-node/setup-just
-    # is Windows-native here; win-arm queues until that class is live).
-    runs-on: [win-ephemeral, win-arm]
+    # is Windows-native here; eph-win-arm64 queues until that class is live).
+    runs-on: [eph-win-x64, eph-win-arm64]
 
     steps:
       - name: Check out repository
@@ -75,7 +75,7 @@ jobs:
         shell: cmd
 
   wdio-smoke:
-    runs-on: incus  # CIP-5: nix job (setup-dev-env) → incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (setup-dev-env) → eph-linux-x64
 
     steps:
       - name: Generate CI token
@@ -136,7 +136,7 @@ jobs:
   # Runs on self-hosted NixOS runners with workspace sibling restoration.
   # Runs by default; add the 'skip-integration' label to a PR to skip.
   wdio-integration:
-    runs-on: incus  # CIP-5: nix job (setup-dev-env) → incus
+    runs-on: eph-linux-x64  # CIP-5: nix job (setup-dev-env) → eph-linux-x64
     if: github.event_name == 'push' || !contains(github.event.pull_request.labels.*.name, 'skip-integration')
 
     # CI runners typically lack hardware performance counters, so use rr's
