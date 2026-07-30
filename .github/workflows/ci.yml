@@ -41,9 +41,17 @@ jobs:
         run: just compile-wdio
 
   windows-build:
-    # CIP-5: windows-latest → Windows runner classes (DIY setup-node/setup-just
-    # is Windows-native here; eph-win-arm64 queues until that class is live).
-    runs-on: [eph-win-x64, eph-win-arm64]
+    # CIP-5: windows-latest → the Windows runner class (DIY setup-node/setup-just
+    # is Windows-native here).
+    #
+    # Single label, not an array. The previous form assumed the extra label
+    # would just "queue until that class is live" — it does not: `runs-on:
+    # [a, b]` is an AND over labels, demanding ONE runner carrying BOTH, so
+    # adding eph-win-arm64 did not add a fallback, it made the job unschedulable
+    # on eph-win-x64 too. The two classes are separate pools on separate hosts.
+    # To span both, use a matrix axis (`matrix: runs-on: [...]` +
+    # `runs-on: ${{ matrix.runs-on }}`).
+    runs-on: eph-win-x64
 
     steps:
       - name: Check out repository
