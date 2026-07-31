@@ -13,7 +13,7 @@ jobs:
     # is not portable to the NixOS `eph-linux-x64` class. Kept on ubuntu-latest
     # until this job moves to the nix dev env; see the nix-based
     # `wdio-smoke`/`wdio-integration` jobs which already run on eph-linux-x64.
-    runs-on: ubuntu-latest
+    runs-on: eph-linux-x64
 
     steps:
       - name: Check out repository
