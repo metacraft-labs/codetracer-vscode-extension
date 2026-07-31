@@ -8,37 +8,43 @@ on:
 
 jobs:
   build:
-    # HOLD (CIP-5 Wave 4): STEP-RISKY. DIY toolchain (actions/setup-node +
-    # extractions/setup-just download dynamically-linked prebuilt binaries)
-    # is not portable to the NixOS `eph-linux-x64` class. Kept on ubuntu-latest
-    # until this job moves to the nix dev env; see the nix-based
-    # `wdio-smoke`/`wdio-integration` jobs which already run on eph-linux-x64.
+    # Runs on the NixOS eph-linux-x64 class using the repo's nix dev env, the
+    # same way wdio-smoke/wdio-integration below do. node + just come from the
+    # flake via dev-exec — the old actions/setup-node + extractions/setup-just
+    # steps downloaded FHS-dynamically-linked binaries that do not run on NixOS.
     runs-on: eph-linux-x64
 
     steps:
+      - name: Generate CI token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Setup dev env
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
         with:
-          node-version: 20
-          cache: npm
-
-      - name: Install just
-        uses: extractions/setup-just@v2
+          env-flavor: nix
+          gh-token: ${{ steps.app-token.outputs.token }}
+          substituters: ${{ vars.SUBSTITUTERS }}
+          trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
 
       - name: Install dependencies
-        run: just install
+        run: dev-exec just install
 
       - name: Lint
-        run: just lint
+        run: dev-exec just lint
 
       - name: Compile TypeScript
-        run: just compile-ts
+        run: dev-exec just compile-ts
 
       - name: Typecheck WDIO tests
-        run: just compile-wdio
+        run: dev-exec just compile-wdio
 
   windows-build:
     # CIP-5: windows-latest → the Windows runner class (DIY setup-node/setup-just
