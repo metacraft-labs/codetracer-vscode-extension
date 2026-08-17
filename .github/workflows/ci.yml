@@ -1,10 +1,13 @@
 name: CI
 
+# `dev` is the default branch and the base of every recent PR; `main` is
+# retained because it still exists. The previous `[main]`-only filters meant
+# neither pushes to `dev` nor PRs based on it ran any CI.
 on:
   push:
-    branches: [main]
+    branches: [dev, main]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
 
 jobs:
   build:
