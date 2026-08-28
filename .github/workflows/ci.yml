@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup dev env
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -110,7 +110,7 @@ jobs:
       # and installs the `dev-exec` wrapper (replacing the open-coded
       # setup-nix step). This job needs no cross-repo siblings.
       - name: Setup dev env
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
@@ -180,7 +180,7 @@ jobs:
       # former setup-nix + manifest/resolve/clone steps). codetracer and the
       # lock-managed recorder/backend siblings resolve from the workspace lock.
       - name: Setup dev env
-        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@main
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
