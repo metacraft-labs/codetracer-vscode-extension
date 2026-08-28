@@ -1,0 +1,13 @@
+{
+  "include": ["marketing-listener.test.ts", "../src/marketing_listener.ts"],
+  "compilerOptions": {
+    "module": "Node16",
+    "target": "ES2022",
+    "outDir": "../out-test",
+    "lib": ["ES2022"],
+    "sourceMap": false,
+    "strict": true,
+    "rootDir": "..",
+    "esModuleInterop": true
+  }
+}

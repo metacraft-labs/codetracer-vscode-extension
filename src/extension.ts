@@ -10,6 +10,7 @@ import {
   _testRegisterPanelOverride,
   PostMessageTarget,
 } from "./initPanels";
+import { MarketingListener, makeVsCodeDispatcher, DEFAULT_MARKETING_PORT } from "./marketing_listener";
 import * as utils from "./utils";
 import * as os from "os";
 import * as fs from "fs";
@@ -1738,6 +1739,45 @@ async function reinitCommands(context: vscode.ExtensionContext) {
   }
 }
 
+// Marketing listener is created at activation time when the user has
+// opted in via the `codetracer.marketingListenerEnabled` setting. Kept
+// at module scope so deactivate() can tear it down deterministically.
+let marketingListener: MarketingListener | undefined;
+
+async function maybeStartMarketingListener(context: vscode.ExtensionContext): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration("codetracer");
+  const enabled = cfg.get<boolean>("marketingListenerEnabled", false);
+  if (!enabled) {
+    if (marketingListener) {
+      await marketingListener.stop();
+      marketingListener = undefined;
+    }
+    return;
+  }
+  if (marketingListener) {
+    return;
+  }
+  const port = cfg.get<number>("marketingListenerPort", DEFAULT_MARKETING_PORT);
+  const dispatcher = makeVsCodeDispatcher(vscode);
+  marketingListener = new MarketingListener(
+    dispatcher,
+    (msg: string) => console.log("[CodeTracer marketing]", msg),
+    port,
+  );
+  try {
+    await marketingListener.start();
+    context.subscriptions.push({
+      dispose: () => {
+        void marketingListener?.stop();
+        marketingListener = undefined;
+      },
+    });
+  } catch (err) {
+    console.error("[CodeTracer marketing] failed to start listener:", err);
+    marketingListener = undefined;
+  }
+}
+
 /**
  * The object returned from `activate(...)` is exposed to other extensions
  * (and to the M6 verification suite) via `vscode.extensions.getExtension(...).exports`.
@@ -1764,6 +1804,16 @@ export interface CodeTracerExtensionExports {
 export async function activate(context: vscode.ExtensionContext): Promise<CodeTracerExtensionExports> {
   // initial (stub or real)
   await reinitCommands(context);
+  // Marketing/test driver listener (opt-in via setting).
+  await maybeStartMarketingListener(context);
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(async (e) => {
+      if (e.affectsConfiguration("codetracer.marketingListenerEnabled") ||
+          e.affectsConfiguration("codetracer.marketingListenerPort")) {
+        await maybeStartMarketingListener(context);
+      }
+    }),
+  );
   // Cross-repo test diagnostic: when ``CODETRACER_DAP_TRACE_PATH`` is
   // set (the WDIO harness points it at
   // ``test/wdio/diagnostics/dap-trace.log``) capture every DAP message
@@ -1851,4 +1901,8 @@ export function deactivate() {
   internalLastCompleteMoveHandlerRegistered = false;
   flowDecorationType?.dispose();
   flowDecorationType = undefined;
+  if (marketingListener) {
+    void marketingListener.stop();
+    marketingListener = undefined;
+  }
 }
