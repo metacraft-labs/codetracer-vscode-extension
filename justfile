@@ -195,6 +195,56 @@ _xvfb-run +CMD:
     # binary, but that alone is insufficient when user namespaces are
     # unavailable.
     export CHROME_DEVEL_SANDBOX=""
+    # Font preflight.
+    #
+    # Chromium hard-requires at least one resolvable font. With zero fonts the
+    # renderer does not degrade -- it hits a Blink NOTREACHED in
+    # remote_font_face_source.cc and aborts via __builtin_trap, so VS Code dies
+    # with "renderer process gone (reason: crashed, code: 133)" (133 = 128+5,
+    # SIGTRAP). The workbench never renders, and WDIO only reports it ~60s later
+    # as "invalid session id" / "Connection timeout exceeded" -- a failure that
+    # says nothing about fonts, buried under thousands of lines of chromedriver
+    # INFO output. Check up front and name the actual cause.
+    #
+    # NOTE ON WHAT THIS ASSERTS. A naive "fc-list | wc -l -gt 0" does NOT work:
+    # nixpkgs' fontconfig is built with dejavu-fonts-minimal compiled in as a
+    # last-resort fallback, so `fc-list` reports 1 font even when FONTCONFIG_FILE
+    # points at a file that does not exist. That threshold could never fire. The
+    # invariant that actually broke in CI was "fontconfig has no config at all"
+    # (Fontconfig error: Cannot load default config file), so assert that
+    # directly, then assert that sans and monospace resolve to files that exist.
+    font_preflight_failed=""
+    if [ -z "${FONTCONFIG_FILE:-}" ]; then
+        echo "_xvfb-run: FATAL: FONTCONFIG_FILE is unset." >&2
+        font_preflight_failed=1
+    elif [ ! -f "${FONTCONFIG_FILE}" ]; then
+        echo "_xvfb-run: FATAL: FONTCONFIG_FILE=${FONTCONFIG_FILE} does not exist." >&2
+        font_preflight_failed=1
+    elif command -v fc-match >/dev/null 2>&1; then
+        for _family in sans monospace; do
+            _file="$(fc-match -f '%{file}' "$_family" 2>/dev/null || true)"
+            if [ -z "$_file" ] || [ ! -f "$_file" ]; then
+                echo "_xvfb-run: FATAL: font family '$_family' resolves to '${_file:-<nothing>}', which is not a file." >&2
+                font_preflight_failed=1
+            else
+                echo "_xvfb-run: font '$_family' -> $_file"
+            fi
+        done
+    else
+        echo "_xvfb-run: note: fc-match unavailable; checked FONTCONFIG_FILE only." >&2
+    fi
+    if [ -n "$font_preflight_failed" ]; then
+        echo "  Chromium/Electron cannot render without a font. The renderer does not" >&2
+        echo "  degrade gracefully: it hits a Blink NOTREACHED in" >&2
+        echo "  remote_font_face_source.cc, aborts via __builtin_trap, and VS Code" >&2
+        echo "  reports 'renderer process gone (reason: crashed, code: 133)'." >&2
+        echo "  WDIO then surfaces that ~60s later as an opaque 'invalid session id'" >&2
+        echo "  / 'Connection timeout exceeded' that never mentions fonts." >&2
+        echo "  Failing fast with the real reason instead." >&2
+        echo "  Fix: run under the repo's nix dev shell, which sets FONTCONFIG_FILE" >&2
+        echo "  and ships dejavu_fonts + liberation_ttf (see flake.nix)." >&2
+        exit 1
+    fi
     if [ -d "$(pwd)/.ct-bin" ]; then
         export PATH="$(pwd)/.ct-bin:$PATH"
     fi
