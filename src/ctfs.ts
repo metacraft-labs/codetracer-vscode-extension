@@ -8,7 +8,7 @@
  *
  * This module implements the read-only subset of the CTFS v2/v3/v4
  * binary container needed to extract `meta.dat`, plus the `meta.dat`
- * (CTMD v3) parser. It is a faithful TypeScript port of the Rust
+ * (CTMD v4) parser. It is a faithful TypeScript port of the Rust
  * reference readers:
  *   - codetracer/src/db-backend/src/ctfs_trace_reader/ctfs_container.rs
  *   - codetracer/src/db-backend/src/ctfs_trace_reader/meta_dat.rs
@@ -24,6 +24,20 @@ import * as path from "path";
 
 /** CTFS magic bytes: "C0DE trACE2" in hex-speak. */
 const CTFS_MAGIC = Buffer.from([0xc0, 0xde, 0x72, 0xac, 0xe2]);
+
+/**
+ * Accepted range for the CTFS *container* version — the byte at offset 5
+ * of the `.ct` file.
+ *
+ * This is a different number from the `meta.dat` schema version (the u16
+ * at offset 4 of the internal `meta.dat` payload, see
+ * {@link SUPPORTED_META_DAT_VERSIONS}), and the two move independently.
+ * The container version describes the block/mapping layout that locates
+ * internal files; a range is right here because every version in it
+ * addresses blocks the same way, so reading a v2 container yields the
+ * same bytes a v4 one would. It says nothing about what those bytes mean,
+ * which is why it cannot stand in for the `meta.dat` gate.
+ */
 const CTFS_VERSION_MIN = 2;
 const CTFS_VERSION_MAX = 4;
 const HEADER_SIZE = 8;
@@ -194,12 +208,57 @@ function base40Decode(encoded: bigint): string {
   return String.fromCharCode(...chars);
 }
 
-// ── meta.dat (CTMD v3) parser ───────────────────────────────────────────
+// ── meta.dat (CTMD v4) parser ───────────────────────────────────────────
 
 /** CTMD magic bytes for `meta.dat`: ASCII "CTMD". */
 const META_DAT_MAGIC = Buffer.from([0x43, 0x54, 0x4d, 0x44]);
 
-/** Decoded subset of a CTFS `meta.dat` payload (CTMD v3). */
+/**
+ * The highest `meta.dat` schema version whose writer packed a line-only
+ * `global_position_index` as `prefix_sums[file_id] + line`.
+ *
+ * Named rather than written as a literal `3` at the comparison site so
+ * that the bound and the refusal it drives move together: a later version
+ * that changed the packing again would raise it, and a reader comparing
+ * against a stale literal would answer such a container instead of
+ * refusing it.
+ */
+export const LAST_SHIFTED_GLOBAL_INDEX_VERSION = 3;
+
+/**
+ * All `meta.dat` schema versions this reader accepts.
+ *
+ * **A singleton, and it has to be.** The tempting alternative — accept
+ * `[3, 4]`, since v4 changed no field of the `meta.dat` header this
+ * module decodes — reintroduces the exact defect the version bump exists
+ * to close. v3 and v4 differ not in the bytes of `meta.dat` but in what
+ * the rest of the container's step addresses MEAN: a v3 writer packed a
+ * line-only `global_position_index` as `prefix_sums[file_id] + line`,
+ * while v4 packs `prefix_sums[file_id] + (line - 1)`, the exact inverse
+ * of the `line = q + 1` decode every reader performs. Both land INSIDE
+ * the trace's own address space, so accepting a v3 container fails
+ * nowhere: every step resolves to a real file and a real line, each one
+ * exactly one line above where it was recorded.
+ *
+ * The `paths` list this module returns is the very array those addresses
+ * are indexed against, so answering a v3 container here hands the
+ * extension the file table for an address space it is about to read one
+ * line high. Nothing else in the container distinguishes the two encodes
+ * — `recorder_id` names the producer, not its address packing, and the
+ * same recorders span the change — so the schema version is the only
+ * field that can carry the distinction.
+ *
+ * Mirrors `SUPPORTED_VERSIONS` in
+ * `codetracer/src/db-backend/src/ctfs_trace_reader/meta_dat.rs`, which is
+ * also `&[4]` for the same reason. A back-compat shim is not merely
+ * unimplemented, it is not constructible: subtracting one from every
+ * address would correct a trace whose writer used the old packing, and
+ * the version is precisely what would have said that it did. Pre-1.0, v3
+ * containers are re-recorded rather than read.
+ */
+export const SUPPORTED_META_DAT_VERSIONS: readonly number[] = [4];
+
+/** Decoded subset of a CTFS `meta.dat` payload (CTMD v4). */
 export interface CtfsMetaDat {
   /** Program path or identifier, exactly as recorded. */
   program: string;
@@ -238,22 +297,34 @@ function readString(buf: Buffer, cur: Cursor): string {
 }
 
 /**
- * Parse the leading fields of a binary `meta.dat` (CTMD v3) payload.
+ * Parse the leading fields of a binary `meta.dat` (CTMD v4) payload.
  *
  * Only the prefix up to and including the `paths` block is decoded — the
  * optional MCR / replay-launch / layout-snapshot / filter-provenance
  * trailers are irrelevant to source-file discovery and are skipped.
+ *
+ * Throws on any version outside {@link SUPPORTED_META_DAT_VERSIONS}.
  */
-function parseMetaDat(buf: Buffer): CtfsMetaDat {
+export function parseMetaDat(buf: Buffer): CtfsMetaDat {
   if (buf.length < 8) throw new Error("meta.dat: too short");
   if (!buf.subarray(0, 4).equals(META_DAT_MAGIC)) {
     throw new Error("meta.dat: bad magic (expected 'CTMD')");
   }
   const version = buf.readUInt16LE(4);
-  if (version !== 3) throw new Error(`meta.dat: unsupported version ${version}`);
+  if (!SUPPORTED_META_DAT_VERSIONS.includes(version)) {
+    const detail = version <= LAST_SHIFTED_GLOBAL_INDEX_VERSION
+      ? "its step addresses use the superseded global_position_index packing " +
+        "(prefix_sums[file_id] + line); reading them under the current decode " +
+        "would report every step one line high. Re-record the trace."
+      : "this reader predates that version.";
+    throw new Error(
+      `meta.dat: unsupported version ${version} ` +
+      `(supported: ${SUPPORTED_META_DAT_VERSIONS.join(", ")}) — ${detail}`
+    );
+  }
 
   const cur: Cursor = { pos: 8 };
-  // v3: recording_id (UUIDv7 string) prepends program.
+  // recording_id (UUIDv7 string) prepends program.
   readString(buf, cur); // recording_id — not needed here
   const program = readString(buf, cur);
   const argsCount = decodeVarint(buf, cur);
@@ -301,15 +372,34 @@ export function findCtfsContainer(traceFolder: string): string | undefined {
  *
  * Returns `undefined` if no container is found, the container has no
  * `meta.dat`, or parsing fails — callers fall back to other sources.
+ *
+ * A rejection is reported through `onReject` rather than dropped. "No
+ * container here" and "this container is one we refuse to read" are
+ * different facts that would otherwise both arrive as a bare
+ * `undefined`, and a rejected container is the one the operator needs
+ * told about: it is on disk, it is the trace they asked for, and the
+ * fallback path they end up on will silently find nothing.
+ *
+ * `onReject` is a parameter rather than a direct `console.warn` call
+ * because the VS Code extension host installs a `console` whose methods
+ * cannot be replaced, so a test has no other way to observe that a
+ * refusal was reported at all.
  */
-export function readCtfsMetaDat(traceFolder: string): CtfsMetaDat | undefined {
+export function readCtfsMetaDat(
+  traceFolder: string,
+  onReject: (message: string) => void = (message) => console.warn(message)
+): CtfsMetaDat | undefined {
   const containerPath = findCtfsContainer(traceFolder);
   if (!containerPath) return undefined;
   try {
     const container = CtfsContainer.open(containerPath);
     if (!container.hasFile("meta.dat")) return undefined;
     return parseMetaDat(container.readFile("meta.dat"));
-  } catch {
+  } catch (err) {
+    onReject(
+      `CodeTracer: ignoring CTFS container ${containerPath}: ` +
+      `${err instanceof Error ? err.message : String(err)}`
+    );
     return undefined;
   }
 }
