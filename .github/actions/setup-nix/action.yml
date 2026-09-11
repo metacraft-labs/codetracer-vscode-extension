@@ -17,7 +17,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: metacraft-labs/metacraft-github-actions/setup-nix@main
+    - uses: metacraft-labs/metacraft-github-actions/setup-nix@dev
       with:
         gh-token: ${{inputs.gh-token}}
         substituters: ${{inputs.substituters}}
