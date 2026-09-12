@@ -88,6 +88,37 @@
           '';
         };
 
+        # Fonts for the headless Electron renderer.
+        #
+        # VS Code's workbench is a Chromium renderer, and Chromium hard-requires
+        # at least one resolvable font. On a machine with zero fonts (or with no
+        # fontconfig config at all) the failure is neither graceful nor legible:
+        #
+        #   Fontconfig error: Cannot load default config file: No such file: (null)
+        #   ERROR:ui/gfx/platform_font_skia.cc:255] Could not find any font: Sans, sans.
+        #   ERROR:third_party/blink/renderer/core/css/remote_font_face_source.cc:354] NOTREACHED hit.
+        #   CodeWindow: renderer process gone (reason: crashed, code: 133)
+        #
+        # The NOTREACHED is a Blink CHECK that aborts via __builtin_trap, so the
+        # renderer dies with SIGTRAP (133 = 128 + 5). `.monaco-workbench` never
+        # renders, and WDIO reports it ~60s later as an opaque
+        # "invalid session id" / "Connection timeout exceeded" — five failing
+        # smoke tests that say nothing about fonts.
+        #
+        # This bit us when CI moved from the persistent `mcl-004` runner (a full
+        # NixOS host that happened to have system fonts and /etc/fonts) to the
+        # ephemeral `eph-linux-x64` / `garm-*` image, which has neither. The dev
+        # shell must therefore carry its own fonts rather than inherit the host's.
+        #
+        # makeFontsConf emits a fonts.conf pointing only at these directories;
+        # FONTCONFIG_FILE (exported in the shellHook) makes fontconfig use it
+        # instead of looking for a nonexistent /etc/fonts/fonts.conf.
+        fontPackages = with pkgs; [
+          dejavu_fonts      # DejaVu Sans / Serif / Sans Mono — the sans+mono default
+          liberation_ttf    # metric-compatible Arial/Times/Courier substitutes
+        ];
+        fontsConf = pkgs.makeFontsConf { fontDirectories = fontPackages; };
+
         # Libraries needed by Chromium/Electron at runtime (for WDIO + chromedriver).
         chromiumLibs = with pkgs; [
           glib
@@ -129,8 +160,9 @@
             chromium
             chromedriver-pinned  # must match VS Code Insiders' Electron (currently Chrome 148)
             xorg.xorgserver      # provides Xvfb for headless VS Code on Linux
+            fontconfig           # fc-list/fc-match — used by the _xvfb-run font preflight
             vscodeInsiders
-          ] ++ chromiumLibs;
+          ] ++ chromiumLibs ++ fontPackages;
 
           shellHook = ''
             echo "CodeTracer Extension Dev Shell: Node $(node -v)"
@@ -142,6 +174,10 @@
             export CHROMEDRIVER_PATH="${chromedriver-pinned}/bin/chromedriver"
             export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"
             export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+            # Give fontconfig a config of our own so the Electron renderer always
+            # has fonts, on hosts with /etc/fonts and on bare CI images alike.
+            # Without this the renderer traps in Blink (see fontsConf above).
+            export FONTCONFIG_FILE="${fontsConf}"
             if [ -d "$PWD/.ct-bin" ]; then
               export PATH="$PWD/.ct-bin:$PATH"
             fi
