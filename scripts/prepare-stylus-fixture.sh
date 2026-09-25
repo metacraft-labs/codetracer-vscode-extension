@@ -33,17 +33,16 @@ echo ""
 # The extension WDIO tests load this fixture; live Arbitrum deployment belongs
 # to CodeTracer's recording-tier tests.
 echo "Regenerating Stylus CTFS fixture from committed event data..."
-if ! command -v direnv >/dev/null 2>&1; then
-  echo "ERROR: direnv is required to run the Stylus fixture command in $CODETRACER_DIR"
+if ! command -v repro >/dev/null 2>&1; then
+  echo "ERROR: repro is required to run the Stylus fixture command in $CODETRACER_DIR"
   exit 1
 fi
-if [ ! -f "$CODETRACER_DIR/.envrc" ]; then
-  echo "ERROR: codetracer repo has no .envrc; refusing bare cargo execution."
+if [ ! -f "$CODETRACER_DIR/repro.nim" ] && [ ! -f "$CODETRACER_DIR/.envrc" ]; then
+  echo "ERROR: codetracer repo has no environment declaration; refusing bare cargo execution."
   exit 1
 fi
 
-direnv allow "$CODETRACER_DIR" 2>/dev/null || true
-direnv exec "$CODETRACER_DIR" bash -c '
+repro exec "$CODETRACER_DIR" -- bash -c '
   set -euo pipefail
   cd "$1/src/db-backend"
   cargo test --test stylus_fixture_rebuild -- --ignored --nocapture rebuild_stylus_ctfs_fixture

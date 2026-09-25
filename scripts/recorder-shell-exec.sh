@@ -2,14 +2,9 @@
 # Shared helper for fixture preparation scripts.
 #
 # Provides `recorder_exec` which runs a command inside the recorder repo's
-# dev shell. Repos with an .envrc must run through `direnv exec`; if direnv
-# cannot enter that shell, fixture preparation fails instead of falling back to
-# whatever happens to be on PATH.
-#
-# Repos without an .envrc are allowed a strict bare fallback only when the
-# caller is already inside a known dev shell and the obvious required tool(s)
-# for the command are present. This keeps legacy repos usable without hiding a
-# failed/interrupted dev-shell setup as a later "command not found" error.
+# dev shell through Repro. Repositories declaring repro.nim or a legacy .envrc
+# must enter that environment successfully; failures never fall back to PATH.
+# Repositories without either declaration retain the checked bare fallback.
 #
 # Usage:
 #   source "$(dirname "${BASH_SOURCE[0]}")/recorder-shell-exec.sh"
@@ -22,7 +17,7 @@ recorder_fail() {
 }
 
 recorder_in_known_dev_shell() {
-  [ -n "${IN_NIX_SHELL:-}" ] || [ -n "${DIRENV_DIR:-}" ]
+  [ -n "${IN_NIX_SHELL:-}" ] || [ -n "${__REPRO_PROJECT_ROOT:-}" ]
 }
 
 recorder_required_tools() {
@@ -66,7 +61,7 @@ recorder_require_bare_fallback_tools() {
   done < <(recorder_required_tools "$cmd" "$arg2")
 
   if [ "${#missing[@]}" -gt 0 ]; then
-    recorder_fail "repo has no .envrc and current dev shell is missing required tool(s): ${missing[*]}"
+    recorder_fail "repo has no environment declaration and current dev shell is missing required tool(s): ${missing[*]}"
     return 1
   fi
 }
@@ -75,19 +70,17 @@ recorder_exec() {
   local repo_dir="$1"
   shift
 
-  if command -v direnv >/dev/null 2>&1 && [ -f "$repo_dir/.envrc" ]; then
-    direnv allow "$repo_dir" 2>/dev/null || true
-    direnv exec "$repo_dir" "$@"
+  if [ -f "$repo_dir/repro.nim" ] || [ -f "$repo_dir/reprobuild.nim" ] || [ -f "$repo_dir/.envrc" ]; then
+    if ! command -v repro >/dev/null 2>&1; then
+      recorder_fail "repro is required to run commands in $repo_dir"
+      return 1
+    fi
+    repro exec "$repo_dir" -- bash -c 'cd "$1" && shift && exec "$@"' recorder-exec "$PWD" "$@"
     return $?
   fi
 
-  if [ -f "$repo_dir/.envrc" ]; then
-    recorder_fail "direnv is required to run commands in $repo_dir"
-    return 1
-  fi
-
   if ! recorder_in_known_dev_shell; then
-    recorder_fail "$repo_dir has no .envrc; refusing bare execution outside a known dev shell"
+    recorder_fail "$repo_dir has no environment declaration; refusing bare execution outside a known dev shell"
     return 1
   fi
 

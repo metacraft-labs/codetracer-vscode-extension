@@ -80,7 +80,7 @@ run_in_repo_env() {
 	shift
 	(
 		cd "$repo"
-		direnv exec . "$@"
+		repro exec . -- "$@"
 	)
 }
 
@@ -148,7 +148,7 @@ ensure_beam_recorder_built() {
 		return 0
 	fi
 
-	echo "codetracer-beam-recorder binary missing; building sibling recorder with direnv exec ..." >&2
+	echo "codetracer-beam-recorder binary missing; building sibling recorder with repro exec ..." >&2
 	run_in_repo_env "$recorder_repo" just build
 }
 
@@ -158,7 +158,7 @@ ensure_mcr_recorder_shim() {
 
 	[ -d "$recorder_repo" ] || return 0
 	if [ ! -x "$mcr" ]; then
-		echo "ct-mcr binary missing; building sibling native recorder with direnv exec ..." >&2
+		echo "ct-mcr binary missing; building sibling native recorder with repro exec ..." >&2
 		run_in_repo_env "$recorder_repo" just build-ct-mcr
 	fi
 	if [ -x "$mcr" ]; then
@@ -174,7 +174,7 @@ ensure_nim_compiler_shim() {
 	[ -d "$nim_repo" ] || return 0
 	if [ -x "$nim_repo/bin/nim" ]; then
 		nim_exe="$nim_repo/bin/nim"
-	elif command -v direnv >/dev/null 2>&1 && [ -f "$nim_repo/.envrc" ]; then
+	elif command -v repro >/dev/null 2>&1 && { [ -f "$nim_repo/repro.nim" ] || [ -f "$nim_repo/.envrc" ]; }; then
 		nim_exe="$(run_in_repo_env "$nim_repo" bash -lc 'command -v nim' 2>/dev/null || true)"
 	fi
 
@@ -219,7 +219,7 @@ EOF
 	fi
 
 	if [ ! -f "$local_bin" ] || [ ! -f "$native_addon" ]; then
-		echo "codetracer-js-recorder CLI missing; building sibling JS recorder with direnv exec ..." >&2
+		echo "codetracer-js-recorder CLI missing; building sibling JS recorder with repro exec ..." >&2
 		run_in_repo_env "$recorder_repo" bash -lc '
 			if [ ! -d node_modules ]; then
 				npm install
@@ -269,7 +269,7 @@ ensure_native_replay_shim() {
 
 	[ -d "$backend_repo" ] || return 0
 	if [ ! -x "$replay" ]; then
-		echo "ct-native-replay binary missing; building sibling native backend with direnv exec ..." >&2
+		echo "ct-native-replay binary missing; building sibling native backend with repro exec ..." >&2
 		run_in_repo_env "$backend_repo" just build
 	fi
 	if [ -x "$replay" ]; then
@@ -285,7 +285,7 @@ ensure_native_recorder_shim() {
 
 	[ -d "$recorder_repo" ] || return 0
 	if [ ! -x "$mcr" ]; then
-		echo "codetracer-native-recorder binary missing; building sibling native recorder with direnv exec ..." >&2
+		echo "codetracer-native-recorder binary missing; building sibling native recorder with repro exec ..." >&2
 		run_in_repo_env "$recorder_repo" just build-ct-mcr
 	fi
 	if [ -x "$mcr" ]; then
@@ -326,13 +326,13 @@ build_codetracer_if_needed() {
 		return 0
 	fi
 
-	echo "CodeTracer binaries missing; building sibling codetracer with direnv exec ..." >&2
-	if ! command -v direnv >/dev/null 2>&1; then
-		fail "direnv is required to build sibling codetracer for WDIO fixtures"
+	echo "CodeTracer binaries missing; building sibling codetracer with repro exec ..." >&2
+	if ! command -v repro >/dev/null 2>&1; then
+		fail "repro is required to build sibling codetracer for WDIO fixtures"
 	fi
 	(
 		cd "$CODETRACER_REPO"
-		direnv exec . just build-once
+		repro exec . -- just build-once
 	)
 }
 

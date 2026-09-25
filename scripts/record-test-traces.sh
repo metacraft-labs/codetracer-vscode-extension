@@ -122,7 +122,7 @@ print_record_failure() {
 
 ct_record_command_text() {
 	format_command \
-		direnv exec "$CODETRACER_PATH" \
+		repro exec "$CODETRACER_PATH" -- \
 		bash -lc 'PATH="$1:$PATH"; if [ -x "$1/ct-mcr" ]; then export CODETRACER_CT_MCR_PATH="$1/ct-mcr"; fi; exec "$2" record "-o=$3" "$4"' \
 		bash "$REPO_ROOT/.ct-bin" "$CT" "$1" "$2"
 }
@@ -131,7 +131,7 @@ run_ct_record() {
 	local trace_dir="$1"
 	local program="$2"
 
-	direnv exec "$CODETRACER_PATH" \
+	repro exec "$CODETRACER_PATH" -- \
 		bash -lc 'PATH="$1:$PATH"; if [ -x "$1/ct-mcr" ]; then export CODETRACER_CT_MCR_PATH="$1/ct-mcr"; fi; exec "$2" record "-o=$3" "$4"' \
 		bash "$REPO_ROOT/.ct-bin" "$CT" "$trace_dir" "$program"
 }
@@ -151,10 +151,10 @@ configure_nim_compiler() {
 
 	if [ -x "$nim_repo/bin/nim" ]; then
 		nim_exe="$nim_repo/bin/nim"
-	elif command -v direnv >/dev/null 2>&1 && [ -f "$nim_repo/.envrc" ]; then
+	elif command -v repro >/dev/null 2>&1 && { [ -f "$nim_repo/repro.nim" ] || [ -f "$nim_repo/.envrc" ]; }; then
 		nim_exe="$(
 			cd "$nim_repo" &&
-				direnv exec . bash -lc 'command -v nim' 2>/dev/null || true
+				repro exec . -- bash -lc 'command -v nim' 2>/dev/null || true
 		)"
 	fi
 

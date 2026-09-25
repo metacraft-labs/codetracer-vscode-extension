@@ -1,4 +1,4 @@
-In the start always start the devShell with `nix develop` and run everything that you do in this development environment
+Activate the flake-backed environment with `repro allow` and the repro shell hook. Run development commands inside this environment (or use `repro exec -- <command>`).
 
 # Build Process
 

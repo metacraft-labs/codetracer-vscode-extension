@@ -122,7 +122,7 @@ run_value_origin_regenerator() {
 	set +e
 	(
 		cd "$codetracer_root"
-		direnv exec . env "${preserved_env[@]}" bash "$script"
+		repro exec . -- env "${preserved_env[@]}" bash "$script"
 	)
 	local status=$?
 	set -e

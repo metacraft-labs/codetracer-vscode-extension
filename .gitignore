@@ -55,3 +55,6 @@ test/fixtures/stylus-fund-trace/files/
 
 # System files
 Thumbs.db
+
+# Repro development environment cache
+.repro/
