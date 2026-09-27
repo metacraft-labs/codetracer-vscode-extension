@@ -58,3 +58,15 @@ Thumbs.db
 
 # Repro development environment cache
 .repro/
+
+# Stray copy of the DAP server binary.
+#
+# `just build` produces the real one at ./backend/db-backend, and `backend` is
+# ignored above. An 8,487,024 B ELF copy sat at db-backend/db-backend, added in
+# this repo's first feature commit (7f04ffd) and never touched again. Nothing in
+# the tree referenced the path, and `.vscodeignore`'s `db-backend/` entry is
+# commented out, so the stale copy was being packaged into every .vsix. It
+# linked an absolute
+# /nix/store/65h17wjrrlsj2rj540igylrx7fqcd6vq-glibc-2.40-36/lib/ld-linux-x86-64.so.2
+# interpreter, which does not exist even on the machine that measured it.
+db-backend/
