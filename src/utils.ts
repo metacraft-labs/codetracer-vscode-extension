@@ -155,9 +155,27 @@ function getThirdParty(
     vscode.Uri.joinPath(
       context.extensionUri,
       "media",
-      "third_party",
       "jstree.min.js"
     )
+  );
+}
+
+function getPublicUri(
+  webview: vscode.Webview,
+  context: vscode.ExtensionContext,
+  ...pathSegments: string[]
+): vscode.Uri {
+  return webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "public", ...pathSegments)
+  );
+}
+
+function getSpaceGroteskUri(
+  webview: vscode.Webview,
+  context: vscode.ExtensionContext
+): vscode.Uri {
+  return webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "fonts", "SpaceGrotesk-VariableFont_wght.ttf")
   );
 }
 
@@ -189,6 +207,17 @@ function getCommonHtml(
   const frontendBundle = getFrontendBundle(webview, context);
   const thirdParty = getThirdParty(webview, context);
   const defaultDarkTheme = getDarkTheme(webview, context);
+  const fontAwesome = getPublicUri(webview, context, "third_party", "font-awesome.min.css");
+  const vexCss = getPublicUri(webview, context, "third_party", "vex.css");
+  const vexTheme = getPublicUri(webview, context, "third_party", "vex-theme-os.css");
+  const goldenLayoutBase = getPublicUri(webview, context, "third_party", "goldenlayout.css");
+  const goldenLayoutTheme = getPublicUri(webview, context, "third_party", "goldenlayout-light-theme.css");
+  const jstreeDefault = getPublicUri(webview, context, "third_party", "jstree_default.css");
+  const bootstrap = getPublicUri(webview, context, "third_party", "bootstrap-4.3.1-dist", "css", "bootstrap.css");
+  const bootstrapGrid = getPublicUri(webview, context, "third_party", "bootstrap-4.3.1-dist", "css", "bootstrap-grid.css");
+  const nouislider = getPublicUri(webview, context, "third_party", "nouislider.css");
+  const deviconBase = getPublicUri(webview, context, "third_party", "devicon-base.css");
+  const spaceGrotesk = getSpaceGroteskUri(webview, context);
   const messageHandlerScript = messageHandler
     ? `\n        ${messageHandler}`
     : "";
@@ -232,7 +261,26 @@ function getCommonHtml(
             <head>
                     <meta charset='utf-8'>
                     <title>CodeTracer</title>
+                    <link rel='stylesheet' href='${fontAwesome}'>
+                    <link rel='stylesheet' href='${vexCss}'>
+                    <link rel='stylesheet' href='${vexTheme}'>
+                    <link rel='stylesheet' href='${goldenLayoutBase}'>
+                    <link rel='stylesheet' href='${goldenLayoutTheme}'>
+                    <link rel='stylesheet' href='${jstreeDefault}'>
+                    <link rel='stylesheet' href='${bootstrap}'>
+                    <link rel='stylesheet' href='${bootstrapGrid}'>
+                    <link rel='stylesheet' href='${nouislider}'>
+                    <link rel='stylesheet' href='${deviconBase}'>
                     <link id='theme' rel='stylesheet' href='${defaultDarkTheme}'>
+                    <style>
+                      @font-face {
+                        font-family: 'SpaceGroteskVs';
+                        src: url('${spaceGrotesk}') format('truetype');
+                      }
+                      body {
+                        font-family: 'SpaceGroteskVs', sans-serif !important;
+                      }
+                    </style>
             <script>
                     inElectron = false
                     loadScripts = true
@@ -764,7 +812,7 @@ export function getTerminalOutputWebviewContent(
   return getCommonHtml(
     webview,
     context,
-    "terminalOutputComponent",
+    "terminalComponent",
     "makeTerminalOutputComponentForExtension",
     `let viewsApi = newVsCodeViewApi("terminal view api", vscode, window);
     window.viewsApi = viewsApi; // for easier debugging

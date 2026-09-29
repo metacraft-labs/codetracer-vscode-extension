@@ -1,3 +1,4 @@
+import "./window-shim";
 import * as vscode from "vscode";
 import { getOrCreatePanel, createTracepointPanel, createFlowPanel } from "./panelManager";
 import * as utils from "./utils";

@@ -1,4 +1,5 @@
 /// <reference path="../vscode.proposed.editorInsets.d.ts" />
+import "./window-shim";
 import * as vscode from "vscode";
 import {
   initPanels,
@@ -48,11 +49,14 @@ let pendingLaunchPanels = false;
 let panelsInitialized = false;
 
 // CtEventKind values are defined in libs/codetracer/src/common/ct_event.nim.
+// IMPORTANT: Keep these in sync with the Nim enum. CtUpdateExpansion (64) and
+// CtUpdateExpansionResponse (65) were added after this file was originally written,
+// shifting InternalLastCompleteMove from 64 to 66.
 const enum CtEventKind {
   CtCompleteMove = 8,
   CtLoadFlow = 56,
   CtUpdatedFlow = 57,
-  InternalLastCompleteMove = 64,
+  InternalLastCompleteMove = 66,
 }
 
 const enum CtFlowMode {
@@ -914,6 +918,21 @@ function isBeamSourceFile(filePath: string, languageId: string): boolean {
   return [".ex", ".exs", ".erl", ".hrl"].includes(ext);
 }
 
+/**
+ * Detect script/file-based languages whose recorders expect the source file
+ * path rather than a project directory.  These extensions map to language
+ * entries in ct's LANGS table (language_detection.nim) but have no matching
+ * detectFolderLang heuristic, so passing a workspace root would result in
+ * LangUnknown and a "no trace folder" failure.
+ */
+function isScriptSourceFile(filePath: string, languageId: string): boolean {
+  if (["python", "javascript", "typescript", "shellscript", "php"].includes(languageId)) {
+    return true;
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  return [".py", ".js", ".mjs", ".ts", ".sh", ".bash", ".zsh", ".php"].includes(ext);
+}
+
 function isRrTraceFolder(traceFolder: string): boolean {
   return fs.existsSync(path.join(traceFolder, "rr"));
 }
@@ -958,28 +977,45 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
         // recorder can locate the surrounding Mix/rebar3 project. Detection
         // matches the languages registered in package.json.debuggers.languages.
         const isBeamFile = isBeamSourceFile(filePath, editor.document.languageId);
+        // Script/file-based languages pass the source file path directly to
+        // `ct record` because detectFolderLang does not detect them from a
+        // workspace directory. Python: `ct record <script.py>`.
+        // JavaScript/TypeScript and shell scripts follow the same pattern.
+        const isScriptFile = isScriptSourceFile(filePath, editor.document.languageId);
         const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
         const workspaceRoot = workspaceFolder?.uri.fsPath;
+
+        const loggedGetCurrentTrace = async (workDir: string): Promise<TraceInfo | undefined> => {
+          console.log('[CodeTracer] running ct record: exe =', codetracerExe, 'workDir =', workDir);
+          const result = await getCurrentTrace(codetracerExe, workDir, isNixOS);
+          console.log('[CodeTracer] ct record result:', result);
+          return result;
+        };
 
         if (isRubyFile) {
           const startDir = path.dirname(filePath);
           const entryPoint = findRubyEntryPoint(startDir, workspaceRoot, filePath);
-          return await getCurrentTrace(codetracerExe, entryPoint, isNixOS);
+          return await loggedGetCurrentTrace(entryPoint);
         }
 
         if (!isNoirFile) {
           if (isRrFile) {
             // RR-based recordings need the full source file path.
-            return await getCurrentTrace(codetracerExe, filePath, isNixOS);
+            return await loggedGetCurrentTrace(filePath);
           }
           if (isBeamFile) {
             // BEAM materialized recordings (Elixir/Erlang) need the file
             // path so prepare-beam-fixtures.sh / Mix can locate the project.
-            return await getCurrentTrace(codetracerExe, filePath, isNixOS);
+            return await loggedGetCurrentTrace(filePath);
+          }
+          if (isScriptFile) {
+            // Script languages (Python, JS/TS, shell) are detected by file
+            // extension; ct record expects the script path, not a workspace dir.
+            return await loggedGetCurrentTrace(filePath);
           }
           const rootPath = workspaceRoot ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath;
           if (rootPath) {
-            return await getCurrentTrace(codetracerExe, rootPath, isNixOS);
+            return await loggedGetCurrentTrace(rootPath);
           }
           vscode.window.showErrorMessage("No workspace found for the active file.");
           return;
@@ -988,7 +1024,7 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
         const startDir = path.dirname(filePath);
 
         if (hasNargoToml(startDir)) {
-          return await getCurrentTrace(codetracerExe, startDir, isNixOS);
+          return await loggedGetCurrentTrace(startDir);
         }
 
         const action = await vscode.window.showWarningMessage(
@@ -1006,7 +1042,7 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
           return;
         }
 
-        return await getCurrentTrace(codetracerExe, nargoRoot, isNixOS);
+        return await loggedGetCurrentTrace(nargoRoot);
       }
       else {
         vscode.window.showErrorMessage("No active text editor!");
@@ -1014,6 +1050,13 @@ async function runCurrent(codetracerExe: string, isNixOS: boolean): Promise<stri
     }
   );
 
+  if (trace !== undefined && !trace.outputFolder) {
+    vscode.window.showErrorMessage(
+      'CodeTracer: recording failed — no trace folder was returned. ' +
+      'Open Help → Toggle Developer Tools and check the Console tab for details.'
+    );
+    return undefined;
+  }
   return trace?.outputFolder;
 }
 
@@ -1043,7 +1086,7 @@ async function initPanelsIfNeeded(context: vscode.ExtensionContext, viewsApi: Me
   // sequential panel creation is still in flight does not create panels twice.
   panelsInitialized = true;
   const panels = await initPanels(context, viewsApi);
-  (vscode.window as any).panels = panels; // easier debugging
+  (vscode.window as any).panels = panels;
 }
 
 async function loadFlow() {
@@ -1205,8 +1248,26 @@ async function openTraceSourceFile(traceFolder: string): Promise<boolean> {
   }
 }
 
+function getRecentTracesFromFilesystem(): TraceInfo[] {
+  try {
+    const storeDir = path.join(os.homedir(), '.local', 'share', 'codetracer');
+    return fs.readdirSync(storeDir, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => {
+        const p = path.join(storeDir, e.name);
+        let mtime = 0;
+        try { mtime = fs.statSync(p).mtimeMs; } catch {}
+        return { outputFolder: p, program: e.name, mtime };
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
 async function pickTraceFolder(codetracerExe: string, isNixOS: boolean): Promise<string | undefined> {
-  const recentTraces: TraceInfo[] | undefined = await vscode.window.withProgress(
+  let recentTraces: TraceInfo[] | undefined = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
       title: "Loading recent traces...",
@@ -1216,6 +1277,12 @@ async function pickTraceFolder(codetracerExe: string, isNixOS: boolean): Promise
       return await getRecentTraces(codetracerExe, isNixOS);
     }
   );
+  // TypeScript-side fallback: scan the codetracer store directory directly
+  // if the Nim layer returned nothing (e.g. DB migration cleared the index
+  // or the require() calls inside the Nim emit block failed in this host).
+  if (!recentTraces || recentTraces.length === 0) {
+    recentTraces = getRecentTracesFromFilesystem();
+  }
   if (!recentTraces || recentTraces.length === 0) {
     vscode.window.showWarningMessage("No recent trace folders found.");
     return;
@@ -1344,9 +1411,12 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     // Setup middleware
     setupMiddlewareApis(dapVsCodeApi, viewsApi);
 
-    // Initialize panels
-    const panels = initPanels(context, viewsApi);
-    (vscode.window as any).panels = panels; // easier debugging
+    // Initialize panels — use initPanelsIfNeeded so panelsInitialized is set
+    // to true before startDebugging fires onDidStartDebugSession, which also
+    // calls initPanelsIfNeeded.  Without this guard both code paths would call
+    // initPanels, leading to "command already exists" errors and duplicate panels.
+    await initPanelsIfNeeded(context, viewsApi);
+    (vscode.window as any).panels = (vscode.window as any).panels; // set by initPanelsIfNeeded
 
     const editor = vscode.window.activeTextEditor;
     if (!editor && (loadMode === LoadMode.Trace || loadMode === LoadMode.Tx)) {
@@ -1479,6 +1549,33 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       console.log('[CodeTracer] Discovered ct binary from PATH:', ctFromPath);
     }
   }
+
+  // VS Code's PATH is often stripped of nix/direnv entries; check common
+  // development build locations as a fallback so users can run recordings
+  // without having to set codetracer.runnablePath manually.
+  if (!valid) {
+    const devCandidates: string[] = [];
+    // Relative to each workspace folder, walk up looking for build-debug/bin/ct.
+    for (const wf of vscode.workspace.workspaceFolders ?? []) {
+      let dir = wf.uri.fsPath;
+      for (let i = 0; i < 6; i++) {
+        devCandidates.push(path.join(dir, 'src', 'build-debug', 'bin', 'ct'));
+        const parent = path.dirname(dir);
+        if (parent === dir) { break; }
+        dir = parent;
+      }
+    }
+    for (const candidate of devCandidates) {
+      if (await isExecutable(candidate)) {
+        codetracerExe = candidate;
+        valid = true;
+        console.log('[CodeTracer] Discovered ct binary from dev build:', candidate);
+        break;
+      }
+    }
+  }
+
+  console.log('[CodeTracer] reinitCommands: codetracerExe =', codetracerExe, 'valid =', valid);
 
   // The Nim-compiled ct_vscode.js may not be available in development/test
   // environments that only run `npm run compile` (TypeScript-only build).
