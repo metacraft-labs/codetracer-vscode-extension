@@ -52,7 +52,7 @@
         "codetracer.marketingListenerEnabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable the CodeTracer marketing-command TCP listener (127.0.0.1) used by the GuiAssert recording pipeline. Off by default — only turn on for video recording sessions."
+          "description": "Enable the CodeTracer marketing-command TCP listener (127.0.0.1) used by the GuiAssert recording pipeline. Off by default \u2014 only turn on for video recording sessions."
         },
         "codetracer.marketingListenerPort": {
           "type": "number",
@@ -241,7 +241,6 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "just build",
     "compile": "echo 'ERROR: npm run compile only compiles TypeScript and produces an incomplete build.' && echo 'Use `just build` for a full build (Nim + Rust + TypeScript).' && echo 'Use `npm run compile:ts` if you only need TypeScript type-checking.' && exit 1",
     "compile:ts": "tsc -p ./",
     "compile:wdio": "tsc -p ./tsconfig.wdio.json --noEmit",
@@ -257,7 +256,8 @@
     "test:wdio:solidity:deep": "just test-wdio-solidity-deep",
     "test:wdio:erlang": "just test-wdio-erlang",
     "test:wdio:beam:deep": "just test-wdio-beam-deep",
-    "test:wdio:value-origin": "just test-wdio-value-origin"
+    "test:wdio:value-origin": "just test-wdio-value-origin",
+    "vscode:prepublish": "just build"
   },
   "devDependencies": {
     "@axe-core/webdriverio": "^4.11.3",

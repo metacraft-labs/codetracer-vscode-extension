@@ -6,6 +6,10 @@ export interface PanelConfig {
     id: PanelId;
     title: string;
     retainContextWhenHidden?: boolean;
+    // When true (the default) the panel is created without stealing focus from
+    // the currently-active panel.  The caller is responsible for explicitly
+    // calling panel.reveal() when it wants the panel to become active.
+    preserveFocus?: boolean;
     getContent?: (panel: vscode.Webview, context: vscode.ExtensionContext) => string;
     getFlowContent?: (panel: vscode.Webview, context: vscode.ExtensionContext, flowLine: number, flowFile: string) => string;
     getTraceContent?: (panel: vscode.Webview, context: vscode.ExtensionContext, traceLine: number, traceFile: string, traceId: number) => string;
@@ -36,7 +40,8 @@ export function createFlowPanel(
             enableScripts: true,
             localResourceRoots: [
                 vscode.Uri.joinPath(context.extensionUri, "media"),
-                vscode.Uri.joinPath(context.extensionUri, "public")
+                vscode.Uri.joinPath(context.extensionUri, "public"),
+                vscode.Uri.joinPath(context.extensionUri, "libs"),
             ],
         }
     );
@@ -71,7 +76,8 @@ export function createTracepointPanel(
             enableScripts: true,
             localResourceRoots: [
                 vscode.Uri.joinPath(context.extensionUri, "media"),
-                vscode.Uri.joinPath(context.extensionUri, "public")
+                vscode.Uri.joinPath(context.extensionUri, "public"),
+                vscode.Uri.joinPath(context.extensionUri, "libs"),
             ],
         }
     );
@@ -103,7 +109,7 @@ export function getOrCreatePanel(
     const panel = vscode.window.createWebviewPanel(
         config.id,
         config.title,
-        vscode.ViewColumn.Two,
+        { viewColumn: vscode.ViewColumn.Two, preserveFocus: config.preserveFocus ?? true },
         {
             enableScripts: true,
             // `retainContextWhenHidden: false` so a hidden panel releases
@@ -117,6 +123,7 @@ export function getOrCreatePanel(
             localResourceRoots: [
                 vscode.Uri.joinPath(context.extensionUri, "media"),
                 vscode.Uri.joinPath(context.extensionUri, "public"),
+                vscode.Uri.joinPath(context.extensionUri, "libs"),
             ],
         }
     );
