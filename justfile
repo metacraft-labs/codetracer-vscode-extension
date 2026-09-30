@@ -73,11 +73,25 @@ build:
         rm -rf ./media/third_party
         ln -s $(pwd)/libs/codetracer/src/public/third_party media/third_party
     fi;
-    if [[ ! -e ./media/styles/default_dark_theme_extension.css && ! -f ./media/styles/default_dark_theme_extension.css ]]; then
-        rm -f ./media/styles/default_dark_theme_extension.css
-        mkdir -p ./media/styles
-        ln -s $(pwd)/libs/codetracer/src/build-debug/frontend/styles/default_dark_theme_extension.css ./media/styles/default_dark_theme_extension.css
-    fi;
+    # Always copy (not symlink) the CSS so we can patch the relative URLs below.
+    # The Electron app's build puts this CSS at build-debug/frontend/styles/ where
+    # relative paths like ../../../../libs/ resolve correctly from that real location.
+    # In a VS Code webview the CSS is served at media/styles/ so we must adjust the
+    # paths: ../../../../libs/codetracer-design-system/ → ../../libs/codetracer/libs/
+    # codetracer-design-system/ and ../../../public/resources/origin-icons/ →
+    # ../../public/resources/origin-icons/ (where origin-icons is copied below).
+    mkdir -p ./media/styles
+    cp libs/codetracer/src/build-debug/frontend/styles/default_dark_theme_extension.css \
+       ./media/styles/default_dark_theme_extension.css
+    sed -i \
+        -e 's|url("\.\./\.\./\.\./public/resources/origin-icons/|url("../../public/resources/origin-icons/|g' \
+        -e 's|url("\.\./\.\./\.\./\.\./libs/codetracer-design-system/|url("../../libs/codetracer/libs/codetracer-design-system/|g' \
+        ./media/styles/default_dark_theme_extension.css
+    # Copy origin-icons from the codetracer build so ../../public/resources/origin-icons/
+    # resolves correctly when the CSS is served from media/styles/.
+    rm -rf ./public/resources/origin-icons
+    cp -r libs/codetracer/src/build-debug/public/resources/origin-icons \
+          ./public/resources/origin-icons
     if [[ ! -e ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf && ! -f ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf ]]; then
         rm -f ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf
         mkdir -p ./media/fonts
