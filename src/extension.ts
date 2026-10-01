@@ -17,7 +17,7 @@ import * as os from "os";
 import * as fs from "fs";
 import { access, readFile, readdir, stat } from "fs/promises";
 import * as path from 'path';
-import { readCtfsMetaDat } from "./ctfs";
+import { readCtfsTrace } from "./ctfs";
 import {
   DapVsCodeApi,
   setupVsCodeExtensionViewsApi,
@@ -1148,21 +1148,23 @@ async function findFirstTraceSourceFile(traceFolder: string): Promise<string | u
   // Prefer explicit program paths, then trace paths, then any bundled file copy.
   const candidates: string[] = [];
 
-  // Current CTFS-only recorders carry the source file list inside the
-  // `.ct` container's binary `meta.dat`; the legacy JSON sidecars
+  // Current CTFS-only recorders carry the program in the `.ct`
+  // container's binary `meta.dat` and the source file list in its
+  // `paths.dat` interning table; the legacy JSON sidecars
   // (trace_metadata.json / trace_paths.json) are no longer written.
   // Read the container first and surface the user's program, then any
   // remaining (non-runtime) source paths it references.
-  const ctfsMeta = readCtfsMetaDat(traceFolder);
-  if (ctfsMeta) {
+  const ctfsTrace = readCtfsTrace(traceFolder);
+  if (ctfsTrace) {
+    const ctfsMeta = ctfsTrace.meta;
     if (ctfsMeta.program) {
       const programPath = ctfsMeta.workdir && !path.isAbsolute(ctfsMeta.program)
         ? path.join(ctfsMeta.workdir, ctfsMeta.program)
         : ctfsMeta.program;
       candidates.push(programPath);
     }
-    const userPaths = ctfsMeta.paths.filter((p) => !looksLikeRuntimeSource(p));
-    const runtimePaths = ctfsMeta.paths.filter((p) => looksLikeRuntimeSource(p));
+    const userPaths = ctfsTrace.paths.filter((p) => !looksLikeRuntimeSource(p));
+    const runtimePaths = ctfsTrace.paths.filter((p) => looksLikeRuntimeSource(p));
     candidates.push(...userPaths, ...runtimePaths);
   }
 

@@ -1,21 +1,21 @@
 /**
- * Minimal CTFS binary container + `meta.dat` reader.
+ * Minimal CTFS binary container + `meta.dat` + `paths.dat` reader.
  *
  * Current CodeTracer recorders emit a single `.ct` CTFS container per
  * trace; the legacy `trace_metadata.json` / `trace_paths.json` sidecars
- * are no longer produced. The source file list a trace references lives
- * inside the container's internal `meta.dat` file (CTMD format).
+ * are no longer produced. The program and working directory live in the
+ * container's internal `meta.dat` (CTMD); the trace's source paths live in
+ * the `paths.dat` + `paths.off` interning table, and only there.
  *
- * This module implements the read-only subset of the CTFS v2/v3/v4
- * binary container needed to extract `meta.dat`, plus the `meta.dat`
- * (CTMD v4) parser. It is a faithful TypeScript port of the Rust
- * reference readers:
- *   - codetracer/src/db-backend/src/ctfs_trace_reader/ctfs_container.rs
- *   - codetracer/src/db-backend/src/ctfs_trace_reader/meta_dat.rs
+ * This module implements the read-only subset of the CTFS version 5
+ * container needed to extract those members, the `meta.dat` version 6
+ * header and body, and the three `paths.dat` record layouts.
  *
- * Specs:
- *   - codetracer-specs/Trace-Files/CTFS-Binary-Format.md
- *   - codetracer-specs/Trace-Files (meta.dat §8)
+ * Specs (codetracer-trace-format-spec):
+ *   - ctfs-container.md §1, §2 ("`MapBlock` has three forms", "Older
+ *     versions are refused"), §4 (block resolution, null pointers)
+ *   - internal-files.md §"Metadata (meta.dat)", §"Interning Tables" and
+ *     the `paths.dat` layouts under it
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -26,45 +26,49 @@ import * as path from "path";
 const CTFS_MAGIC = Buffer.from([0xc0, 0xde, 0x72, 0xac, 0xe2]);
 
 /**
- * Accepted range for the CTFS *container* version — the byte at offset 5
- * of the `.ct` file.
+ * The one CTFS *container* version this reader reads — the byte at offset
+ * 5 of the `.ct` file.
  *
- * This is a different number from the `meta.dat` schema version (the u16
- * at offset 4 of the internal `meta.dat` payload, see
- * {@link SUPPORTED_META_DAT_VERSIONS}), and the two move independently.
- * The container version describes the block/mapping layout that locates
- * internal files; a range is right here because every version in it
- * addresses blocks the same way, so reading a v2 container yields the
- * same bytes a v4 one would. It says nothing about what those bytes mean,
- * which is why it cannot stand in for the `meta.dat` gate.
+ * This is a different number from the `meta.dat` schema version (see
+ * {@link SUPPORTED_META_DAT_VERSION}); the two move independently.
+ * Version 5 gave `FileEntry.MapBlock` three forms (empty, direct-tagged,
+ * mapped). A version 4 container happens to decode under version 5's
+ * rules, but `ctfs-container.md` §2 ("Older versions are refused")
+ * requires refusing it by name so that no writer of the old layout stays
+ * alive.
  */
-const CTFS_VERSION_MIN = 2;
-const CTFS_VERSION_MAX = 4;
-const HEADER_SIZE = 8;
-const EXTENDED_HEADER_SIZE = 8;
+export const SUPPORTED_CTFS_CONTAINER_VERSION = 5;
+
+/** Bit 63 of `FileEntry.MapBlock`: the member's only data block follows. */
+const CTFS_DIRECT = 1n << 63n;
+const HEADER_SIZE = 16;
 const FILE_ENTRY_SIZE = 24;
 const MAX_MAPPING_LEVELS = 5;
 
 interface CtfsFileEntry {
-  size: number;
-  mapBlock: number;
+  size: bigint;
+  mapBlock: bigint;
 }
 
 /**
- * Read-only reader for a CTFS v2/v3/v4 binary container.
+ * Read-only reader for a CTFS version 5 binary container.
  *
  * Loads the whole file into memory and resolves named internal files by
- * walking the hierarchical block-mapping structure.
+ * the form of their `MapBlock` (`ctfs-container.md` §2): `0` is an empty
+ * member, a value with bit 63 set names the member's only data block, and
+ * any other value is the root of a hierarchical block mapping (§4).
  */
-class CtfsContainer {
+export class CtfsContainer {
   private readonly data: Buffer;
   private readonly blockSize: number;
+  private readonly blockCount: bigint;
   private readonly entriesPerBlock: number;
   private readonly files: Map<string, CtfsFileEntry>;
 
   private constructor(data: Buffer, blockSize: number, files: Map<string, CtfsFileEntry>) {
     this.data = data;
     this.blockSize = blockSize;
+    this.blockCount = BigInt(Math.ceil(data.length / blockSize));
     this.entriesPerBlock = Math.floor(blockSize / 8);
     this.files = files;
   }
@@ -76,15 +80,18 @@ class CtfsContainer {
 
   /** Parse a CTFS container from raw bytes. */
   static fromBytes(data: Buffer): CtfsContainer {
-    if (data.length < HEADER_SIZE + EXTENDED_HEADER_SIZE) {
+    if (data.length < HEADER_SIZE) {
       throw new Error(`CTFS container too small (${data.length} bytes)`);
     }
     if (!data.subarray(0, 5).equals(CTFS_MAGIC)) {
       throw new Error("not a valid CTFS container (bad magic bytes)");
     }
     const version = data[5];
-    if (version < CTFS_VERSION_MIN || version > CTFS_VERSION_MAX) {
-      throw new Error(`unsupported CTFS version ${version}`);
+    if (version !== SUPPORTED_CTFS_CONTAINER_VERSION) {
+      throw new Error(
+        `unsupported CTFS container version ${version} ` +
+        `(this reader reads version ${SUPPORTED_CTFS_CONTAINER_VERSION}); re-record the trace`
+      );
     }
 
     const blockSize = data.readUInt32LE(8);
@@ -92,25 +99,30 @@ class CtfsContainer {
     if (blockSize !== 1024 && blockSize !== 2048 && blockSize !== 4096) {
       throw new Error(`invalid CTFS block size: ${blockSize}`);
     }
+    // `MaxRootEntries = 0` auto-fills block 0 (`ctfs-container.md` §1). The
+    // entry array starts right after the header, as every writer places it.
+    const entryCount = maxRootEntries === 0
+      ? Math.floor((blockSize - HEADER_SIZE) / FILE_ENTRY_SIZE)
+      : maxRootEntries;
 
     const files = new Map<string, CtfsFileEntry>();
-    const entryStart = HEADER_SIZE + EXTENDED_HEADER_SIZE;
-    for (let i = 0; i < maxRootEntries; i++) {
-      const offset = entryStart + i * FILE_ENTRY_SIZE;
-      if (offset + FILE_ENTRY_SIZE > data.length) break;
-      const size = data.readBigUInt64LE(offset);
-      const mapBlock = data.readBigUInt64LE(offset + 8);
+    for (let i = 0; i < entryCount; i++) {
+      const offset = HEADER_SIZE + i * FILE_ENTRY_SIZE;
+      if (offset + FILE_ENTRY_SIZE > data.length) {break;}
       const nameEncoded = data.readBigUInt64LE(offset + 16);
-      if (nameEncoded === 0n) continue;
+      if (nameEncoded === 0n) {continue;}
       files.set(base40Decode(nameEncoded), {
-        size: Number(size),
-        mapBlock: Number(mapBlock),
+        size: data.readBigUInt64LE(offset),
+        mapBlock: data.readBigUInt64LE(offset + 8),
       });
     }
     return new CtfsContainer(data, blockSize, files);
   }
 
-  /** Whether the container holds an internal file with this name. */
+  /**
+   * Whether the container holds an internal file with this name. An empty
+   * member (`(Size, MapBlock) = (0, 0)`) is present.
+   */
   hasFile(name: string): boolean {
     return this.files.has(name);
   }
@@ -118,32 +130,71 @@ class CtfsContainer {
   /** Read the full contents of a named internal file. */
   readFile(name: string): Buffer {
     const entry = this.files.get(name);
-    if (!entry) throw new Error(`CTFS internal file not found: ${name}`);
-    if (entry.size === 0) return Buffer.alloc(0);
-    if (entry.mapBlock === 0) {
-      throw new Error(`CTFS file '${name}' has size but no map block`);
+    if (!entry) {throw new Error(`CTFS internal file not found: ${name}`);}
+    const { size, mapBlock } = entry;
+
+    if (mapBlock === 0n) {
+      if (size === 0n) {return Buffer.alloc(0);}
+      throw new Error(
+        `CTFS file '${name}': null block pointer (MapBlock 0 with size ${size}); the container is damaged`
+      );
     }
-    const totalBlocks = Math.ceil(entry.size / this.blockSize);
-    const out = Buffer.alloc(entry.size);
+    if (size > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error(`CTFS file '${name}': size ${size} is too large to read`);
+    }
+    const length = Number(size);
+
+    if ((mapBlock & CTFS_DIRECT) !== 0n) {
+      if (size > BigInt(this.blockSize)) {
+        throw new Error(
+          `CTFS file '${name}': size ${size} is tagged as a direct member, ` +
+          `but one block holds at most ${this.blockSize} bytes`
+        );
+      }
+      const out = Buffer.alloc(length);
+      this.copyBlock(name, this.checkBlock(name, mapBlock & ~CTFS_DIRECT, "data block"), out, 0, length);
+      return out;
+    }
+
+    const totalBlocks = Math.ceil(length / this.blockSize);
+    const out = Buffer.alloc(length);
     let written = 0;
     for (let blockIndex = 0; blockIndex < totalBlocks; blockIndex++) {
-      const dataBlock = this.resolveBlock(entry.mapBlock, blockIndex);
-      if (dataBlock === 0) {
-        throw new Error(`CTFS file '${name}': unallocated block ${blockIndex}`);
-      }
-      const blockOffset = dataBlock * this.blockSize;
-      const toRead = Math.min(entry.size - written, this.blockSize);
-      if (blockOffset + toRead > this.data.length) {
-        throw new Error(`CTFS file '${name}': block extends past end of container`);
-      }
-      this.data.copy(out, written, blockOffset, blockOffset + toRead);
+      const dataBlock = this.resolveBlock(name, mapBlock, blockIndex);
+      const toRead = Math.min(length - written, this.blockSize);
+      this.copyBlock(name, dataBlock, out, written, toRead);
       written += toRead;
     }
     return out;
   }
 
-  /** Resolve a logical block index to a physical block number. */
-  private resolveBlock(rootMapBlock: number, logicalIndex: number): number {
+  /**
+   * Refuse a block number of `0` (the header and root directory, and the
+   * "unallocated" sentinel) or one past the container's end, before it is
+   * ever multiplied by the block size (`ctfs-container.md` §4).
+   */
+  private checkBlock(name: string, block: bigint, what: string): number {
+    if (block === 0n) {
+      throw new Error(`CTFS file '${name}': null ${what} pointer; the container is damaged`);
+    }
+    if (block >= this.blockCount) {
+      throw new Error(
+        `CTFS file '${name}': ${what} ${block} is past the end of the container (${this.blockCount} blocks)`
+      );
+    }
+    return Number(block);
+  }
+
+  private copyBlock(name: string, block: number, out: Buffer, at: number, length: number): void {
+    const start = block * this.blockSize;
+    if (start + length > this.data.length) {
+      throw new Error(`CTFS file '${name}': block ${block} extends past the end of the container`);
+    }
+    this.data.copy(out, at, start, start + length);
+  }
+
+  /** Resolve a logical block index through a mapping rooted at `rootMapBlock`. */
+  private resolveBlock(name: string, rootMapBlock: bigint, logicalIndex: number): number {
     const directEntries = this.entriesPerBlock - 1;
     let remaining = logicalIndex;
     let level = 1;
@@ -154,40 +205,29 @@ class CtfsContainer {
       levelCapacity *= directEntries;
     }
     if (remaining >= levelCapacity) {
-      throw new Error(`CTFS block index ${logicalIndex} exceeds maximum mapping depth`);
+      throw new Error(`CTFS file '${name}': block index ${logicalIndex} exceeds maximum mapping depth`);
     }
-    let currentBlock = rootMapBlock;
+    let currentBlock = this.checkBlock(name, rootMapBlock, "mapping block");
     for (let l = 1; l < level; l++) {
-      const indirect = this.readMappingEntry(currentBlock, this.entriesPerBlock - 1);
-      if (indirect === 0) throw new Error("CTFS: null indirect pointer in mapping hierarchy");
-      currentBlock = indirect;
+      currentBlock = this.checkBlock(
+        name, this.readMappingEntry(currentBlock, this.entriesPerBlock - 1), "chain"
+      );
     }
-    if (level === 1) {
-      return this.readMappingEntry(currentBlock, remaining);
+    for (let depth = level - 1; depth > 0; depth--) {
+      const subCapacity = Math.pow(directEntries, depth);
+      const subIndex = Math.floor(remaining / subCapacity);
+      remaining %= subCapacity;
+      currentBlock = this.checkBlock(name, this.readMappingEntry(currentBlock, subIndex), "child mapping block");
     }
-    return this.resolveMultilevel(currentBlock, remaining, level - 1);
+    return this.checkBlock(name, this.readMappingEntry(currentBlock, remaining), "data block");
   }
 
-  private resolveMultilevel(mapBlock: number, index: number, depth: number): number {
-    if (depth === 0) return this.readMappingEntry(mapBlock, index);
-    const directEntries = this.entriesPerBlock - 1;
-    const subCapacity = Math.pow(directEntries, depth);
-    const subIndex = Math.floor(index / subCapacity);
-    const subRemaining = index % subCapacity;
-    if (subIndex >= directEntries) {
-      throw new Error(`CTFS mapping sub-index ${subIndex} out of range`);
-    }
-    const next = this.readMappingEntry(mapBlock, subIndex);
-    if (next === 0) throw new Error("CTFS: null pointer in mapping sub-block");
-    return this.resolveMultilevel(next, subRemaining, depth - 1);
-  }
-
-  private readMappingEntry(blockNum: number, entryIndex: number): number {
+  private readMappingEntry(blockNum: number, entryIndex: number): bigint {
     const offset = blockNum * this.blockSize + entryIndex * 8;
     if (offset + 8 > this.data.length) {
       throw new Error(`CTFS mapping entry at block ${blockNum} index ${entryIndex} out of bounds`);
     }
-    return Number(this.data.readBigUInt64LE(offset));
+    return this.data.readBigUInt64LE(offset);
   }
 }
 
@@ -196,7 +236,7 @@ const BASE40_CHARS = "\x00" + "0123456789abcdefghijklmnopqrstuvwxyz./-";
 
 /** Decode a base40-packed `u64` (as bigint) into a file name string. */
 function base40Decode(encoded: bigint): string {
-  if (encoded === 0n) return "";
+  if (encoded === 0n) {return "";}
   const chars: number[] = [];
   let v = encoded;
   for (let i = 0; i < 12; i++) {
@@ -204,138 +244,186 @@ function base40Decode(encoded: bigint): string {
     v = v / 40n;
     chars.push(BASE40_CHARS.charCodeAt(idx));
   }
-  while (chars.length > 0 && chars[chars.length - 1] === 0) chars.pop();
+  while (chars.length > 0 && chars[chars.length - 1] === 0) {chars.pop();}
   return String.fromCharCode(...chars);
 }
 
-// ── meta.dat (CTMD v4) parser ───────────────────────────────────────────
+// ── meta.dat (CTMD v6) parser ───────────────────────────────────────────
 
 /** CTMD magic bytes for `meta.dat`: ASCII "CTMD". */
 const META_DAT_MAGIC = Buffer.from([0x43, 0x54, 0x4d, 0x44]);
 
 /**
- * The highest `meta.dat` schema version whose writer packed a line-only
- * `global_position_index` as `prefix_sums[file_id] + line`.
+ * The one `meta.dat` schema version this reader reads.
  *
- * Named rather than written as a literal `3` at the comparison site so
- * that the bound and the refusal it drives move together: a later version
- * that changed the packing again would raise it, and a reader comparing
- * against a stale literal would answer such a container instead of
- * refusing it.
+ * Version 6 removed the path list that versions 3 to 5 wrote after
+ * `recorder_id`, and always carries the u32 `flags_ext` word, so its
+ * header is 12 bytes. The bytes after `recorder_id` mean something
+ * different in every earlier version, and versions 3 and below also used
+ * a superseded `global_position_index` packing, so every other version is
+ * refused by name (internal-files.md §"Version History").
  */
-export const LAST_SHIFTED_GLOBAL_INDEX_VERSION = 3;
+export const SUPPORTED_META_DAT_VERSION = 6;
 
-/**
- * All `meta.dat` schema versions this reader accepts.
- *
- * **A singleton, and it has to be.** The tempting alternative — accept
- * `[3, 4]`, since v4 changed no field of the `meta.dat` header this
- * module decodes — reintroduces the exact defect the version bump exists
- * to close. v3 and v4 differ not in the bytes of `meta.dat` but in what
- * the rest of the container's step addresses MEAN: a v3 writer packed a
- * line-only `global_position_index` as `prefix_sums[file_id] + line`,
- * while v4 packs `prefix_sums[file_id] + (line - 1)`, the exact inverse
- * of the `line = q + 1` decode every reader performs. Both land INSIDE
- * the trace's own address space, so accepting a v3 container fails
- * nowhere: every step resolves to a real file and a real line, each one
- * exactly one line above where it was recorded.
- *
- * The `paths` list this module returns is the very array those addresses
- * are indexed against, so answering a v3 container here hands the
- * extension the file table for an address space it is about to read one
- * line high. Nothing else in the container distinguishes the two encodes
- * — `recorder_id` names the producer, not its address packing, and the
- * same recorders span the change — so the schema version is the only
- * field that can carry the distinction.
- *
- * Mirrors `SUPPORTED_VERSIONS` in
- * `codetracer/src/db-backend/src/ctfs_trace_reader/meta_dat.rs`, which is
- * also `&[4]` for the same reason. A back-compat shim is not merely
- * unimplemented, it is not constructible: subtracting one from every
- * address would correct a trace whose writer used the old packing, and
- * the version is precisely what would have said that it did. Pre-1.0, v3
- * containers are re-recorded rather than read.
- */
-export const SUPPORTED_META_DAT_VERSIONS: readonly number[] = [4];
+const META_DAT_HEADER_SIZE = 12;
 
-/** Decoded subset of a CTFS `meta.dat` payload (CTMD v4). */
+/** `meta.dat` flag bit 4: `paths.dat` records are in Layout A. */
+export const FLAG_HAS_COLUMN_AWARE_STEPS = 1 << 4;
+/** `meta.dat` flag bit 14: every `paths.dat` record carries a line count. */
+export const FLAG_HAS_LINE_COUNT_TABLE = 1 << 14;
+/** The `flags_ext` bits this reader implements: bit 0, `SourceReload`. */
+const KNOWN_FLAGS_EXT = 0x1;
+
+/** Decoded subset of a CTFS `meta.dat` payload (CTMD v6). */
 export interface CtfsMetaDat {
   /** Program path or identifier, exactly as recorded. */
   program: string;
   /** Working directory of the recorded program. */
   workdir: string;
-  /** Source file paths referenced by the trace. */
-  paths: string[];
+  /** The u16 `flags` word; bits 4 and 14 select the `paths.dat` layout. */
+  flags: number;
+  /** The u32 `flags_ext` word. */
+  flagsExt: number;
 }
 
-/** Cursor for sequential decoding of a `meta.dat` buffer. */
+/** Cursor for sequential decoding of a buffer. */
 interface Cursor {
   pos: number;
 }
 
-/** Decode one unsigned LEB128 varint. */
-function decodeVarint(buf: Buffer, cur: Cursor): number {
+/** Decode one unsigned LEB128 varint as a bigint. */
+function decodeVarintBig(buf: Buffer, cur: Cursor, what: string): bigint {
   let result = 0n;
   let shift = 0n;
   while (true) {
-    if (cur.pos >= buf.length) throw new Error("meta.dat: varint EOF");
+    if (cur.pos >= buf.length) {throw new Error(`${what}: varint EOF`);}
     const byte = buf[cur.pos++];
     result |= BigInt(byte & 0x7f) << shift;
-    if ((byte & 0x80) === 0) return Number(result);
+    if ((byte & 0x80) === 0) {return result;}
     shift += 7n;
-    if (shift >= 64n) throw new Error("meta.dat: varint too long");
+    if (shift >= 70n) {throw new Error(`${what}: varint too long`);}
   }
 }
 
+/** Decode one unsigned LEB128 varint that must fit a safe integer. */
+function decodeVarint(buf: Buffer, cur: Cursor, what = "meta.dat"): number {
+  const v = decodeVarintBig(buf, cur, what);
+  if (v > BigInt(Number.MAX_SAFE_INTEGER)) {throw new Error(`${what}: varint ${v} out of range`);}
+  return Number(v);
+}
+
 /** Decode one varint-length-prefixed UTF-8 string. */
-function readString(buf: Buffer, cur: Cursor): string {
-  const len = decodeVarint(buf, cur);
-  if (cur.pos + len > buf.length) throw new Error("meta.dat: string extends past EOF");
+function readString(buf: Buffer, cur: Cursor, what = "meta.dat"): string {
+  const len = decodeVarint(buf, cur, what);
+  if (cur.pos + len > buf.length) {throw new Error(`${what}: string extends past EOF`);}
   const s = buf.toString("utf8", cur.pos, cur.pos + len);
   cur.pos += len;
   return s;
 }
 
 /**
- * Parse the leading fields of a binary `meta.dat` (CTMD v4) payload.
+ * Parse a binary `meta.dat` (CTMD v6) payload up to `recorder_id`.
  *
- * Only the prefix up to and including the `paths` block is decoded — the
- * optional MCR / replay-launch / layout-snapshot / filter-provenance
- * trailers are irrelevant to source-file discovery and are skipped.
+ * The flag-gated blocks that may follow `recorder_id` are irrelevant to
+ * source-file discovery and are not decoded. Source paths are not in
+ * `meta.dat` at version 6; read them with {@link parsePathsDat}.
  *
- * Throws on any version outside {@link SUPPORTED_META_DAT_VERSIONS}.
+ * Throws on any version other than {@link SUPPORTED_META_DAT_VERSION}, on
+ * a header shorter than 12 bytes, on an unknown `flags_ext` bit, and on a
+ * header that sets both bit 4 and bit 14.
  */
 export function parseMetaDat(buf: Buffer): CtfsMetaDat {
-  if (buf.length < 8) throw new Error("meta.dat: too short");
-  if (!buf.subarray(0, 4).equals(META_DAT_MAGIC)) {
+  if (buf.length >= 4 && !buf.subarray(0, 4).equals(META_DAT_MAGIC)) {
     throw new Error("meta.dat: bad magic (expected 'CTMD')");
   }
-  const version = buf.readUInt16LE(4);
-  if (!SUPPORTED_META_DAT_VERSIONS.includes(version)) {
-    const detail = version <= LAST_SHIFTED_GLOBAL_INDEX_VERSION
-      ? "its step addresses use the superseded global_position_index packing " +
-        "(prefix_sums[file_id] + line); reading them under the current decode " +
-        "would report every step one line high. Re-record the trace."
-      : "this reader predates that version.";
-    throw new Error(
-      `meta.dat: unsupported version ${version} ` +
-      `(supported: ${SUPPORTED_META_DAT_VERSIONS.join(", ")}) — ${detail}`
-    );
+  if (buf.length >= 6) {
+    const version = buf.readUInt16LE(4);
+    if (version !== SUPPORTED_META_DAT_VERSION) {
+      throw new Error(
+        `meta.dat: unsupported meta.dat version ${version} ` +
+        `(this reader reads version ${SUPPORTED_META_DAT_VERSION}); re-record the trace`
+      );
+    }
+  }
+  if (buf.length < META_DAT_HEADER_SIZE) {
+    throw new Error(`meta.dat: ${buf.length} bytes is shorter than its 12-byte header`);
+  }
+  const flags = buf.readUInt16LE(6);
+  const flagsExt = buf.readUInt32LE(8);
+  const unknownExt = flagsExt & ~KNOWN_FLAGS_EXT;
+  if (unknownExt !== 0) {
+    throw new Error(`meta.dat: flags_ext carries bits this reader does not implement: 0x${(unknownExt >>> 0).toString(16)}`);
+  }
+  if ((flags & FLAG_HAS_COLUMN_AWARE_STEPS) !== 0 && (flags & FLAG_HAS_LINE_COUNT_TABLE) !== 0) {
+    throw new Error("meta.dat: flag bits 4 and 14 are mutually exclusive, and both are set");
   }
 
-  const cur: Cursor = { pos: 8 };
-  // recording_id (UUIDv7 string) prepends program.
+  const cur: Cursor = { pos: META_DAT_HEADER_SIZE };
   readString(buf, cur); // recording_id — not needed here
   const program = readString(buf, cur);
   const argsCount = decodeVarint(buf, cur);
-  for (let i = 0; i < argsCount; i++) readString(buf, cur);
+  for (let i = 0; i < argsCount; i++) {readString(buf, cur);}
   const workdir = readString(buf, cur);
   readString(buf, cur); // recorder_id — not needed here
-  const pathsCount = decodeVarint(buf, cur);
-  const paths: string[] = [];
-  for (let i = 0; i < pathsCount; i++) paths.push(readString(buf, cur));
 
-  return { program, workdir, paths };
+  return { program, workdir, flags, flagsExt };
+}
+
+// ── paths.dat ───────────────────────────────────────────────────────────
+
+/**
+ * Decode the source-path interning table (`paths.dat` + `paths.off`) into
+ * paths in id order.
+ *
+ * The record layout is decided by the `meta.dat` flags, never by the
+ * record bytes (internal-files.md §"`paths.dat` line-count table"):
+ *   - neither bit: the record is the bare path bytes;
+ *   - bit 14: `path_len`, path, a non-zero `line_count`;
+ *   - bit 4 (Layout A): `path_len`, path, `line_count`, and `line_count`
+ *     zigzag-delta line lengths.
+ * A framed record must be consumed whole; leftover bytes are refused.
+ * Paths are not deduplicated: equal bytes under two ids are two versions.
+ */
+export function parsePathsDat(dat: Buffer, off: Buffer, flags: number): string[] {
+  if (off.length % 8 !== 0) {
+    throw new Error(`paths.off: ${off.length} bytes is not a whole number of u64 offsets`);
+  }
+  const count = off.length / 8;
+  const starts: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const o = off.readBigUInt64LE(i * 8);
+    const prev = i === 0 ? 0n : BigInt(starts[i - 1]);
+    if (o > BigInt(dat.length) || o < prev || (i === 0 && o !== 0n)) {
+      throw new Error(`paths.off: offset ${o} of record ${i} is out of order or past paths.dat (${dat.length} bytes)`);
+    }
+    starts.push(Number(o));
+  }
+
+  const columnAware = (flags & FLAG_HAS_COLUMN_AWARE_STEPS) !== 0;
+  const lineCountTable = (flags & FLAG_HAS_LINE_COUNT_TABLE) !== 0;
+  const paths: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const record = dat.subarray(starts[i], i + 1 < count ? starts[i + 1] : dat.length);
+    if (!columnAware && !lineCountTable) {
+      paths.push(record.toString("utf8"));
+      continue;
+    }
+    const what = `paths.dat record ${i}`;
+    const cur: Cursor = { pos: 0 };
+    const p = readString(record, cur, what);
+    const lineCount = decodeVarintBig(record, cur, what);
+    if (lineCountTable && lineCount === 0n) {
+      throw new Error(`${what}: line_count 0 (a file sized zero is indistinguishable from the next)`);
+    }
+    if (columnAware) {
+      for (let k = 0n; k < lineCount; k++) {decodeVarintBig(record, cur, what);}
+    }
+    if (cur.pos !== record.length) {
+      throw new Error(`${what}: ${record.length - cur.pos} bytes left over after the record`);
+    }
+    paths.push(p);
+  }
+  return paths;
 }
 
 // ── Public API ──────────────────────────────────────────────────────────
@@ -355,11 +443,11 @@ export function findCtfsContainer(traceFolder: string): string | undefined {
     return undefined;
   }
   for (const entry of entries) {
-    if (!entry.toLowerCase().endsWith(".ct")) continue;
+    if (!entry.toLowerCase().endsWith(".ct")) {continue;}
     const full = path.join(traceFolder, entry);
     try {
       const st = fs.statSync(full);
-      if (st.isFile() && st.size > 0) return full;
+      if (st.isFile() && st.size > 0) {return full;}
     } catch {
       // ignore unreadable entries
     }
@@ -367,11 +455,19 @@ export function findCtfsContainer(traceFolder: string): string | undefined {
   return undefined;
 }
 
+/** What a trace's `.ct` container says about its program and sources. */
+export interface CtfsTrace {
+  meta: CtfsMetaDat;
+  /** Source paths from `paths.dat`, in id order; empty when there are none. */
+  paths: string[];
+}
+
 /**
- * Read and parse the `meta.dat` metadata from a trace's `.ct` container.
+ * Read `meta.dat` and the `paths.dat` source-path table from a trace's
+ * `.ct` container.
  *
  * Returns `undefined` if no container is found, the container has no
- * `meta.dat`, or parsing fails — callers fall back to other sources.
+ * `meta.dat`, or reading fails — callers fall back to other sources.
  *
  * A rejection is reported through `onReject` rather than dropped. "No
  * container here" and "this container is one we refuse to read" are
@@ -385,16 +481,26 @@ export function findCtfsContainer(traceFolder: string): string | undefined {
  * cannot be replaced, so a test has no other way to observe that a
  * refusal was reported at all.
  */
-export function readCtfsMetaDat(
+export function readCtfsTrace(
   traceFolder: string,
   onReject: (message: string) => void = (message) => console.warn(message)
-): CtfsMetaDat | undefined {
+): CtfsTrace | undefined {
   const containerPath = findCtfsContainer(traceFolder);
-  if (!containerPath) return undefined;
+  if (!containerPath) {return undefined;}
   try {
     const container = CtfsContainer.open(containerPath);
-    if (!container.hasFile("meta.dat")) return undefined;
-    return parseMetaDat(container.readFile("meta.dat"));
+    if (!container.hasFile("meta.dat")) {return undefined;}
+    const meta = parseMetaDat(container.readFile("meta.dat"));
+    let paths: string[] = [];
+    if (container.hasFile("paths.dat")) {
+      const dat = container.readFile("paths.dat");
+      if (!container.hasFile("paths.off")) {
+        if (dat.length !== 0) {throw new Error("paths.dat has no paths.off");}
+      } else {
+        paths = parsePathsDat(dat, container.readFile("paths.off"), meta.flags);
+      }
+    }
+    return { meta, paths };
   } catch (err) {
     onReject(
       `CodeTracer: ignoring CTFS container ${containerPath}: ` +

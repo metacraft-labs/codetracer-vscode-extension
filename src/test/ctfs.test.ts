@@ -1,18 +1,18 @@
 /**
- * Version-gate tests for the CTFS `meta.dat` reader in `src/ctfs.ts`.
+ * Tests for the CTFS container, `meta.dat` and `paths.dat` readers in
+ * `src/ctfs.ts`.
  *
- * The `meta.dat` schema version went from 3 to 4 when the line-only
- * `global_position_index` encode was corrected from
- * `prefix_sums[file_id] + line` to `prefix_sums[file_id] + (line - 1)`,
- * the inverse of the `line = q + 1` decode every reader performs. No
- * field of the `meta.dat` header changed, so the version is the ONLY
- * thing in a container that distinguishes the two encodes — which is
- * exactly why the gate has to refuse v3 rather than wave it through.
+ * Normative sources (codetracer-trace-format-spec):
+ *   - `ctfs-container.md` §1 (container version 5), §2 ("`MapBlock` has
+ *     three forms", "Older versions are refused"), §4 (block resolution and
+ *     the null-pointer rules);
+ *   - `internal-files.md` §"Metadata (meta.dat)" (version 6, 12-byte header,
+ *     no path list) and the `paths.dat` layouts under §"Interning Tables".
  *
  * These tests build containers byte-by-byte rather than mocking the
- * reader's inputs: the thing under test is how a specific byte sequence
- * on disk is interpreted, so anything short of real bytes would be
- * testing the mock.
+ * reader's inputs: the thing under test is how a specific byte sequence on
+ * disk is interpreted, so anything short of real bytes would be testing the
+ * mock. No mock objects are used.
  */
 import * as assert from "assert";
 import * as fs from "fs";
@@ -20,33 +20,43 @@ import * as os from "os";
 import * as path from "path";
 
 import {
-  LAST_SHIFTED_GLOBAL_INDEX_VERSION,
-  SUPPORTED_META_DAT_VERSIONS,
+  CtfsContainer,
+  SUPPORTED_CTFS_CONTAINER_VERSION,
+  SUPPORTED_META_DAT_VERSION,
   parseMetaDat,
-  readCtfsMetaDat,
+  parsePathsDat,
+  readCtfsTrace,
 } from "../ctfs";
 
 // ── Fixture builders ────────────────────────────────────────────────────
 
 const CTFS_MAGIC = Buffer.from([0xc0, 0xde, 0x72, 0xac, 0xe2]);
-const CTFS_CONTAINER_VERSION = 3;
+const CTFS_DIRECT = 1n << 63n;
 const META_DAT_MAGIC = Buffer.from([0x43, 0x54, 0x4d, 0x44]);
 const BLOCK_SIZE = 1024;
 const MAX_ENTRIES = 8;
 const BASE40_CHARS = "\x00" + "0123456789abcdefghijklmnopqrstuvwxyz./-";
 
-function encodeVarint(value: number): Buffer {
+const FLAG_HAS_COLUMN_AWARE_STEPS = 1 << 4;
+const FLAG_HAS_LINE_COUNT_TABLE = 1 << 14;
+
+function encodeVarint(value: number | bigint): Buffer {
   const out: number[] = [];
-  let v = value;
+  let v = BigInt(value);
   do {
-    let byte = v & 0x7f;
-    v >>>= 7;
-    if (v !== 0) {
+    let byte = Number(v & 0x7fn);
+    v >>= 7n;
+    if (v !== 0n) {
       byte |= 0x80;
     }
     out.push(byte);
-  } while (v !== 0);
+  } while (v !== 0n);
   return Buffer.from(out);
+}
+
+function zigzag(n: number): bigint {
+  const b = BigInt(n);
+  return b >= 0n ? b << 1n : ((-b) << 1n) - 1n;
 }
 
 function lenString(s: string): Buffer {
@@ -72,18 +82,19 @@ interface MetaDatFields {
   args: string[];
   workdir: string;
   recorderId: string;
-  paths: string[];
 }
 
 /**
- * Serialize a `meta.dat` payload stamped with an explicit schema
- * version. The version is a parameter precisely because the tests need
- * to produce the containers a current writer never would.
+ * Serialize a version 6 `meta.dat` payload: the 12-byte header
+ * (magic, version, flags, flags_ext) and a body that ends at
+ * `recorder_id`. `version` is a parameter so the tests can stamp the
+ * containers a current writer never would.
  */
-function buildMetaDat(version: number, f: MetaDatFields): Buffer {
-  const header = Buffer.alloc(4);
+function buildMetaDat(version: number, f: MetaDatFields, flags = 0, flagsExt = 0): Buffer {
+  const header = Buffer.alloc(8);
   header.writeUInt16LE(version, 0);
-  header.writeUInt16LE(0, 2); // flags — no optional blocks
+  header.writeUInt16LE(flags, 2);
+  header.writeUInt32LE(flagsExt, 4);
   return Buffer.concat([
     META_DAT_MAGIC,
     header,
@@ -93,39 +104,85 @@ function buildMetaDat(version: number, f: MetaDatFields): Buffer {
     ...f.args.map(lenString),
     lenString(f.workdir),
     lenString(f.recorderId),
-    encodeVarint(f.paths.length),
-    ...f.paths.map(lenString),
   ]);
 }
 
-/** Wrap internal files in a minimal one-mapping-block CTFS container. */
-function buildMinimalCtfs(files: Array<[string, Buffer]>): Buffer {
+/**
+ * Wrap internal files in a version 5 CTFS container laid out as a writer
+ * that has closed it must lay it out (`ctfs-container.md` §2): an empty
+ * member owns no block, a member of at most one block is direct (its
+ * `MapBlock` carries the tag), and a larger one has a level-1 mapping
+ * block followed by its data blocks.
+ */
+function buildMinimalCtfs(files: Array<[string, Buffer]>, version = 5): Buffer {
   assert.ok(files.length <= MAX_ENTRIES, "too many internal files");
   const root = Buffer.alloc(BLOCK_SIZE);
   CTFS_MAGIC.copy(root, 0);
-  root[5] = CTFS_CONTAINER_VERSION;
+  root[5] = version;
   root.writeUInt32LE(BLOCK_SIZE, 8);
   root.writeUInt32LE(MAX_ENTRIES, 12);
 
+  const blocks: Buffer[] = [root];
+  const claim = (b: Buffer): number => {
+    blocks.push(b);
+    return blocks.length - 1;
+  };
+  const dataBlock = (data: Buffer, from: number): Buffer => {
+    const b = Buffer.alloc(BLOCK_SIZE);
+    data.copy(b, 0, from, Math.min(data.length, from + BLOCK_SIZE));
+    return b;
+  };
+
   files.forEach(([name, data], i) => {
     const off = 16 + i * 24;
+    let mapBlock = 0n;
+    if (data.length > 0 && data.length <= BLOCK_SIZE) {
+      mapBlock = CTFS_DIRECT | BigInt(claim(dataBlock(data, 0)));
+    } else if (data.length > BLOCK_SIZE) {
+      const nblocks = Math.ceil(data.length / BLOCK_SIZE);
+      assert.ok(nblocks < BLOCK_SIZE / 8, "fixture builder handles level-1 mappings only");
+      const mapping = Buffer.alloc(BLOCK_SIZE);
+      const m = claim(mapping);
+      for (let k = 0; k < nblocks; k++) {
+        mapping.writeBigUInt64LE(BigInt(claim(dataBlock(data, k * BLOCK_SIZE))), k * 8);
+      }
+      mapBlock = BigInt(m);
+    }
     root.writeBigUInt64LE(BigInt(data.length), off);
-    root.writeBigUInt64LE(BigInt(1 + i * 2), off + 8); // mapping block
+    root.writeBigUInt64LE(mapBlock, off + 8);
     root.writeBigUInt64LE(base40Encode(name), off + 16);
   });
-
-  const blocks: Buffer[] = [root];
-  files.forEach(([, data], i) => {
-    const dataBlockNum = 2 + i * 2;
-    const mapping = Buffer.alloc(BLOCK_SIZE);
-    mapping.writeBigUInt64LE(BigInt(dataBlockNum), 0);
-    blocks.push(mapping);
-
-    const padded = Buffer.alloc(Math.max(BLOCK_SIZE, Math.ceil(data.length / BLOCK_SIZE) * BLOCK_SIZE));
-    data.copy(padded, 0);
-    blocks.push(padded);
-  });
   return Buffer.concat(blocks);
+}
+
+/** Overwrite one root entry's `(Size, MapBlock)` in a built container. */
+function patchEntry(container: Buffer, index: number, size: bigint, mapBlock: bigint): Buffer {
+  const copy = Buffer.from(container);
+  copy.writeBigUInt64LE(size, 16 + index * 24);
+  copy.writeBigUInt64LE(mapBlock, 16 + index * 24 + 8);
+  return copy;
+}
+
+/** Serialize `paths.dat` + `paths.off` from already-framed records. */
+function buildPathsTable(records: Buffer[]): { dat: Buffer; off: Buffer } {
+  const off = Buffer.alloc(records.length * 8);
+  let pos = 0;
+  records.forEach((r, i) => {
+    off.writeBigUInt64LE(BigInt(pos), i * 8);
+    pos += r.length;
+  });
+  return { dat: Buffer.concat(records), off };
+}
+
+const bareRecord = (p: string): Buffer => Buffer.from(p, "utf8");
+const lineCountRecord = (p: string, lineCount: number): Buffer =>
+  Buffer.concat([lenString(p), encodeVarint(lineCount)]);
+function layoutARecord(p: string, lineLengths: number[]): Buffer {
+  const parts = [lenString(p), encodeVarint(lineLengths.length)];
+  lineLengths.forEach((len, i) => {
+    parts.push(encodeVarint(zigzag(i === 0 ? len : len - lineLengths[i - 1])));
+  });
+  return Buffer.concat(parts);
 }
 
 const FIELDS: MetaDatFields = {
@@ -134,107 +191,259 @@ const FIELDS: MetaDatFields = {
   args: ["--release"],
   workdir: "/work",
   recorderId: "ct-test/1.0",
-  paths: ["/work/main.rs", "/work/lib.rs"],
 };
+const PATHS = ["/work/main.rs", "/work/lib.rs"];
 
+const tempDirs: string[] = [];
 function writeTraceFolder(container: Buffer): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-vscode-ctfs-"));
+  tempDirs.push(dir);
   fs.writeFileSync(path.join(dir, "main.ct"), container);
   return dir;
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────
+function traceWith(meta: Buffer, records: Buffer[]): Buffer {
+  const { dat, off } = buildPathsTable(records);
+  return buildMinimalCtfs([
+    ["meta.dat", meta],
+    ["paths.dat", dat],
+    ["paths.off", off],
+  ]);
+}
 
-suite("CTFS meta.dat version gate", () => {
-  test("accepts exactly one version, and it is 4", () => {
-    assert.deepStrictEqual(
-      [...SUPPORTED_META_DAT_VERSIONS],
-      [4],
-      "accepting more than v4 means accepting the superseded " +
-      "global_position_index packing, which reads one line high"
-    );
-    assert.ok(
-      !SUPPORTED_META_DAT_VERSIONS.includes(LAST_SHIFTED_GLOBAL_INDEX_VERSION),
-      "the last shifted-encode version must never be in the accepted set"
-    );
+suiteTeardown(() => {
+  for (const dir of tempDirs) {fs.rmSync(dir, { recursive: true, force: true });}
+});
+
+// ── Container (ctfs-container.md §1, §2, §4) ────────────────────────────
+
+suite("CTFS container version 5", () => {
+  test("reads exactly container version 5", () => {
+    assert.strictEqual(SUPPORTED_CTFS_CONTAINER_VERSION, 5);
   });
 
-  test("a v4 meta.dat parses to the recorded fields", () => {
-    const parsed = parseMetaDat(buildMetaDat(4, FIELDS));
+  test("a direct member of at most one block is read from its tagged data block", () => {
+    const small = Buffer.from("hello, direct member");
+    const exact = Buffer.alloc(BLOCK_SIZE, 0x5a);
+    const c = CtfsContainer.fromBytes(buildMinimalCtfs([["small.bin", small], ["exact.bin", exact]]));
+    assert.ok(c.readFile("small.bin").equals(small));
+    assert.ok(c.readFile("exact.bin").equals(exact));
+  });
+
+  test("an empty member (MapBlock = 0) is present and empty, not absent", () => {
+    const c = CtfsContainer.fromBytes(buildMinimalCtfs([["empty.bin", Buffer.alloc(0)]]));
+    assert.strictEqual(c.hasFile("empty.bin"), true, "a null is not an absence");
+    assert.strictEqual(c.readFile("empty.bin").length, 0);
+    assert.strictEqual(c.hasFile("absent.bin"), false);
+    assert.throws(() => c.readFile("absent.bin"), /not found: absent\.bin/);
+  });
+
+  test("a member larger than one block is read through its mapping block", () => {
+    const big = Buffer.alloc(BLOCK_SIZE * 2 + 300);
+    for (let i = 0; i < big.length; i++) {big[i] = (i * 7 + 3) & 0xff;}
+    const c = CtfsContainer.fromBytes(buildMinimalCtfs([["a.bin", Buffer.from("x")], ["big.bin", big]]));
+    assert.ok(c.readFile("big.bin").equals(big));
+  });
+
+  test("a container of version 4 is refused, naming both versions", () => {
+    const v4 = buildMinimalCtfs([["meta.dat", buildMetaDat(6, FIELDS)]], 4);
+    assert.throws(
+      () => CtfsContainer.fromBytes(v4),
+      /unsupported CTFS container version 4 \(this reader reads version 5\)/
+    );
+    for (const version of [2, 3, 6]) {
+      assert.throws(
+        () => CtfsContainer.fromBytes(buildMinimalCtfs([], version)),
+        new RegExp(`unsupported CTFS container version ${version}\\b`)
+      );
+    }
+  });
+
+  test("a tagged MapBlock with Size above BlockSize is refused", () => {
+    const base = buildMinimalCtfs([["small.bin", Buffer.from("abc")]]);
+    const bad = patchEntry(base, 0, BigInt(BLOCK_SIZE + 1), CTFS_DIRECT | 1n);
+    assert.throws(() => CtfsContainer.fromBytes(bad).readFile("small.bin"), /small\.bin.*one block/);
+  });
+
+  test("a tagged MapBlock naming block 0 is refused as a null pointer", () => {
+    const base = buildMinimalCtfs([["small.bin", Buffer.from("abc")]]);
+    const bad = patchEntry(base, 0, 3n, CTFS_DIRECT);
+    assert.throws(() => CtfsContainer.fromBytes(bad).readFile("small.bin"), /small\.bin.*null/);
+  });
+
+  test("a tagged MapBlock past the end of the container is refused", () => {
+    const base = buildMinimalCtfs([["small.bin", Buffer.from("abc")]]);
+    const bad = patchEntry(base, 0, 3n, CTFS_DIRECT | 1000n);
+    assert.throws(() => CtfsContainer.fromBytes(bad).readFile("small.bin"), /small\.bin.*past (the )?end/);
+  });
+
+  test("MapBlock = 0 with a non-zero Size is refused as a null pointer, not read as empty", () => {
+    const base = buildMinimalCtfs([["small.bin", Buffer.from("abc")]]);
+    const bad = patchEntry(base, 0, 3n, 0n);
+    const c = CtfsContainer.fromBytes(bad);
+    assert.strictEqual(c.hasFile("small.bin"), true);
+    assert.throws(() => c.readFile("small.bin"), (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /small\.bin.*null/);
+      assert.ok(!/truncat/i.test(err.message), "a null is not a truncation");
+      return true;
+    });
+  });
+});
+
+// ── meta.dat (internal-files.md §"Metadata (meta.dat)") ─────────────────
+
+suite("CTFS meta.dat version 6", () => {
+  test("reads exactly meta.dat version 6", () => {
+    assert.strictEqual(SUPPORTED_META_DAT_VERSION, 6);
+  });
+
+  test("a v6 meta.dat parses to the recorded fields and its flag words", () => {
+    const parsed = parseMetaDat(buildMetaDat(6, FIELDS, FLAG_HAS_LINE_COUNT_TABLE, 1));
     assert.strictEqual(parsed.program, FIELDS.program);
     assert.strictEqual(parsed.workdir, FIELDS.workdir);
-    assert.deepStrictEqual(parsed.paths, FIELDS.paths);
+    assert.strictEqual(parsed.flags, FLAG_HAS_LINE_COUNT_TABLE);
+    assert.strictEqual(parsed.flagsExt, 1);
+    assert.ok(!("paths" in parsed), "meta.dat carries no path list at version 6");
   });
 
-  test("a v3 meta.dat is refused, naming the superseded encode", () => {
-    // Byte-identical to the v4 payload above except for the version
-    // stamp — which is the whole point: nothing else in the container
-    // could have told the two encodes apart.
-    const v3 = buildMetaDat(3, FIELDS);
-    const v4 = buildMetaDat(4, FIELDS);
-    assert.strictEqual(v3.length, v4.length);
-    assert.ok(
-      v3.subarray(6).equals(v4.subarray(6)),
-      "fixtures must differ only in the version field"
-    );
-
+  test("a v5 meta.dat is refused, naming both versions", () => {
     assert.throws(
-      () => parseMetaDat(v3),
-      (err: unknown) => {
-        assert.ok(err instanceof Error);
-        assert.match(err.message, /unsupported version 3\b/);
-        assert.match(err.message, /global_position_index/);
-        assert.match(err.message, /one line high/);
-        return true;
-      },
-      "a v3 container must be refused by name, not read one line high"
+      () => parseMetaDat(buildMetaDat(5, FIELDS)),
+      /unsupported meta\.dat version 5 \(this reader reads version 6\)/
     );
   });
 
-  test("every version below 4 is refused", () => {
-    for (const version of [0, 1, 2, 3]) {
+  test("every other version is refused by name", () => {
+    for (const version of [0, 1, 2, 3, 4, 7]) {
       assert.throws(
         () => parseMetaDat(buildMetaDat(version, FIELDS)),
-        new RegExp(`unsupported version ${version}\\b`),
+        new RegExp(`unsupported meta\\.dat version ${version}\\b`),
         `v${version} must be refused`
       );
     }
   });
 
-  test("a future version is refused too, without the encode claim", () => {
+  test("a header shorter than 12 bytes is refused", () => {
+    const full = buildMetaDat(6, FIELDS);
+    assert.throws(() => parseMetaDat(full.subarray(0, 11)), /shorter than (its )?12-byte header/);
+  });
+
+  test("an unknown flags_ext bit is refused, naming the bits", () => {
+    assert.throws(() => parseMetaDat(buildMetaDat(6, FIELDS, 0, 0b110)), /flags_ext.*0x6/);
+  });
+
+  test("bits 4 and 14 together are refused", () => {
     assert.throws(
-      () => parseMetaDat(buildMetaDat(5, FIELDS)),
-      (err: unknown) => {
-        assert.ok(err instanceof Error);
-        assert.match(err.message, /unsupported version 5\b/);
-        assert.ok(
-          !/one line high/.test(err.message),
-          "v5 postdates the correction; the shifted-encode diagnosis does not apply"
-        );
-        return true;
-      }
+      () => parseMetaDat(buildMetaDat(6, FIELDS, FLAG_HAS_COLUMN_AWARE_STEPS | FLAG_HAS_LINE_COUNT_TABLE)),
+      /bits 4 and 14/
     );
   });
+});
 
-  test("readCtfsMetaDat answers a v4 container and drops a v3 one", () => {
-    const v4Dir = writeTraceFolder(buildMinimalCtfs([["meta.dat", buildMetaDat(4, FIELDS)]]));
-    const v4Rejections: string[] = [];
-    const v4Meta = readCtfsMetaDat(v4Dir, (message) => v4Rejections.push(message));
-    assert.deepStrictEqual(v4Rejections, [], "a v4 container must not be rejected");
-    assert.ok(v4Meta, "a v4 container must be readable end to end");
-    assert.deepStrictEqual(v4Meta.paths, FIELDS.paths);
-    assert.strictEqual(v4Meta.program, FIELDS.program);
+// ── paths.dat (internal-files.md §"Interning Tables") ───────────────────
 
-    const v3Dir = writeTraceFolder(buildMinimalCtfs([["meta.dat", buildMetaDat(3, FIELDS)]]));
-    const rejections: string[] = [];
-    const v3Meta = readCtfsMetaDat(v3Dir, (message) => rejections.push(message));
-    assert.strictEqual(v3Meta, undefined, "a v3 container must not yield metadata");
-    assert.strictEqual(rejections.length, 1, "the refusal must be reported, not swallowed");
-    assert.match(rejections[0], /unsupported version 3\b/);
-    assert.match(rejections[0], /global_position_index/);
-    assert.ok(rejections[0].includes(v3Dir), "the report must name the container it refused");
+suite("CTFS paths.dat", () => {
+  test("bare records are the path bytes", () => {
+    const { dat, off } = buildPathsTable(PATHS.map(bareRecord));
+    assert.deepStrictEqual(parsePathsDat(dat, off, 0), PATHS);
+  });
 
-    fs.rmSync(v4Dir, { recursive: true, force: true });
-    fs.rmSync(v3Dir, { recursive: true, force: true });
+  test("line-count records (bit 14) carry a line count after the path", () => {
+    const { dat, off } = buildPathsTable([lineCountRecord(PATHS[0], 42), lineCountRecord(PATHS[1], 100000)]);
+    assert.deepStrictEqual(parsePathsDat(dat, off, FLAG_HAS_LINE_COUNT_TABLE), PATHS);
+  });
+
+  test("a line-count record with line_count 0 is refused", () => {
+    const { dat, off } = buildPathsTable([lineCountRecord(PATHS[0], 0)]);
+    assert.throws(() => parsePathsDat(dat, off, FLAG_HAS_LINE_COUNT_TABLE), /record 0.*line_count 0/);
+  });
+
+  test("Layout A records (bit 4) carry a per-line length table after the path", () => {
+    const { dat, off } = buildPathsTable([layoutARecord(PATHS[0], [10, 4, 300, 1]), layoutARecord(PATHS[1], [])]);
+    assert.deepStrictEqual(parsePathsDat(dat, off, FLAG_HAS_COLUMN_AWARE_STEPS), PATHS);
+  });
+
+  test("a Layout A record with bytes left over is refused, not read by its prefix", () => {
+    const rec = Buffer.concat([layoutARecord(PATHS[0], [10, 20]), Buffer.from([0x05])]);
+    const { dat, off } = buildPathsTable([rec]);
+    assert.throws(() => parsePathsDat(dat, off, FLAG_HAS_COLUMN_AWARE_STEPS), /record 0.*left over/);
+  });
+
+  test("a bare record is not decoded as a framed one when no layout bit is set", () => {
+    // The first byte of this bare record equals its remaining length, so it
+    // would "decode" under a framed layout; the flags decide, not the bytes.
+    const tricky = "\x04/a/b";
+    const { dat, off } = buildPathsTable([bareRecord(tricky)]);
+    assert.deepStrictEqual(parsePathsDat(dat, off, 0), [tricky]);
+  });
+
+  test("offsets that run backwards or past the data are refused", () => {
+    const { dat } = buildPathsTable(PATHS.map(bareRecord));
+    const off = Buffer.alloc(16);
+    off.writeBigUInt64LE(5n, 0);
+    off.writeBigUInt64LE(2n, 8);
+    assert.throws(() => parsePathsDat(dat, off, 0), /paths\.off/);
+    off.writeBigUInt64LE(BigInt(dat.length + 1), 8);
+    assert.throws(() => parsePathsDat(dat, off, 0), /paths\.off/);
   });
 });
+
+// ── End to end (readCtfsTrace) ──────────────────────────────────────────
+
+suite("readCtfsTrace", () => {
+  test("source paths come from paths.dat, including a mapped multi-block paths.dat", () => {
+    const many: string[] = [];
+    for (let i = 0; i < 120; i++) {many.push(`/work/src/module_${i}.rs`);}
+    const records = many.map((p) => lineCountRecord(p, 100 + i32(p)));
+    const container = traceWith(buildMetaDat(6, FIELDS, FLAG_HAS_LINE_COUNT_TABLE), records);
+    assert.ok(buildPathsTable(records).dat.length > BLOCK_SIZE, "paths.dat must outgrow one block");
+
+    const rejections: string[] = [];
+    const trace = readCtfsTrace(writeTraceFolder(container), (m) => rejections.push(m));
+    assert.deepStrictEqual(rejections, []);
+    assert.ok(trace);
+    assert.strictEqual(trace.meta.program, FIELDS.program);
+    assert.deepStrictEqual(trace.paths, many);
+  });
+
+  test("a trace with an empty paths.dat, or none, has no source paths", () => {
+    const empty = buildMinimalCtfs([
+      ["meta.dat", buildMetaDat(6, FIELDS)],
+      ["paths.dat", Buffer.alloc(0)],
+      ["paths.off", Buffer.alloc(0)],
+    ]);
+    assert.deepStrictEqual(readCtfsTrace(writeTraceFolder(empty), assert.fail)?.paths, []);
+    const none = buildMinimalCtfs([["meta.dat", buildMetaDat(6, FIELDS)]]);
+    assert.deepStrictEqual(readCtfsTrace(writeTraceFolder(none), assert.fail)?.paths, []);
+  });
+
+  test("a version 4 container is reported and yields nothing", () => {
+    const { dat, off } = buildPathsTable(PATHS.map(bareRecord));
+    const v4 = buildMinimalCtfs(
+      [["meta.dat", buildMetaDat(6, FIELDS)], ["paths.dat", dat], ["paths.off", off]],
+      4
+    );
+    const dir = writeTraceFolder(v4);
+    const rejections: string[] = [];
+    assert.strictEqual(readCtfsTrace(dir, (m) => rejections.push(m)), undefined);
+    assert.strictEqual(rejections.length, 1, "the refusal must be reported, not swallowed");
+    assert.match(rejections[0], /unsupported CTFS container version 4\b/);
+    assert.ok(rejections[0].includes(dir), "the report must name the container it refused");
+  });
+
+  test("a version 5 meta.dat is reported and yields nothing", () => {
+    const dir = writeTraceFolder(traceWith(buildMetaDat(5, FIELDS), PATHS.map(bareRecord)));
+    const rejections: string[] = [];
+    assert.strictEqual(readCtfsTrace(dir, (m) => rejections.push(m)), undefined);
+    assert.strictEqual(rejections.length, 1);
+    assert.match(rejections[0], /unsupported meta\.dat version 5\b/);
+  });
+});
+
+/** A small deterministic per-path number, so line counts differ by record. */
+function i32(s: string): number {
+  let h = 0;
+  for (const ch of s) {h = (h * 31 + ch.charCodeAt(0)) % 1000;}
+  return h;
+}
