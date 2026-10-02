@@ -364,6 +364,16 @@ suite("CTFS paths.dat", () => {
     assert.deepStrictEqual(parsePathsDat(dat, off, FLAG_HAS_COLUMN_AWARE_STEPS), PATHS);
   });
 
+  test("a Layout A record with line_count 0 is the conventional table and reads as its path", () => {
+    // `path_len, path, 0`: the only encoding of the 100000 x 1024 table
+    // (internal-files.md §"`paths.dat` Layout A"), a one-byte table body.
+    const rec = layoutARecord(PATHS[0], []);
+    assert.strictEqual(rec[rec.length - 1], 0);
+    assert.strictEqual(rec.length, 1 + Buffer.byteLength(PATHS[0]) + 1);
+    const { dat, off } = buildPathsTable([rec, layoutARecord(PATHS[1], [3])]);
+    assert.deepStrictEqual(parsePathsDat(dat, off, FLAG_HAS_COLUMN_AWARE_STEPS), PATHS);
+  });
+
   test("a Layout A record with bytes left over is refused, not read by its prefix", () => {
     const rec = Buffer.concat([layoutARecord(PATHS[0], [10, 20]), Buffer.from([0x05])]);
     const { dat, off } = buildPathsTable([rec]);

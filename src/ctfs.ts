@@ -380,7 +380,10 @@ export function parseMetaDat(buf: Buffer): CtfsMetaDat {
  *   - neither bit: the record is the bare path bytes;
  *   - bit 14: `path_len`, path, a non-zero `line_count`;
  *   - bit 4 (Layout A): `path_len`, path, `line_count`, and `line_count`
- *     zigzag-delta line lengths.
+ *     zigzag-delta line lengths. `line_count = 0` with no lengths is the
+ *     conventional table (100000 lines of 1024 positions, internal-files.md
+ *     §"`paths.dat` Layout A"); only the path is needed here, so it parses
+ *     like any other record.
  * A framed record must be consumed whole; leftover bytes are refused.
  * Paths are not deduplicated: equal bytes under two ids are two versions.
  */
