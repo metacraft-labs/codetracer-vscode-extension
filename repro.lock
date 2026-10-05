@@ -1,0 +1,9 @@
+schema = "reprobuild.solved-graph-lock.v2"
+
+[lock]
+platform = "amd64-linux"
+optimal = false
+inputs_digest = "fnv1a64:cbf29ce484222325"
+variants = []
+packages = []
+deps = [{ name = "codetracer-vscode-extension", path = ".", coord_kind = "vcs", url = "https://github.com/metacraft-labs/codetracer-vscode-extension", ref = "extension-frozen-origin-icons-contract-20261005", revision = "5bf6d536e390f10299a07cb69d34aade64c8da50", integrity = "git-sha1:5bf6d536e390f10299a07cb69d34aade64c8da50", version = "", visibility = "public", participation = "", depends = "", tags = "" }]
