@@ -277,6 +277,18 @@ suite("CTFS container version 5", () => {
     assert.throws(() => CtfsContainer.fromBytes(bad).readFile("small.bin"), /small\.bin.*past (the )?end/);
   });
 
+  for (const retired of ["events.log", "events.fmt"]) {
+    test(`a container carrying ${retired} is refused by name, whatever its size`, () => {
+      for (const data of [Buffer.alloc(0), Buffer.from([1, 2, 3])]) {
+        const container = buildMinimalCtfs([["meta.dat", buildMetaDat(6, FIELDS)], [retired, data]]);
+        assert.throws(
+          () => CtfsContainer.fromBytes(container),
+          (err: Error) => err.message.includes(`\`${retired}\``) && /not part of the trace format/.test(err.message)
+        );
+      }
+    });
+  }
+
   test("MapBlock = 0 with a non-zero Size is refused as a null pointer, not read as empty", () => {
     const base = buildMinimalCtfs([["small.bin", Buffer.from("abc")]]);
     const bad = patchEntry(base, 0, 3n, 0n);
@@ -322,6 +334,21 @@ suite("CTFS meta.dat version 6", () => {
         `v${version} must be refused`
       );
     }
+  });
+
+  test("text that is not UTF-8 is refused, naming the field", () => {
+    const placeholder = "\u0001\u0002";
+    const invalid = Buffer.from([0xc3, 0x28]);
+    const withInvalid = (f: MetaDatFields): Buffer => {
+      const meta = buildMetaDat(6, f);
+      const at = meta.indexOf(Buffer.from(placeholder, "utf8"));
+      assert.ok(at >= 0);
+      invalid.copy(meta, at);
+      return meta;
+    };
+    assert.throws(() => parseMetaDat(withInvalid({ ...FIELDS, program: `/work/${placeholder}` })), /meta\.dat: program is not UTF-8/);
+    assert.throws(() => parseMetaDat(withInvalid({ ...FIELDS, args: ["--release", placeholder] })), /meta\.dat: args is not UTF-8/);
+    assert.throws(() => parseMetaDat(withInvalid({ ...FIELDS, workdir: placeholder })), /meta\.dat: workdir is not UTF-8/);
   });
 
   test("a header shorter than 12 bytes is refused", () => {
@@ -388,6 +415,20 @@ suite("CTFS paths.dat", () => {
     assert.deepStrictEqual(parsePathsDat(dat, off, 0), [tricky]);
   });
 
+  test("a path is the bytes recorded for it, UTF-8 or not, in every layout", () => {
+    const raw = Buffer.from([0x2f, 0x77, 0xff, 0x2e, 0x63]);
+    const framed = Buffer.concat([encodeVarint(raw.length), raw]);
+    const records: Array<[Buffer, number]> = [
+      [raw, 0],
+      [Buffer.concat([framed, encodeVarint(3)]), FLAG_HAS_LINE_COUNT_TABLE],
+      [Buffer.concat([framed, encodeVarint(1), encodeVarint(zigzag(4))]), FLAG_HAS_COLUMN_AWARE_STEPS],
+    ];
+    for (const [record, flags] of records) {
+      const { dat, off } = buildPathsTable([record]);
+      assert.deepStrictEqual(parsePathsDat(dat, off, flags), [raw.toString("utf8")]);
+    }
+  });
+
   test("offsets that run backwards or past the data are refused", () => {
     const { dat } = buildPathsTable(PATHS.map(bareRecord));
     const off = Buffer.alloc(16);
@@ -440,6 +481,20 @@ suite("readCtfsTrace", () => {
     assert.strictEqual(rejections.length, 1, "the refusal must be reported, not swallowed");
     assert.match(rejections[0], /unsupported CTFS container version 4\b/);
     assert.ok(rejections[0].includes(dir), "the report must name the container it refused");
+  });
+
+  test("a container carrying events.log is reported and yields nothing", () => {
+    const { dat, off } = buildPathsTable(PATHS.map(bareRecord));
+    const legacy = buildMinimalCtfs([
+      ["meta.dat", buildMetaDat(6, FIELDS)],
+      ["paths.dat", dat],
+      ["paths.off", off],
+      ["events.log", Buffer.from([0xa0])],
+    ]);
+    const rejections: string[] = [];
+    assert.strictEqual(readCtfsTrace(writeTraceFolder(legacy), (m) => rejections.push(m)), undefined);
+    assert.strictEqual(rejections.length, 1);
+    assert.match(rejections[0], /`events\.log`/);
   });
 
   test("a version 5 meta.dat is reported and yields nothing", () => {
