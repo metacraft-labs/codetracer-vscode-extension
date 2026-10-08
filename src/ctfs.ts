@@ -45,6 +45,13 @@ const HEADER_SIZE = 16;
 const FILE_ENTRY_SIZE = 24;
 const MAX_MAPPING_LEVELS = 5;
 
+/**
+ * Members that are not part of the trace format. A container whose root
+ * directory has an entry for either, whatever its size, is refused by name
+ * before any member is read (trace-events.md §"Removed members").
+ */
+const RETIRED_MEMBERS = ["events.log", "events.fmt"];
+
 interface CtfsFileEntry {
   size: bigint;
   mapBlock: bigint;
@@ -115,6 +122,13 @@ export class CtfsContainer {
         size: data.readBigUInt64LE(offset),
         mapBlock: data.readBigUInt64LE(offset + 8),
       });
+    }
+    for (const name of RETIRED_MEMBERS) {
+      if (files.has(name)) {
+        throw new Error(
+          `this container carries \`${name}\`, which is not part of the trace format; it is refused`
+        );
+      }
     }
     return new CtfsContainer(data, blockSize, files);
   }
@@ -312,13 +326,29 @@ function decodeVarint(buf: Buffer, cur: Cursor, what = "meta.dat"): number {
   return Number(v);
 }
 
-/** Decode one varint-length-prefixed UTF-8 string. */
-function readString(buf: Buffer, cur: Cursor, what = "meta.dat"): string {
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
+
+/** Read one varint-length-prefixed byte string. */
+function readBytes(buf: Buffer, cur: Cursor, what: string): Buffer {
   const len = decodeVarint(buf, cur, what);
   if (cur.pos + len > buf.length) {throw new Error(`${what}: string extends past EOF`);}
-  const s = buf.toString("utf8", cur.pos, cur.pos + len);
+  const bytes = buf.subarray(cur.pos, cur.pos + len);
   cur.pos += len;
-  return s;
+  return bytes;
+}
+
+/**
+ * Decode one varint-length-prefixed `meta.dat` text field, `field`. Every
+ * text field of `meta.dat` is UTF-8, and one that is not is refused rather
+ * than read with replacement characters (internal-files.md §"Metadata").
+ */
+function readString(buf: Buffer, cur: Cursor, field: string, what = "meta.dat"): string {
+  const bytes = readBytes(buf, cur, what);
+  try {
+    return STRICT_UTF8.decode(bytes);
+  } catch {
+    throw new Error(`${what}: ${field} is not UTF-8`);
+  }
 }
 
 /**
@@ -359,12 +389,12 @@ export function parseMetaDat(buf: Buffer): CtfsMetaDat {
   }
 
   const cur: Cursor = { pos: META_DAT_HEADER_SIZE };
-  readString(buf, cur); // recording_id — not needed here
-  const program = readString(buf, cur);
+  readString(buf, cur, "recording_id"); // not needed here, but must be UTF-8
+  const program = readString(buf, cur, "program");
   const argsCount = decodeVarint(buf, cur);
-  for (let i = 0; i < argsCount; i++) {readString(buf, cur);}
-  const workdir = readString(buf, cur);
-  readString(buf, cur); // recorder_id — not needed here
+  for (let i = 0; i < argsCount; i++) {readString(buf, cur, "args");}
+  const workdir = readString(buf, cur, "workdir");
+  readString(buf, cur, "recorder_id"); // not needed here, but must be UTF-8
 
   return { program, workdir, flags, flagsExt };
 }
@@ -413,7 +443,7 @@ export function parsePathsDat(dat: Buffer, off: Buffer, flags: number): string[]
     }
     const what = `paths.dat record ${i}`;
     const cur: Cursor = { pos: 0 };
-    const p = readString(record, cur, what);
+    const p = readBytes(record, cur, what).toString("utf8");
     const lineCount = decodeVarintBig(record, cur, what);
     if (lineCountTable && lineCount === 0n) {
       throw new Error(`${what}: line_count 0 (a file sized zero is indistinguishable from the next)`);
