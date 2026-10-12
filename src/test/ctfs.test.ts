@@ -6,7 +6,7 @@
  *   - `ctfs-container.md` §1 (container version 5), §2 ("`MapBlock` has
  *     three forms", "Older versions are refused"), §4 (block resolution and
  *     the null-pointer rules);
- *   - `internal-files.md` §"Metadata (meta.dat)" (version 6, 12-byte header,
+ *   - `internal-files.md` §"Metadata (meta.dat)" (version 7, 12-byte header,
  *     no path list) and the `paths.dat` layouts under §"Interning Tables".
  *
  * These tests build containers byte-by-byte rather than mocking the
@@ -85,7 +85,7 @@ interface MetaDatFields {
 }
 
 /**
- * Serialize a version 6 `meta.dat` payload: the 12-byte header
+ * Serialize a version 7 `meta.dat` payload: the 12-byte header
  * (magic, version, flags, flags_ext) and a body that ends at
  * `recorder_id`. `version` is a parameter so the tests can stamp the
  * containers a current writer never would.
@@ -246,7 +246,7 @@ suite("CTFS container version 5", () => {
   });
 
   test("a container of version 4 is refused, naming both versions", () => {
-    const v4 = buildMinimalCtfs([["meta.dat", buildMetaDat(6, FIELDS)]], 4);
+    const v4 = buildMinimalCtfs([["meta.dat", buildMetaDat(7, FIELDS)]], 4);
     assert.throws(
       () => CtfsContainer.fromBytes(v4),
       /unsupported CTFS container version 4 \(this reader reads version 5\)/
@@ -280,7 +280,7 @@ suite("CTFS container version 5", () => {
   for (const retired of ["events.log", "events.fmt"]) {
     test(`a container carrying ${retired} is refused by name, whatever its size`, () => {
       for (const data of [Buffer.alloc(0), Buffer.from([1, 2, 3])]) {
-        const container = buildMinimalCtfs([["meta.dat", buildMetaDat(6, FIELDS)], [retired, data]]);
+        const container = buildMinimalCtfs([["meta.dat", buildMetaDat(7, FIELDS)], [retired, data]]);
         assert.throws(
           () => CtfsContainer.fromBytes(container),
           (err: Error) => err.message.includes(`\`${retired}\``) && /not part of the trace format/.test(err.message)
@@ -305,29 +305,39 @@ suite("CTFS container version 5", () => {
 
 // ── meta.dat (internal-files.md §"Metadata (meta.dat)") ─────────────────
 
-suite("CTFS meta.dat version 6", () => {
-  test("reads exactly meta.dat version 6", () => {
-    assert.strictEqual(SUPPORTED_META_DAT_VERSION, 6);
+suite("CTFS meta.dat version 7", () => {
+  test("reads exactly meta.dat version 7", () => {
+    assert.strictEqual(SUPPORTED_META_DAT_VERSION, 7);
   });
 
-  test("a v6 meta.dat parses to the recorded fields and its flag words", () => {
-    const parsed = parseMetaDat(buildMetaDat(6, FIELDS, FLAG_HAS_LINE_COUNT_TABLE, 1));
+  test("a v7 meta.dat parses to the recorded fields and its flag words", () => {
+    const parsed = parseMetaDat(buildMetaDat(7, FIELDS, FLAG_HAS_LINE_COUNT_TABLE, 1));
     assert.strictEqual(parsed.program, FIELDS.program);
     assert.strictEqual(parsed.workdir, FIELDS.workdir);
     assert.strictEqual(parsed.flags, FLAG_HAS_LINE_COUNT_TABLE);
     assert.strictEqual(parsed.flagsExt, 1);
-    assert.ok(!("paths" in parsed), "meta.dat carries no path list at version 6");
+    assert.ok(!("paths" in parsed), "meta.dat carries no path list at version 7");
+  });
+
+  test("a v6 meta.dat is refused although its layout is the same, naming both versions", () => {
+    // Version 7 changed only the set of events.dat kinds, not meta.dat's
+    // layout; readers still accept version 7 alone (internal-files.md
+    // §"Version History").
+    assert.throws(
+      () => parseMetaDat(buildMetaDat(6, FIELDS)),
+      /unsupported meta\.dat version 6 \(this reader reads version 7\)/
+    );
   });
 
   test("a v5 meta.dat is refused, naming both versions", () => {
     assert.throws(
       () => parseMetaDat(buildMetaDat(5, FIELDS)),
-      /unsupported meta\.dat version 5 \(this reader reads version 6\)/
+      /unsupported meta\.dat version 5 \(this reader reads version 7\)/
     );
   });
 
   test("every other version is refused by name", () => {
-    for (const version of [0, 1, 2, 3, 4, 7]) {
+    for (const version of [0, 1, 2, 3, 4, 8]) {
       assert.throws(
         () => parseMetaDat(buildMetaDat(version, FIELDS)),
         new RegExp(`unsupported meta\\.dat version ${version}\\b`),
@@ -340,7 +350,7 @@ suite("CTFS meta.dat version 6", () => {
     const placeholder = "\u0001\u0002";
     const invalid = Buffer.from([0xc3, 0x28]);
     const withInvalid = (f: MetaDatFields): Buffer => {
-      const meta = buildMetaDat(6, f);
+      const meta = buildMetaDat(7, f);
       const at = meta.indexOf(Buffer.from(placeholder, "utf8"));
       assert.ok(at >= 0);
       invalid.copy(meta, at);
@@ -352,17 +362,17 @@ suite("CTFS meta.dat version 6", () => {
   });
 
   test("a header shorter than 12 bytes is refused", () => {
-    const full = buildMetaDat(6, FIELDS);
+    const full = buildMetaDat(7, FIELDS);
     assert.throws(() => parseMetaDat(full.subarray(0, 11)), /shorter than (its )?12-byte header/);
   });
 
   test("an unknown flags_ext bit is refused, naming the bits", () => {
-    assert.throws(() => parseMetaDat(buildMetaDat(6, FIELDS, 0, 0b110)), /flags_ext.*0x6/);
+    assert.throws(() => parseMetaDat(buildMetaDat(7, FIELDS, 0, 0b110)), /flags_ext.*0x6/);
   });
 
   test("bits 4 and 14 together are refused", () => {
     assert.throws(
-      () => parseMetaDat(buildMetaDat(6, FIELDS, FLAG_HAS_COLUMN_AWARE_STEPS | FLAG_HAS_LINE_COUNT_TABLE)),
+      () => parseMetaDat(buildMetaDat(7, FIELDS, FLAG_HAS_COLUMN_AWARE_STEPS | FLAG_HAS_LINE_COUNT_TABLE)),
       /bits 4 and 14/
     );
   });
@@ -447,7 +457,7 @@ suite("readCtfsTrace", () => {
     const many: string[] = [];
     for (let i = 0; i < 120; i++) {many.push(`/work/src/module_${i}.rs`);}
     const records = many.map((p) => lineCountRecord(p, 100 + i32(p)));
-    const container = traceWith(buildMetaDat(6, FIELDS, FLAG_HAS_LINE_COUNT_TABLE), records);
+    const container = traceWith(buildMetaDat(7, FIELDS, FLAG_HAS_LINE_COUNT_TABLE), records);
     assert.ok(buildPathsTable(records).dat.length > BLOCK_SIZE, "paths.dat must outgrow one block");
 
     const rejections: string[] = [];
@@ -460,19 +470,19 @@ suite("readCtfsTrace", () => {
 
   test("a trace with an empty paths.dat, or none, has no source paths", () => {
     const empty = buildMinimalCtfs([
-      ["meta.dat", buildMetaDat(6, FIELDS)],
+      ["meta.dat", buildMetaDat(7, FIELDS)],
       ["paths.dat", Buffer.alloc(0)],
       ["paths.off", Buffer.alloc(0)],
     ]);
     assert.deepStrictEqual(readCtfsTrace(writeTraceFolder(empty), assert.fail)?.paths, []);
-    const none = buildMinimalCtfs([["meta.dat", buildMetaDat(6, FIELDS)]]);
+    const none = buildMinimalCtfs([["meta.dat", buildMetaDat(7, FIELDS)]]);
     assert.deepStrictEqual(readCtfsTrace(writeTraceFolder(none), assert.fail)?.paths, []);
   });
 
   test("a version 4 container is reported and yields nothing", () => {
     const { dat, off } = buildPathsTable(PATHS.map(bareRecord));
     const v4 = buildMinimalCtfs(
-      [["meta.dat", buildMetaDat(6, FIELDS)], ["paths.dat", dat], ["paths.off", off]],
+      [["meta.dat", buildMetaDat(7, FIELDS)], ["paths.dat", dat], ["paths.off", off]],
       4
     );
     const dir = writeTraceFolder(v4);
@@ -486,7 +496,7 @@ suite("readCtfsTrace", () => {
   test("a container carrying events.log is reported and yields nothing", () => {
     const { dat, off } = buildPathsTable(PATHS.map(bareRecord));
     const legacy = buildMinimalCtfs([
-      ["meta.dat", buildMetaDat(6, FIELDS)],
+      ["meta.dat", buildMetaDat(7, FIELDS)],
       ["paths.dat", dat],
       ["paths.off", off],
       ["events.log", Buffer.from([0xa0])],
