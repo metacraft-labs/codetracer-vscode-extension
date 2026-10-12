@@ -8,7 +8,7 @@
  * the `paths.dat` + `paths.off` interning table, and only there.
  *
  * This module implements the read-only subset of the CTFS version 5
- * container needed to extract those members, the `meta.dat` version 6
+ * container needed to extract those members, the `meta.dat` version 7
  * header and body, and the three `paths.dat` record layouts.
  *
  * Specs (codetracer-trace-format-spec):
@@ -262,7 +262,7 @@ function base40Decode(encoded: bigint): string {
   return String.fromCharCode(...chars);
 }
 
-// ── meta.dat (CTMD v6) parser ───────────────────────────────────────────
+// ── meta.dat (CTMD v7) parser ───────────────────────────────────────────
 
 /** CTMD magic bytes for `meta.dat`: ASCII "CTMD". */
 const META_DAT_MAGIC = Buffer.from([0x43, 0x54, 0x4d, 0x44]);
@@ -270,14 +270,15 @@ const META_DAT_MAGIC = Buffer.from([0x43, 0x54, 0x4d, 0x44]);
 /**
  * The one `meta.dat` schema version this reader reads.
  *
- * Version 6 removed the path list that versions 3 to 5 wrote after
- * `recorder_id`, and always carries the u32 `flags_ext` word, so its
- * header is 12 bytes. The bytes after `recorder_id` mean something
- * different in every earlier version, and versions 3 and below also used
- * a superseded `global_position_index` packing, so every other version is
- * refused by name (internal-files.md §"Version History").
+ * Version 7 has no path list after `recorder_id` and always carries the
+ * u32 `flags_ext` word, so its header is 12 bytes. Version 6 has the same
+ * layout but a smaller set of `events.dat` kinds; the bytes after
+ * `recorder_id` mean something different in versions 5 and below, and
+ * versions 3 and below also used a superseded `global_position_index`
+ * packing. Every version other than 7 is refused by name
+ * (internal-files.md §"Version History").
  */
-export const SUPPORTED_META_DAT_VERSION = 6;
+export const SUPPORTED_META_DAT_VERSION = 7;
 
 const META_DAT_HEADER_SIZE = 12;
 
@@ -288,7 +289,7 @@ export const FLAG_HAS_LINE_COUNT_TABLE = 1 << 14;
 /** The `flags_ext` bits this reader implements: bit 0, `SourceReload`. */
 const KNOWN_FLAGS_EXT = 0x1;
 
-/** Decoded subset of a CTFS `meta.dat` payload (CTMD v6). */
+/** Decoded subset of a CTFS `meta.dat` payload (CTMD v7). */
 export interface CtfsMetaDat {
   /** Program path or identifier, exactly as recorded. */
   program: string;
@@ -352,11 +353,11 @@ function readString(buf: Buffer, cur: Cursor, field: string, what = "meta.dat"):
 }
 
 /**
- * Parse a binary `meta.dat` (CTMD v6) payload up to `recorder_id`.
+ * Parse a binary `meta.dat` (CTMD v7) payload up to `recorder_id`.
  *
  * The flag-gated blocks that may follow `recorder_id` are irrelevant to
  * source-file discovery and are not decoded. Source paths are not in
- * `meta.dat` at version 6; read them with {@link parsePathsDat}.
+ * `meta.dat` at version 7; read them with {@link parsePathsDat}.
  *
  * Throws on any version other than {@link SUPPORTED_META_DAT_VERSION}, on
  * a header shorter than 12 bytes, on an unknown `flags_ext` bit, and on a
