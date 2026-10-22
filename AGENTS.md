@@ -158,6 +158,18 @@ Test files:
 - `wdio.conf.ts` — WDIO configuration with VS Code Insiders resolution, chromedriver
   setup, and test workspace configuration
 
+### Extension host tests (`just test-vscode`)
+
+`just test-vscode` runs the mocha suites in `src/test/` inside VS Code through
+`npx vscode-test` (`.vscode-test.mjs`). In the dev shell it launches the
+Electron executable named by `VSCODE_INSIDERS_EXECUTABLE` (flake.nix), not the
+`bin/code-insiders` CLI launcher in `VSCODE_INSIDERS_PATH` that WDIO uses: the
+launcher detaches VS Code and exits 0, so no test ever reported.
+`.vscode-test.mjs` refuses a missing, non-executable or script path by name,
+and the recipe fails when the output lacks mocha's `<N> passing` summary.
+`just test-vscode-control` runs an always-throwing test
+(`src/test-control/throws.control.ts`) and requires the run to fail naming it.
+
 ### Generating the Stylus trace fixture for Tier 3
 
 The Stylus trace fixture used by `stylus-trace-load.e2e.ts` must be generated from a

@@ -3,7 +3,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-const EXTENSION_ID = 'ct-vscode';
+// VS Code identifies an extension as `<publisher>.<name>` from its
+// package.json (here `metacraft-labs.ct-vscode`); the bare `name` matches
+// nothing, so getExtension() returns undefined. Derive the id from the
+// manifest so a rename cannot silently break every lookup again. This file
+// compiles to out/test/, two levels below the extension root.
+const EXTENSION_ID = (() => {
+	const manifest = JSON.parse(
+		fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')
+	) as { publisher: string; name: string };
+	return `${manifest.publisher}.${manifest.name}`;
+})();
 const EXPECTED_COMMANDS = [
 	'ct-vscode.toggleCT',
 	'ct-vscode.loadCurrentFile',

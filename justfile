@@ -85,9 +85,16 @@ compile-ts:
 compile-wdio:
     npm run compile:wdio
 
-# Run the VS Code extension host tests from src/test under Xvfb.
+# Run the VS Code extension host tests from src/test under Xvfb. Fails when
+# vscode-test fails, and also when it exits 0 without mocha's `<N> passing`
+# summary, i.e. when no test reported (scripts/run-vscode-test.sh).
 test-vscode:
-    just _xvfb-run "npx vscode-test"
+    just _xvfb-run "bash scripts/run-vscode-test.sh"
+
+# Positive control for test-vscode: a run of an always-throwing test must exit
+# non-zero and name that test (scripts/check-test-vscode-control.sh).
+test-vscode-control:
+    just _xvfb-run "bash scripts/check-test-vscode-control.sh"
 
 # Helper: start Xvfb and run a command with DISPLAY set.
 # Usage: just _xvfb-run "npx wdio run wdio.conf.ts --spec ..."
@@ -304,4 +311,4 @@ test-wdio: prepare-wdio-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts"
 
 # Run every repo-local test/check entrypoint; full WDIO needs siblings/fixtures.
-test: lint compile-ts compile-wdio test-vscode test-wdio
+test: lint compile-ts compile-wdio test-vscode test-vscode-control test-wdio

@@ -169,6 +169,21 @@
             export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath chromiumLibs}:''${LD_LIBRARY_PATH:-}
             # Point WDIO at the nix-provided VS Code Insiders binary
             export VSCODE_INSIDERS_PATH="${vscodeInsiders}/bin/code-insiders"
+            # The Electron executable `just test-vscode` (@vscode/test-electron,
+            # via .vscode-test.mjs) must spawn. It cannot use VSCODE_INSIDERS_PATH:
+            # that bin/ entry is VS Code's CLI launcher (a wrapper script running
+            # `ELECTRON_RUN_AS_NODE=1 electron cli.js`), which starts the app
+            # detached and exits 0 at once, so the test run "passed" without a
+            # single test reporting. On Darwin the path follows nixpkgs'
+            # `$out/Applications/<longName>.app` layout and test-electron's own
+            # `Contents/MacOS/Electron` convention; it has not been verified on a
+            # Darwin host, and .vscode-test.mjs refuses it loudly if it is wrong.
+            export VSCODE_INSIDERS_EXECUTABLE="${
+              if pkgs.stdenv.isDarwin then
+                "${vscodeInsiders}/Applications/Visual Studio Code - Insiders.app/Contents/MacOS/Electron"
+              else
+                "${vscodeInsiders}/lib/vscode/code-insiders"
+            }"
             # Use nix-provided chromedriver for WDIO (npm binary won't run on NixOS).
             # Must match the Chrome version embedded in VS Code Insiders' Electron.
             export CHROMEDRIVER_PATH="${chromedriver-pinned}/bin/chromedriver"

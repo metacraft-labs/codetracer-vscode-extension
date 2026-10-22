@@ -35,6 +35,7 @@ tests/
 scripts/
 *.test.*
 *.spec.*
+out/test-control/**
 
 # Git
 .git
