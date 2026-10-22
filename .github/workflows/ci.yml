@@ -387,6 +387,18 @@ jobs:
           echo "COMBINED_BIN contents:"
           ls -la "$COMBINED_BIN"
 
+      # The extension built from the codetracer sibling (CODETRACER_DIR,
+      # default ../codetracer): its panel and host bundles, middleware, theme
+      # and replay backend. The smoke suite then runs against that build and
+      # fails, rather than skips, if the panel bundle is missing.
+      - name: Build the extension against the codetracer sibling
+        run: dev-exec just build
+
+      - name: Run WDIO smoke tests against the built bundle
+        env:
+          CT_EXPECT_PANEL_BUNDLE: "1"
+        run: dev-exec just test-wdio-smoke
+
       - name: Prepare blockchain trace fixtures
         run: dev-exec just prepare-wdio-blockchain-fixtures
 

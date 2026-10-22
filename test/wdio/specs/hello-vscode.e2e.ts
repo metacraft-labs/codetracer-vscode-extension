@@ -6,7 +6,7 @@
  * the heavier trace-loading tests are unlikely to succeed.
  */
 import { browser, expect } from '@wdio/globals'
-import { ExtensionState } from '../page-objects'
+import { ExtensionState, panelDocuments } from '../page-objects'
 import { captureFullDiagnostics } from '../helpers/diagnostics'
 
 const ext = new ExtensionState()
@@ -62,5 +62,55 @@ describe('CodeTracer Extension - Smoke Test', () => {
 
     // The compiled extension.js must exist
     expect(status['out/extension.js']?.exists).toBe(true)
+  })
+
+  // THE REAL PANEL BUNDLE (Shared-DOM-Front-Ends D5). A TypeScript-only
+  // build has no `media/vscode_panel.js`; a `just build` from the codetracer
+  // checkout does, and CI's integration job sets CT_EXPECT_PANEL_BUNDLE=1 so
+  // its absence fails instead of skipping.
+  it('opens a panel whose webview loads vscode_panel.js alone, and mounts it', async function () {
+    const status = await ext.resourceFileStatus()
+    const built = Boolean(status['media/vscode_panel.js']?.exists && status['media/vscode_host.js']?.exists)
+    if (!built) {
+      if (process.env.CT_EXPECT_PANEL_BUNDLE === '1') {
+        throw new Error('media/vscode_panel.js / media/vscode_host.js are missing: run `just build` against the codetracer checkout')
+      }
+      this.skip()
+    }
+    await ext.ensureActivated()
+    await browser.executeWorkbench(async (vscode) => {
+      await vscode.commands.executeCommand('ct-vscode.openState')
+    })
+    let docs: Awaited<ReturnType<typeof panelDocuments>> = []
+    await browser.waitUntil(async () => {
+      docs = await panelDocuments()
+      return docs.some((d) => d.panel === 'state' && d.mounted === 'state')
+    }, { timeout: 30000, interval: 500, timeoutMsg: 'the State panel webview did not mount vscode_panel.js' })
+    console.log('Panel documents:', JSON.stringify(docs))
+    const state = docs.find((d) => d.panel === 'state')!
+    // One script, the panel's: no renderer bundle, no webpack bundle, no
+    // Monaco, no jQuery.
+    expect(state.scripts).toEqual(['vscode_panel.js'])
+    const open = await browser.executeWorkbench(async (vscode) => {
+      const extension = vscode.extensions.getExtension('metacraft-labs.ct-vscode')
+      return (extension?.exports as any)?.openPanels?.() ?? []
+    })
+    expect(open).toContain('state')
+
+    // What of the arrangement the extension can read back (D9 / SDF-AREQ9):
+    // the column VS Code put the panel in, and the editor layout through
+    // VS Code's own `vscode.getEditorLayout` command. Logged as the
+    // measurement. The extension asks for column Two; with no editor open
+    // VS Code puts the panel in the first group (measured 2026-10-22), so
+    // the assertion is that the column is readable, not which it is.
+    const arrangement = await browser.executeWorkbench(async (vscode) => {
+      const extension = vscode.extensions.getExtension('metacraft-labs.ct-vscode')
+      const columns = (extension?.exports as any)?.panelColumns?.() ?? {}
+      const layout = await vscode.commands.executeCommand('vscode.getEditorLayout')
+      return { columns, layout }
+    })
+    console.log('Panel arrangement:', JSON.stringify(arrangement))
+    expect((arrangement as any).columns.state).toBeGreaterThanOrEqual(1)
+    expect((arrangement as any).layout).toBeDefined()
   })
 })

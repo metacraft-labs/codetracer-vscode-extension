@@ -187,3 +187,53 @@ export async function inspectWebviews(label: string): Promise<any[]> {
 
   return results
 }
+
+/** One CodeTracer panel webview, as its document reports itself. */
+export interface PanelDocument {
+  /** `<body data-ct-panel>`: the panel the webview was opened for. */
+  panel: string
+  /** `<body data-ct-mounted>`: set by `vscode_panel.js` once it mounted. */
+  mounted: string
+  /** Every script the document loaded, by file name. */
+  scripts: string[]
+}
+
+/**
+ * The CodeTracer panel webviews in the window: every frame (to three levels
+ * of nesting, as VS Code draws webviews) whose body names a panel.
+ */
+export async function panelDocuments(): Promise<PanelDocument[]> {
+  const found: PanelDocument[] = []
+  const probe = async () => {
+    const doc = await browser.execute(() => {
+      const body = document.body
+      if (!body || !body.dataset.ctPanel) return null
+      return {
+        panel: body.dataset.ctPanel ?? '',
+        mounted: body.getAttribute('data-ct-mounted') ?? '',
+        scripts: Array.from(document.querySelectorAll('script'))
+          .map((s) => (s.getAttribute('src') ?? '').split('?')[0].split('/').pop() ?? '')
+          .filter((name) => name.length > 0),
+      }
+    })
+    if (doc) found.push(doc as PanelDocument)
+  }
+  const walk = async (depth: number) => {
+    await probe()
+    if (depth >= 3) return
+    const frames = await browser.$$('iframe')
+    for (let i = 0; i < Math.min(frames.length, 10); i++) {
+      try {
+        await browser.switchToFrame(frames[i])
+        await walk(depth + 1)
+      } catch { /* a frame that went away */ }
+      try { await browser.switchToParentFrame() } catch { /* ignore */ }
+    }
+  }
+  try {
+    await walk(0)
+  } finally {
+    try { await browser.switchToFrame(null) } catch { /* ignore */ }
+  }
+  return found
+}

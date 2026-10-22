@@ -9,7 +9,6 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
-libs/codetracer
 public/dist
 nix/**
 # db-backend/

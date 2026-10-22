@@ -2,28 +2,40 @@ Activate the flake-backed environment with `repro allow` and the repro shell hoo
 
 # Build Process
 
-The extension has a multi-stage build pipeline that combines Nim-compiled JavaScript,
-Rust binaries, and TypeScript. The canonical build command is:
+The extension is built from the **codetracer checkout beside it** —
+`CODETRACER_DIR`, default `../codetracer` (the workspace layout); there is no
+codetracer submodule. The canonical build command is:
 
 ```bash
-just build
+just build                                  # or: CODETRACER_DIR=/path/to/codetracer just build
 ```
 
 This runs the following stages (see `justfile`):
 
 1. **`npm install`** — install Node.js dependencies
-2. **`build_for_extension.sh`** (inside `nix develop` devShell) — compiles the Nim frontend:
-   - `nim js src/frontend/ui_js.nim` → `media/ui.js` (renderer UI)
-   - `nim js src/frontend/middleware.nim` → `media/ct_vscode.js` (extension middleware)
-   - `just build-once` in codetracer repo (tup incremental build + webpack)
-   - `cargo build` in `src/db-backend` → `backend/db-backend` (DAP server binary)
-3. **Symlinks** — creates symlinks from `libs/codetracer/src/public/` into `media/`:
-   - `media/frontend_bundle.js` → webpack bundle
-   - `media/third_party/` → jstree, etc.
-   - `media/styles/default_dark_theme_extension.css` → theme CSS
-   - `media/fonts/SpaceGrotesk-VariableFont_wght.ttf` → font
+2. **codetracer's `build_for_extension.sh`** (inside codetracer's `nix develop`
+   devShell) — builds into `media/` and `backend/`:
+   - `media/vscode_panel.js` — every panel webview's one script: that panel's
+     view over a mirror of the session the extension host owns
+     (`src/frontend/entries/vscode_panel.nim`)
+   - `media/vscode_host.js` — the extension host's sessions, one per
+     CodeTracer debug session (`src/frontend/entries/vscode_host.nim`),
+     loaded by `src/sessionHost.ts`
+   - `media/ct_vscode.js` — the extension host's middleware
+   - `backend/replay-server` — the replay backend (`cargo build`)
+3. **Theme** — compiles codetracer's `default_dark_theme_extension.styl` into
+   `media/styles/`, copies the icons and fonts it refers to into
+   `media/resources/` and `media/design-system/`, and rewrites its URLs to
+   them (a webview may load only from `media/`)
 4. **`npm run compile:ts`** (`tsc -p ./`) — compile TypeScript to `out/`
 5. **`cp media/ct_vscode.js out/ct_vscode.js`** — restore Nim-compiled middleware
+
+The panels hold no debugger state: `src/sessionHost.ts` routes VS Code's debug
+sessions, their adapter's events (a debug adapter tracker) and each panel's
+messages to `vscode_host.js`, which serves every panel a mirror of the active
+session. Panels are restored with the window (`registerWebviewPanelSerializer`),
+and `codetracer.panels.fileTree` chooses CodeTracer's Files panel or VS Code's
+Explorer as the file tree.
 
 ### CRITICAL: The ct_vscode.js overwrite bug
 
@@ -52,20 +64,23 @@ an incomplete build that produces a broken extension.
 ### Required media assets
 
 After a full build, these files must exist and be non-empty:
-- `media/ui.js` — Nim-compiled renderer (~2.5 MB)
-- `media/ct_vscode.js` — Nim-compiled middleware (~1.2 MB)
-- `media/frontend_bundle.js` — webpack bundle (symlink)
-- `media/third_party/jstree.min.js` — jsTree library (symlink)
-- `media/styles/default_dark_theme_extension.css` — theme (symlink)
-- `backend/db-backend` — DAP server binary
+- `media/vscode_panel.js` — the panel webviews' script
+- `media/vscode_host.js` — the extension host's sessions
+- `media/ct_vscode.js` — Nim-compiled middleware
+- `media/styles/default_dark_theme_extension.css` — theme
+- `backend/replay-server` — DAP server binary
+
+The WDIO smoke suite (`just test-wdio-smoke`) opens the State panel and
+asserts its webview loads `vscode_panel.js` alone and mounts; it skips that
+case without a built bundle unless `CT_EXPECT_PANEL_BUNDLE=1`, which CI's
+integration job sets.
 
 ### Nim compilation integration note
 
-The Nim compilation currently requires the Nix devShell from the codetracer repo
-(`libs/codetracer`). This is invoked via `nix develop` in the `just build` target.
-There is no way to run Nim compilation from a bare `npm run compile` — it always
-requires the Nix environment. The `vscode:prepublish` script calls `just build`
-to ensure a full build before packaging.
+The Nim compilation requires codetracer's Nix devShell, which `just build`
+enters with `nix develop` in `CODETRACER_DIR`. There is no way to run Nim
+compilation from a bare `npm run compile`. The `vscode:prepublish` script calls
+`just build` to ensure a full build before packaging.
 
 # Testing
 

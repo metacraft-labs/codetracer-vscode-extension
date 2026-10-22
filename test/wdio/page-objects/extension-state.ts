@@ -98,9 +98,9 @@ export class ExtensionState {
       if (!ext) return {}
 
       const files = [
-        'media/frontend_bundle.js',
+        'media/vscode_panel.js',
+        'media/vscode_host.js',
         'media/ct_vscode.js',
-        'media/third_party/jstree.min.js',
         'media/styles/default_dark_theme_extension.css',
         'out/extension.js',
         'out/ct_vscode.js',

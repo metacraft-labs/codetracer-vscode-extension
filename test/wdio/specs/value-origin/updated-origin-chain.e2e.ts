@@ -5,30 +5,17 @@
  *
  * The db-backend emits `ct/updated-origin-chain` as a lazy-continuation
  * DAP event alongside the canonical `ct/originChain` response (spec
- * §5.2). On the TypeScript side the extension MUST forward every such
- * event payload into the embedded CodeTracer webview via
- * `panel.webview.postMessage(...)` so the embedded `OriginChainVM` can
- * merge the update without re-issuing the request.
+ * §5.2). The extension host's session receives every event the replay
+ * sends (its debug adapter tracker) and merges the update into its
+ * `OriginChainVM`; the panels mirror that session, so no event is
+ * forwarded to a webview (Shared-DOM-Front-Ends D2/D5).
  *
- * Without a real `codetracer-debug` session we cannot inject a real DAP
- * custom event — `vscode.debug.onDidReceiveDebugSessionCustomEvent` is a
- * read-only stream populated by the debug adapter. The spec gates that
- * end-to-end path behind a running adapter. What we *can* verify in any
- * environment is the contract the subscription delegates to:
- * `forwardToEmbeddedPanels(...)` posts a `ct/updated-origin-chain`
- * envelope to every embedded panel. The DAP-event subscription in
- * `src/extension.ts` is a one-line bridge that invokes exactly this
- * function with exactly this envelope (see the
- * `onDidReceiveDebugSessionCustomEvent` handler), so verifying the
- * function directly is the tightest unit-level proof the wiring is
- * correct.
- *
- * The second test in this file probes for an active CodeTracer debug
- * session and, if one is present, exercises the end-to-end DAP path by
- * triggering a `ct/originChain` request and waiting for the matching
- * `ct/updated-origin-chain` event. In environments without a live
- * recorder + db-backend the probe fails explicitly with a precise reason
- * string — the same discipline the M3 / M5 specs use.
+ * The spec starts a CodeTracer debug session, asks for a chain, and
+ * observes the event reaching the host through the extension's
+ * `registerPanelOverride` seam, which is handed each event the replay
+ * sends. In environments without a live recorder + db-backend the probe
+ * fails explicitly with a precise reason string — the same discipline the
+ * M3 / M5 specs use.
  *
  * Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org M6.
  */
@@ -59,76 +46,6 @@ describe('Value Origin Tracking M6 — ct/updated-origin-chain forwarding', () =
     await debug.stop()
   })
 
-  it('forwards the ct/updated-origin-chain payload to every embedded panel', async () => {
-    // Drive the production `forwardToEmbeddedPanels(...)` helper with the
-    // exact envelope the DAP-event subscription would build, and verify
-    // the override panel receives it. This is the same code path the
-    // `onDidReceiveDebugSessionCustomEvent` handler triggers — only the
-    // upstream signal differs (here: synchronous call; there: VS Code
-    // debug event stream).
-    const captured = await browser.executeWorkbench(
-      async (vscode, eventName: string) => {
-        const extension = vscode.extensions.getExtension('metacraft-labs.ct-vscode')
-        if (!extension) {
-          return { error: 'extension not found', messages: [] as any[] }
-        }
-        if (!extension.isActive) {
-          await extension.activate()
-        }
-        const exports = extension.exports as any
-        if (
-          !exports ||
-          typeof exports.registerPanelOverride !== 'function' ||
-          typeof exports.forwardToEmbeddedPanels !== 'function'
-        ) {
-          return { error: 'M6 test seam exports missing', messages: [] as any[] }
-        }
-
-        const messages: any[] = []
-        const fakePanel = {
-          webview: {
-            postMessage(message: any) {
-              messages.push(message)
-              return Promise.resolve(true)
-            },
-          },
-        }
-        const dispose = exports.registerPanelOverride('m6-dap-event-panel', fakePanel)
-        try {
-          // Synthetic event body modelled on §5.2 — the wire shape is
-          // opaque to the extension; the embedded panel parses it. We
-          // only assert the envelope and that the body round-trips
-          // verbatim.
-          const body = {
-            requestId: 'm6-test-req-1',
-            queryVariable: 'total',
-            hops: [],
-            terminator: { kind: 'Literal', expression: '10' },
-          }
-          exports.forwardToEmbeddedPanels({
-            command: eventName,
-            value: body,
-          })
-        } finally {
-          dispose()
-        }
-
-        return { error: null as string | null, messages }
-      },
-      UPDATED_ORIGIN_CHAIN_EVENT
-    )
-
-    expect((captured as any).error).toBeNull()
-    const messages = (captured as any).messages as any[]
-    expect(messages.length).toBeGreaterThanOrEqual(1)
-    const update = messages.find(
-      (m) => m?.command === UPDATED_ORIGIN_CHAIN_EVENT
-    )
-    expect(update).toBeDefined()
-    expect(update?.value?.queryVariable).toBe('total')
-    expect(update?.value?.terminator?.kind).toBe('Literal')
-  })
-
   it('end-to-end: forwards a real DAP ct/updated-origin-chain event when a codetracer-debug session is active', async function () {
     const traceFolder = crossProcessTracePath('frontend.ct')
     const started = await debug.start(traceFolder)
@@ -150,9 +67,8 @@ describe('Value Origin Tracking M6 — ct/updated-origin-chain forwarding', () =
 
     // With a session active, register a probe via the extension's test
     // seam, then invoke a `ct/originChain` customRequest. The db-backend
-    // is expected to fire one `ct/updated-origin-chain` event back; the
-    // subscription in `src/extension.ts` forwards it through
-    // `forwardToEmbeddedPanels(...)`, which our override observes.
+    // is expected to fire one `ct/updated-origin-chain` event back, which
+    // reaches the host's session and our override.
     const result = await browser.executeWorkbench(async (vscode) => {
       const extension = vscode.extensions.getExtension('metacraft-labs.ct-vscode')
       const exports = extension?.exports as any

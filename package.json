@@ -27,7 +27,16 @@
     "onCommand:ct-vscode.toggleCT",
     "onCommand:ct-vscode.loadCurrentFile",
     "onCommand:ct-vscode.loadRecentTraces",
-    "onLanguage:solidity"
+    "onLanguage:solidity",
+    "onWebviewPanel:codetracer.state",
+    "onWebviewPanel:codetracer.calltrace",
+    "onWebviewPanel:codetracer.eventLog",
+    "onWebviewPanel:codetracer.terminalOutput",
+    "onWebviewPanel:codetracer.scratchpad",
+    "onWebviewPanel:codetracer.traceLog",
+    "onWebviewPanel:codetracer.flow",
+    "onWebviewPanel:codetracer.pointList",
+    "onWebviewPanel:codetracer.fileTree"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -58,6 +67,19 @@
           "type": "number",
           "default": 7117,
           "description": "TCP port the marketing-command listener binds to on 127.0.0.1 (default 7117; matches GuiAssert's VsCodeClient)."
+        },
+        "codetracer.panels.fileTree": {
+          "type": "string",
+          "enum": [
+            "codetracer",
+            "editor"
+          ],
+          "default": "codetracer",
+          "enumDescriptions": [
+            "CodeTracer's Files panel lists the recording's sources and follows the editor.",
+            "VS Code's Explorer is the file tree; CodeTracer opens no Files panel."
+          ],
+          "description": "Which file tree a CodeTracer debug session shows: CodeTracer's Files panel, or VS Code's own Explorer."
         }
       }
     },
@@ -165,6 +187,33 @@
         "command": "ct-vscode.showValueOrigin",
         "title": "Show Value Origin",
         "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.openTraceLog",
+        "title": "Open Trace Log Panel",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.openPointList",
+        "title": "Open Points Panel",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.openFileTree",
+        "title": "Open Files Panel",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.historyBack",
+        "title": "History Back",
+        "category": "CodeTracer",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "ct-vscode.historyForward",
+        "title": "History Forward",
+        "category": "CodeTracer",
+        "icon": "$(arrow-right)"
       }
     ],
     "menus": {
@@ -210,6 +259,18 @@
       "commandPalette": [
         {
           "command": "ct-vscode.showValueOrigin"
+        }
+      ],
+      "debug/toolbar": [
+        {
+          "command": "ct-vscode.historyBack",
+          "when": "debugType == 'codetracer-debug'",
+          "group": "navigation@90"
+        },
+        {
+          "command": "ct-vscode.historyForward",
+          "when": "debugType == 'codetracer-debug'",
+          "group": "navigation@91"
         }
       ]
     },

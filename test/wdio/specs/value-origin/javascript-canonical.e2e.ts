@@ -129,6 +129,13 @@ describe('M7 — JavaScript simple_trivial_chain Value Origin', () => {
         })
         try {
           const delivered = await vscode.commands.executeCommand(command)
+          // The extension host's session asks for the chain and the replay
+          // answers with a `ct/updated-origin-chain` event, after the command
+          // has returned: wait for it.
+          for (let waited = 0; waited < 10000; waited += 100) {
+            if (messages.some((m) => m?.command === 'ct/updated-origin-chain')) break
+            await new Promise((r) => setTimeout(r, 100))
+          }
           return { error: null as string | null, delivered, messages }
         } finally {
           dispose()

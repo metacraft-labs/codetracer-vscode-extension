@@ -1,5 +1,4 @@
 /// <reference path="../vscode.proposed.editorInsets.d.ts" />
-import "./window-shim";
 import * as vscode from "vscode";
 import {
   initPanels,
@@ -7,10 +6,12 @@ import {
   disposeCommands,
   addTracepoint,
   addLoopPosition,
-  forwardToEmbeddedPanels,
-  _testRegisterPanelOverride,
-  PostMessageTarget,
+  openPanel,
+  registerPanelCommands,
+  registerPanelSerializers,
 } from "./initPanels";
+import * as sessionHost from "./sessionHost";
+import { activePanels } from "./panelManager";
 import { MarketingListener, makeVsCodeDispatcher, DEFAULT_MARKETING_PORT } from "./marketing_listener";
 import * as utils from "./utils";
 import * as os from "os";
@@ -20,11 +21,8 @@ import * as path from 'path';
 import { readCtfsTrace } from "./ctfs";
 import {
   DapVsCodeApi,
-  setupVsCodeExtensionViewsApi,
   newDapVsCodeApi,
-  setupMiddlewareApis,
   ctSourceLineJump,
-  ctAddToScratchpad,
   CtJumpBehaviour,
   LoadMode,
   getRecentTraces,
@@ -32,23 +30,20 @@ import {
   getTransactionTrace,
   getCurrentTrace,
   getFlowList,
-  receive,
-  computeFlowInsetData,
   TraceInfo,
   TransactionInfo,
-  MediatorWithSubscribers,
 } from "./ct_vscode.js";
 
-const tracepointInsets = new Map<number, vscode.WebviewEditorInset>();
+let extensionContext: vscode.ExtensionContext | undefined;
+let hostWired = false;
 let flowInsetPath: string | undefined;
 const flowInsets = new Map<number, vscode.WebviewEditorInset>();
-let lastFlowLocation: unknown | undefined;
 let ctStarted = false;
 let adapterFactoryDisposable: vscode.Disposable | undefined;
 let pendingLaunchPanels = false;
 let panelsInitialized = false;
 
-// CtEventKind values are defined in libs/codetracer/src/common/ct_event.nim.
+// CtEventKind values are defined in codetracer's src/common/ct_event.nim.
 // IMPORTANT: Keep these in sync with the Nim enum. CtUpdateExpansion (64) and
 // CtUpdateExpansionResponse (65) were added after this file was originally written,
 // shifting InternalLastCompleteMove from 64 to 66.
@@ -59,57 +54,15 @@ const enum CtEventKind {
   InternalLastCompleteMove = 66,
 }
 
-const enum CtFlowMode {
-  Call = 0,
-  Diff = 1,
-}
-
 const FLOW_DECORATION_MAX_VALUES_PER_LINE = 10;
 const FLOW_DECORATION_MAX_TEXT_LENGTH = 180;
 
-type FlowValueMap = Record<string, any>;
-type FlowLineValue = { line: number; text: string };
-type FlowLoopSlider = {
-  line: number;
-  loopId: number;
-  activeIteration: number;
-  locationInside?: boolean;
-};
-type FlowInsetData = {
-  lineValues?: FlowLineValue[];
-  loopSliders?: FlowLoopSlider[];
-};
-
-interface FlowStep {
-  position?: number;
-  stepCount?: number;
-  exprOrder?: string[];
-  beforeValues?: FlowValueMap;
-  afterValues?: FlowValueMap;
-}
-
-interface FlowViewUpdate {
-  location?: { highLevelPath?: string; path?: string };
-  steps?: FlowStep[];
-  renderValueGroups?: any[][];
-}
-
-interface FlowUpdate {
-  location?: { highLevelPath?: string; path?: string };
-  viewUpdates?: Array<FlowViewUpdate | null | undefined> | Record<string, FlowViewUpdate | null | undefined>;
-  error?: boolean;
-}
-
-interface CtLoadFlowArguments {
-  flowMode: CtFlowMode;
-  location: unknown;
-}
+type FlowLineValue = sessionHost.FlowLine;
+type FlowLoopSlider = sessionHost.FlowLoop;
 
 let flowDecorationType: vscode.TextEditorDecorationType | undefined;
 const flowLineValuesByPath = new Map<string, FlowLineValue[]>();
 const flowLoopSlidersByPath = new Map<string, FlowLoopSlider[]>();
-let internalLastCompleteMoveHandlerRegistered = false;
-let lastFlowLocationKey: string | undefined;
 
 interface TraceMetadata {
   workdir?: string;
@@ -141,80 +94,12 @@ function normalizeFlowPath(rawPath?: string): string | undefined {
   return path.normalize(rawPath);
 }
 
-function getFlowLocationKey(location: unknown): string | undefined {
-  if (!location || typeof location !== "object") {
-    return undefined;
-  }
-
-  const key = (location as { key?: unknown }).key;
-  return typeof key === "string" && key.length > 0 ? key : undefined;
-}
-
 function sanitizeDecorationText(text: string): string {
   const trimmed = text.replace(/\s+/g, " ").trim();
   if (trimmed.length <= FLOW_DECORATION_MAX_TEXT_LENGTH) {
     return trimmed;
   }
   return `${trimmed.slice(0, FLOW_DECORATION_MAX_TEXT_LENGTH - 3)}...`;
-}
-
-function resolveFlowViewUpdates(update: FlowUpdate): FlowViewUpdate[] {
-  const viewUpdates = update.viewUpdates;
-  if (Array.isArray(viewUpdates)) {
-    return viewUpdates.filter((item): item is FlowViewUpdate => Boolean(item));
-  }
-  if (viewUpdates && typeof viewUpdates === "object") {
-    const values = Object.values(viewUpdates);
-    return values.filter((item): item is FlowViewUpdate => Boolean(item));
-  }
-  return [];
-}
-
-function updateFlowValuesCache(update: FlowUpdate): void {
-  if (!update || update.error) {
-    return;
-  }
-
-  const viewUpdate = resolveFlowViewUpdates(update)[0];
-  if (!viewUpdate) {
-    return;
-  }
-
-  const pathKey = normalizeFlowPath(
-    viewUpdate.location?.highLevelPath ??
-    viewUpdate.location?.path ??
-    update.location?.highLevelPath ??
-    update.location?.path
-  );
-  if (!pathKey) {
-    return;
-  }
-
-  let sourceLines: string[] = [];
-  try {
-    sourceLines = fs.readFileSync(pathKey, "utf8").split(/\r?\n/);
-  } catch {
-    return;
-  }
-
-  const insetData = computeFlowInsetData(
-    update,
-    sourceLines,
-    FLOW_DECORATION_MAX_VALUES_PER_LINE
-  ) as FlowInsetData | undefined;
-  const lineValues = insetData?.lineValues;
-  if (!Array.isArray(lineValues) || lineValues.length === 0) {
-    flowLineValuesByPath.delete(pathKey);
-  } else {
-    flowLineValuesByPath.set(pathKey, lineValues);
-  }
-
-  const loopSliders = insetData?.loopSliders;
-  if (!Array.isArray(loopSliders) || loopSliders.length === 0) {
-    flowLoopSlidersByPath.delete(pathKey);
-  } else {
-    flowLoopSlidersByPath.set(pathKey, loopSliders);
-  }
 }
 
 function applyFlowDecorationsForEditor(editor: vscode.TextEditor | undefined): void {
@@ -286,7 +171,6 @@ function clearFlowInset(): void {
 
 function syncFlowInsetForEditor(
   context: vscode.ExtensionContext,
-  viewsApi: MediatorWithSubscribers,
   editor: vscode.TextEditor | undefined
 ): void {
   if (!editor) {
@@ -322,102 +206,36 @@ function syncFlowInsetForEditor(
   }
 
   clearFlowInset();
-  const inset = addLoopPosition(context, viewsApi, editor, targetLine);
+  const inset = addLoopPosition(context, editor, targetLine);
   flowInsets.set(line, inset);
   flowInsetPath = pathKey;
-
-  // A new inset can miss the latest flow event while the webview initializes.
-  // Re-request flow from the last known debugger location right after inset creation.
-  if (lastFlowLocation) {
-    setTimeout(() => emitCtLoadFlow(viewsApi, lastFlowLocation), 0);
-    setTimeout(() => emitCtLoadFlow(viewsApi, lastFlowLocation), 60);
-  }
 }
 
-function emitCtLoadFlow(viewsApi: MediatorWithSubscribers, location: unknown): void {
-  // Avoid sending when the debug session is not ready (prevents customRequest undefined).
-  const session = vscode.debug.activeDebugSession;
-  if (!session || session.type !== "codetracer-debug" || typeof session.customRequest !== "function") {
-    return;
-  }
-  const args: CtLoadFlowArguments = {
-    flowMode: CtFlowMode.Call,
-    location,
-  };
-  receive(viewsApi, CtEventKind.CtLoadFlow, args, viewsApi.asSubscriber);
-}
-
-function registerFlowDecorationHandlers(
-  context: vscode.ExtensionContext,
-  dapApi: DapVsCodeApi,
-  viewsApi: MediatorWithSubscribers
-): void {
-  if (!Array.isArray(dapApi.handlers)) {
-    return;
-  }
-  if (!dapApi.handlers[CtEventKind.CtUpdatedFlow] || !dapApi.handlers[CtEventKind.CtCompleteMove]) {
-    return;
-  }
-
-  if (
-    !internalLastCompleteMoveHandlerRegistered &&
-    Array.isArray(viewsApi.handlers) &&
-    Array.isArray(viewsApi.handlers[CtEventKind.InternalLastCompleteMove])
-  ) {
-    viewsApi.handlers[CtEventKind.InternalLastCompleteMove].push((_kind: number, _value: unknown, _sub: unknown) => {
-      if (!lastFlowLocation) {
-        return;
+/**
+ * Draw the flow the host's session holds (`FlowVM`, fed by the stop loader):
+ * values after each line, and the loop control in an inset on the loop the
+ * debugger is in. Shared-DOM-Front-Ends D9: fed from the host's ViewModels,
+ * never computed here.
+ */
+function registerHostFlowDecorations(context: vscode.ExtensionContext): void {
+  sessionHost.onFlowLines((filePath, lines, loops) => {
+    flowLineValuesByPath.clear();
+    flowLoopSlidersByPath.clear();
+    const pathKey = normalizeFlowPath(filePath);
+    if (pathKey) {
+      if (lines.length > 0) {
+        flowLineValuesByPath.set(pathKey, lines.slice(0, 1000));
       }
-      emitCtLoadFlow(viewsApi, lastFlowLocation);
-      setTimeout(() => emitCtLoadFlow(viewsApi, lastFlowLocation), 50);
-    });
-    internalLastCompleteMoveHandlerRegistered = true;
-  }
-
-  // Track flow updates as they arrive from the DAP so we can decorate immediately.
-  dapApi.handlers[CtEventKind.CtUpdatedFlow].push((_kind: number, update: FlowUpdate, _sub: any) => {
-    lastFlowLocationKey = getFlowLocationKey(update?.location) ?? lastFlowLocationKey;
-    updateFlowValuesCache(update);
-    const activeEditor = vscode.window.activeTextEditor;
-    applyFlowDecorationsForEditor(activeEditor);
-    syncFlowInsetForEditor(context, viewsApi, activeEditor);
-  });
-
-  // Same-function moves should reuse the current flow shape; reloading on every step
-  // shrinks loop iteration metadata to the current position and resets the slider.
-  dapApi.handlers[CtEventKind.CtCompleteMove].push((_kind: number, response: { location?: unknown }) => {
-    if (response?.location) {
-      const nextLocationKey = getFlowLocationKey(response.location);
-      const shouldReloadFlow =
-        !nextLocationKey ||
-        !lastFlowLocationKey ||
-        nextLocationKey !== lastFlowLocationKey;
-
-      lastFlowLocation = response.location;
-      lastFlowLocationKey = nextLocationKey ?? lastFlowLocationKey;
-
-      if (shouldReloadFlow) {
-        emitCtLoadFlow(viewsApi, response.location);
+      if (loops.length > 0) {
+        flowLoopSlidersByPath.set(pathKey, loops);
       }
     }
+    for (const editor of vscode.window.visibleTextEditors) {
+      applyFlowDecorationsForEditor(editor);
+    }
+    syncFlowInsetForEditor(context, vscode.window.activeTextEditor);
   });
 }
-
-// Value Origin Tracking (M6, spec §8.2) — message commands used by the
-// extension → embedded-webview post-message bridge. These constants are
-// shared between the command handler and the DAP-event forwarder so the
-// embedded panels can route them through one router on their side.
-//
-// `SHOW_VALUE_ORIGIN_COMMAND` is what `ct-vscode.showValueOrigin` emits;
-// the embedded `StateVM.onShowOrigin` listens for it.
-//
-// `UPDATED_ORIGIN_CHAIN_EVENT` is the DAP event the db-backend emits as a
-// lazy continuation alongside the canonical `ct/originChain` response
-// (spec §5.2). The TypeScript side does not parse the body — it just
-// hands the entire event payload over to the embedded webview, which
-// already knows how to merge the update into `OriginChainVM`.
-const SHOW_VALUE_ORIGIN_COMMAND = "showValueOrigin";
-const UPDATED_ORIGIN_CHAIN_EVENT = "ct/updated-origin-chain";
 
 /**
  * Resolve the expression to query for "Show Value Origin" from the active
@@ -524,11 +342,6 @@ type ValueOriginResolvedExpression = {
   location: { path: string; line: number; column: number };
 };
 
-function currentOriginStepId(): number {
-  const location = lastFlowLocation as { rrTicks?: unknown } | undefined;
-  return typeof location?.rrTicks === "number" ? location.rrTicks : -1;
-}
-
 function isResolvedValueOriginExpression(value: unknown): value is ValueOriginResolvedExpression {
   const candidate = value as ValueOriginResolvedExpression;
   return (
@@ -590,51 +403,21 @@ async function showValueOriginHandler(explicit?: unknown): Promise<number> {
   if (shouldUseInferredOriginExpression(editor, resolved)) {
     resolved = inferValueOriginExpressionFromLine(editor) ?? resolved;
   }
-  const message = {
-    command: SHOW_VALUE_ORIGIN_COMMAND,
-    value: resolved ?? { expression: "", location: null },
-  };
-  const delivered = forwardToEmbeddedPanels(message);
-  if (delivered === 0) {
+  // The host's session asks for the chain (`StateVM.onShowOrigin`) and the
+  // State pane shows it: the extension draws nothing of its own (spec §8.2).
+  const expression = resolved?.expression ?? "";
+  if (!sessionHost.showValueOrigin(expression)) {
     console.warn(
-      "[CodeTracer] ct-vscode.showValueOrigin: no embedded panels available; " +
-      "the message was not delivered. Start a CodeTracer debug session first."
+      "[CodeTracer] ct-vscode.showValueOrigin: no expression, or no CodeTracer " +
+      "debug session to ask. Start a CodeTracer debug session first."
     );
+    return 0;
   }
-
-  const session = vscode.debug.activeDebugSession;
-  if (session?.type === "codetracer-debug" && resolved?.expression) {
-    try {
-      const chain = await session.customRequest("ct/originChain", {
-        variableName: resolved.expression,
-        variable_name: resolved.expression,
-        variablePath: [],
-        variable_path: [],
-        frameId: -1,
-        frame_id: -1,
-        stepId: currentOriginStepId(),
-        step_id: currentOriginStepId(),
-        threadId: 0,
-        thread_id: 0,
-        maxHops: 16,
-        max_hops: 16,
-        lazy: false,
-        continuationToken: null,
-        continuation_token: null,
-        sessionId: "",
-        session_id: "",
-        classifySource: true,
-        classify_source: true,
-      });
-      forwardToEmbeddedPanels({
-        command: UPDATED_ORIGIN_CHAIN_EVENT,
-        value: chain,
-      });
-    } catch (err) {
-      console.warn("[CodeTracer] ct-vscode.showValueOrigin: ct/originChain failed:", err);
-    }
+  const context = extensionContext;
+  if (context) {
+    openPanel(context, "state");
   }
-  return delivered;
+  return 1;
 }
 
 /// Candidate file names for an executable, accounting for the Windows `.exe`
@@ -707,15 +490,8 @@ function getBackendBinPath(context: vscode.ExtensionContext): string {
   if (ctInPath) {
     return path.dirname(ctInPath);
   }
-  // Fallback: bundled layout (extension ships with libs/codetracer/)
-  return path.join(
-    context.extensionPath,
-    'libs',
-    'codetracer',
-    'src',
-    'build-debug',
-    'bin'
-  );
+  // Fallback: the replay backend `just build` puts beside the extension.
+  return path.join(context.extensionPath, 'backend');
 }
 
 /// Resolve the absolute path to the DAP replay server executable.
@@ -1078,15 +854,14 @@ async function recordTraceForWorkdir(
   );
 }
 
-async function initPanelsIfNeeded(context: vscode.ExtensionContext, viewsApi: MediatorWithSubscribers): Promise<void> {
+async function initPanelsIfNeeded(context: vscode.ExtensionContext): Promise<void> {
   if (panelsInitialized) {
     return;
   }
   // Mark initialised up-front so a second debug-session start while the
   // sequential panel creation is still in flight does not create panels twice.
   panelsInitialized = true;
-  const panels = await initPanels(context, viewsApi);
-  (vscode.window as any).panels = panels;
+  await initPanels(context);
 }
 
 async function loadFlow() {
@@ -1358,7 +1133,7 @@ async function pickTxFolder(codetracerExe: string, isNixOS: boolean): Promise<st
   return undefined;
 }
 
-async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCodeApi, viewsApi: MediatorWithSubscribers, codetracerExe: string, loadMode: LoadMode) {
+async function toggleCt(context: vscode.ExtensionContext, codetracerExe: string, loadMode: LoadMode) {
   if (ctStarted) {
     // Stop CT
     ctStarted = false;
@@ -1367,15 +1142,9 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
     disposeCommands();
     panelsInitialized = false;
 
-    for (const [line, inset] of tracepointInsets) {
-      inset.dispose();
-      tracepointInsets.delete(line);
-    }
 
     clearFlowDecorations();
     clearFlowInset();
-    lastFlowLocation = undefined;
-    internalLastCompleteMoveHandlerRegistered = false;
 
     adapterFactoryDisposable?.dispose();
     adapterFactoryDisposable = undefined;
@@ -1410,15 +1179,11 @@ async function toggleCt(context: vscode.ExtensionContext, dapVsCodeApi: DapVsCod
       return;
     }
 
-    // Setup middleware
-    setupMiddlewareApis(dapVsCodeApi, viewsApi);
-
     // Initialize panels — use initPanelsIfNeeded so panelsInitialized is set
     // to true before startDebugging fires onDidStartDebugSession, which also
     // calls initPanelsIfNeeded.  Without this guard both code paths would call
     // initPanels, leading to "command already exists" errors and duplicate panels.
-    await initPanelsIfNeeded(context, viewsApi);
-    (vscode.window as any).panels = (vscode.window as any).panels; // set by initPanelsIfNeeded
+    await initPanelsIfNeeded(context);
 
     const editor = vscode.window.activeTextEditor;
     if (!editor && (loadMode === LoadMode.Trace || loadMode === LoadMode.Tx)) {
@@ -1579,29 +1344,33 @@ async function reinitCommands(context: vscode.ExtensionContext) {
 
   console.log('[CodeTracer] reinitCommands: codetracerExe =', codetracerExe, 'valid =', valid);
 
-  // The Nim-compiled ct_vscode.js may not be available in development/test
-  // environments that only run `npm run compile` (TypeScript-only build).
+  // The Nim bundles (ct_vscode.js and vscode_host.js) may not be available
+  // in development/test environments that only compile the TypeScript.
   // Gracefully degrade so that stub commands are still registered.
   let dapVsCodeApi: DapVsCodeApi | undefined;
-  let viewsApi: MediatorWithSubscribers | undefined;
   let nimBackendAvailable = false;
   try {
     dapVsCodeApi = newDapVsCodeApi(vscode, context);
-    viewsApi = setupVsCodeExtensionViewsApi(
-      "vscode-extension-to-views"
-    );
-    nimBackendAvailable = true;
+    nimBackendAvailable = sessionHost.startSessionHost(context);
   } catch {
     console.warn('[CodeTracer] Nim backend (ct_vscode.js) not available — running in stub mode');
   }
   if (dapVsCodeApi) {
     (vscode.window as any).dapVsCodeApi = dapVsCodeApi;
   }
-  if (viewsApi) {
-    (vscode.window as any).viewsApi = viewsApi;
-  }
-  if (nimBackendAvailable && dapVsCodeApi && viewsApi) {
-    registerFlowDecorationHandlers(context, dapVsCodeApi, viewsApi);
+  if (nimBackendAvailable && !hostWired) {
+    hostWired = true;
+    registerHostFlowDecorations(context);
+    // The source editor role is always VS Code's editor: a file opened in
+    // CodeTracer's file tree opens there.
+    sessionHost.onOpenFile(async (filePath) => {
+      try {
+        const doc = await vscode.workspace.openTextDocument(filePath);
+        await vscode.window.showTextDocument(doc, { preview: true });
+      } catch (err) {
+        console.warn("[CodeTracer] cannot open", filePath, err);
+      }
+    });
   }
 
   if (!valid) {
@@ -1648,7 +1417,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
 
   const exe = codetracerExe!;
   const toggleCtReal = async (mode: LoadMode) =>
-    toggleCt(context, dapVsCodeApi!, viewsApi!, exe, mode);
+    toggleCt(context, exe, mode);
   const maybeToggleCt = async (mode: LoadMode) => {
     if (!valid) {
       await promptForExecutablePath();
@@ -1668,13 +1437,14 @@ async function reinitCommands(context: vscode.ExtensionContext) {
     stub('ct-vscode.backwardSourceLineJump');
     stub('ct-vscode.addToScratchpad');
     stub('ct-vscode.addTracepoint');
+    stub('ct-vscode.historyBack');
+    stub('ct-vscode.historyForward');
     // Value Origin Tracking (M6): the command is *always* contributed in
     // package.json so the verification suite finds it after activation,
     // regardless of whether the Nim backend has finished loading. When the
-    // backend is unavailable we still register a real handler that forwards
-    // an empty payload into any embedded panels that are mounted — this
-    // preserves the post-message contract for tests that simulate trigger
-    // before a real DAP session is alive.
+    // backend is unavailable we still register the real handler, which
+    // reports the request to the test seam (`registerPanelOverride`) and
+    // asks nothing.
     register('ct-vscode.showValueOrigin', (payload?: unknown) => showValueOriginHandler(payload));
   } else {
     // ---- real registrations ----
@@ -1711,8 +1481,12 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       const pos = ed.selection.active;
       const word = ed.document.getWordRangeAtPosition(pos);
       const expr = word ? ed.document.getText(word) : '';
-      vscode.window.showInformationMessage(`Trying to add the variable: ${expr} to the Scratchpad`);
-      ctAddToScratchpad(viewsApi!, expr);
+      openPanel(context, "scratchpad");
+      if (!sessionHost.addToScratchpad(expr)) {
+        vscode.window.showInformationMessage(
+          `'${expr}' has no value at this stop: it is not a local or a watch.`
+        );
+      }
     });
 
     register("ct-vscode.addTracepoint", async () => {
@@ -1722,14 +1496,7 @@ async function reinitCommands(context: vscode.ExtensionContext) {
         return;
       }
 
-      const line = editor.selection.active.line;
-      const existingInset = tracepointInsets.get(line);
-      if (existingInset) {
-        existingInset.dispose();
-        tracepointInsets.delete(line);
-      }
-      const inset = addTracepoint(context, viewsApi, editor, line);
-      tracepointInsets.set(line, inset);
+      await addTracepoint(context, editor, editor.selection.active.line);
     });
 
     // Value Origin Tracking (M6): the command resolves the variable name to
@@ -1741,6 +1508,10 @@ async function reinitCommands(context: vscode.ExtensionContext) {
     // half of M6; the other half is the `ct/updated-origin-chain` DAP-event
     // forwarder registered below.
     register('ct-vscode.showValueOrigin', (payload?: unknown) => showValueOriginHandler(payload));
+    // VS Code's debug toolbar: back and forward through the active session's
+    // jump history (SDF-AREQ8 keeps VS Code's own toolbar).
+    register('ct-vscode.historyBack', () => sessionHost.moveInHistory(true));
+    register('ct-vscode.historyForward', () => sessionHost.moveInHistory(false));
   }
 
   if (miscDisposables.length === 0) {
@@ -1754,29 +1525,22 @@ async function reinitCommands(context: vscode.ExtensionContext) {
           if (pendingLaunchPanels && !ctStarted) {
             console.log('[CodeTracer] Initializing panels for launch...');
             await reinitCommands(context);
-            const viewsApi = (vscode.window as any).viewsApi as MediatorWithSubscribers | undefined;
-            const dapVsCodeApi = (vscode.window as any).dapVsCodeApi as DapVsCodeApi | undefined;
-            console.log('[CodeTracer] viewsApi=', !!viewsApi, 'dapVsCodeApi=', !!dapVsCodeApi);
-            if (viewsApi && dapVsCodeApi) {
-              setupMiddlewareApis(dapVsCodeApi, viewsApi);
-              await initPanelsIfNeeded(context, viewsApi);
+            await initPanelsIfNeeded(context);
 
-              // Open a source file from the trace so the editor isn't empty
-              const traceFolder = session.configuration?.traceFolder as string | undefined;
-              if (traceFolder) {
-                const opened = await openTraceSourceFile(traceFolder);
-                if (!opened) {
-                  console.warn('[CodeTracer] No trace source file found to open automatically');
-                }
+            // Open a source file from the trace so the editor isn't empty,
+            // and give the session's file tree the recording's sources.
+            const traceFolder = session.configuration?.traceFolder as string | undefined;
+            if (traceFolder) {
+              sessionHost.setSourceFiles(session.id, await readTracePaths(traceFolder));
+              const opened = await openTraceSourceFile(traceFolder);
+              if (!opened) {
+                console.warn('[CodeTracer] No trace source file found to open automatically');
               }
-
-              // Enable CodeTracer context menu items
-              vscode.commands.executeCommand('setContext', 'codetracer:active', true);
-
-              console.log('[CodeTracer] Panels initialized successfully');
-            } else {
-              console.error('[CodeTracer] Cannot init panels: viewsApi or dapVsCodeApi missing');
             }
+
+            // Enable CodeTracer context menu items
+            vscode.commands.executeCommand('setContext', 'codetracer:active', true);
+            console.log('[CodeTracer] Panels initialized successfully');
             pendingLaunchPanels = false;
             ctStarted = true;
           } else {
@@ -1800,38 +1564,16 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       ),
       vscode.window.onDidChangeActiveTextEditor((editor) => {
         applyFlowDecorationsForEditor(editor);
-        const viewsApi = (vscode.window as any).viewsApi as MediatorWithSubscribers | undefined;
-        if (viewsApi) {
-          syncFlowInsetForEditor(context, viewsApi, editor);
+        syncFlowInsetForEditor(context, editor);
+        // The file-tree role's floor: the tree follows the editor's file.
+        if (editor?.document.uri.scheme === "file") {
+          sessionHost.revealFile(editor.document.uri.fsPath);
         }
       }),
       vscode.workspace.onDidChangeConfiguration(async (e) => {
         if (e.affectsConfiguration('codetracer.runnablePath')) {
           await reinitCommands(context);
         }
-      }),
-      // Value Origin Tracking (M6, spec §5.2) — the db-backend emits
-      // `ct/updated-origin-chain` as a lazy continuation alongside the
-      // canonical `ct/originChain` response so frontends can update an
-      // already-rendered chain without re-issuing the request. The
-      // TypeScript side does NOT parse the event body (everything is
-      // rendered inside the embedded panels per spec §8.2); it just
-      // re-broadcasts the payload to every embedded CodeTracer panel.
-      // Using `onDidReceiveDebugSessionCustomEvent` rather than the
-      // Nim-side CtEventKind table keeps the bridge independent of the
-      // (potentially older) CodeTracer submodule pin shipped with the
-      // extension.
-      vscode.debug.onDidReceiveDebugSessionCustomEvent((event) => {
-        if (event.session.type !== "codetracer-debug") {
-          return;
-        }
-        if (event.event !== UPDATED_ORIGIN_CHAIN_EVENT) {
-          return;
-        }
-        forwardToEmbeddedPanels({
-          command: UPDATED_ORIGIN_CHAIN_EVENT,
-          value: event.body,
-        });
       }),
     );
     context.subscriptions.push(...miscDisposables);
@@ -1879,28 +1621,36 @@ async function maybeStartMarketingListener(context: vscode.ExtensionContext): Pr
 
 /**
  * The object returned from `activate(...)` is exposed to other extensions
- * (and to the M6 verification suite) via `vscode.extensions.getExtension(...).exports`.
+ * (and to the WDIO suites) via `vscode.extensions.getExtension(...).exports`.
  *
- * The surface is intentionally narrow — only the helpers the value-origin
- * test suite needs to verify the extension-side bridge from §8.2:
- *
- *   - `registerPanelOverride(name, target)` lets a test install a fake
- *     panel that captures `postMessage` calls from
- *     `forwardToEmbeddedPanels(...)`, so we can verify
- *     `ct-vscode.showValueOrigin` and the `ct/updated-origin-chain` event
- *     forwarder land the expected message without depending on the full
- *     CodeTracer toolchain being available in the test environment.
- *
- *   - `forwardToEmbeddedPanels(message)` is the same function the
- *     command handler and the DAP-event subscription call internally —
- *     exposing it lets tests directly exercise the post-message bridge.
+ *   - `showValueOrigin(expression)` runs `ct-vscode.showValueOrigin`'s path
+ *     for `expression`: the host's session asks for the chain and the State
+ *     pane shows it. `false` when no session is hosted.
+ *   - `openPanels()` names the CodeTracer panels open in the window, and
+ *     `panelColumns()` the editor column each is in — what of the
+ *     arrangement an extension can read (`WebviewPanel.viewColumn`).
+ *   - `registerPanelOverride(id, panel)` is the WDIO suites' seam: `panel`'s
+ *     `webview.postMessage` is handed the value-origin traffic as
+ *     `{ command, value }` — each `showValueOrigin` request with its
+ *     expression, and each event the replay sends the host's sessions (such
+ *     as `ct/updated-origin-chain`). The result removes it.
  */
 export interface CodeTracerExtensionExports {
-  registerPanelOverride(name: string, target: PostMessageTarget): () => void;
-  forwardToEmbeddedPanels(message: unknown): number;
+  showValueOrigin(expression: string): boolean;
+  openPanels(): string[];
+  panelColumns(): Record<string, number | undefined>;
+  registerPanelOverride(
+    id: string,
+    panel: { webview: { postMessage(message: unknown): Thenable<boolean> } }
+  ): () => void;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<CodeTracerExtensionExports> {
+  extensionContext = context;
+  // Panels VS Code persisted with the window are restored into the session
+  // the host makes active (SDF-AREQ9), and each has a command that opens it.
+  registerPanelSerializers(context);
+  registerPanelCommands(context);
   // initial (stub or real)
   await reinitCommands(context);
   // Marketing/test driver listener (opt-in via setting).
@@ -1984,8 +1734,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodeTr
   }));
 
   return {
-    registerPanelOverride: _testRegisterPanelOverride,
-    forwardToEmbeddedPanels,
+    showValueOrigin: (expression: string) => sessionHost.showValueOrigin(expression),
+    openPanels: () => [...activePanels().keys()],
+    panelColumns: () => Object.fromEntries(
+      [...activePanels()].map(([kind, panel]) => [kind, panel.viewColumn])
+    ),
+    registerPanelOverride: (_id, panel) => {
+      const observing = sessionHost.observeMessages((message) => {
+        void panel.webview.postMessage(message);
+      });
+      return () => observing.dispose();
+    },
   };
 }
 
@@ -1996,8 +1755,6 @@ export function deactivate() {
   adapterFactoryDisposable = undefined;
   clearFlowDecorations();
   clearFlowInset();
-  lastFlowLocation = undefined;
-  internalLastCompleteMoveHandlerRegistered = false;
   flowDecorationType?.dispose();
   flowDecorationType = undefined;
   if (marketingListener) {

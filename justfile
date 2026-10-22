@@ -1,102 +1,62 @@
+# Build the extension from the codetracer checkout beside it (CODETRACER_DIR,
+# default `../codetracer`, the workspace layout). codetracer builds the Nim
+# and Rust artefacts into `media/` and `backend/` (its `build_for_extension.sh`):
+#
+#   media/vscode_panel.js   every panel webview's script: one panel's view over
+#                           a mirror of the session the extension host owns
+#   media/vscode_host.js    the extension host's sessions (`src/sessionHost.ts`)
+#   media/ct_vscode.js      the extension host's middleware
+#   backend/replay-server   the replay backend
+#
+# and this recipe adds the theme CSS (compiled from codetracer's stylus
+# sources), the icons and fonts it refers to, and the TypeScript.
 build:
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p ./media
-    mkdir -p ./backend
+    ct_dir="${CODETRACER_DIR:-../codetracer}"
+    if [[ ! -f "${ct_dir}/build_for_extension.sh" ]]; then
+        echo "codetracer checkout not found at '${ct_dir}' (set CODETRACER_DIR)" >&2
+        exit 1
+    fi
+    ct_dir="$(cd "${ct_dir}" && pwd)"
+    ext_dir="$(pwd)"
+    mkdir -p ./media ./backend
     npm install
 
-    rm -f ./backend/db-backend
+    rm -f ./backend/replay-server ./backend/db-backend ./media/vscode_panel.js ./media/vscode_host.js ./media/ct_vscode.js
     (
-        cd libs/codetracer
+        cd "${ct_dir}"
         nix develop \
             --extra-experimental-features nix-command \
             --extra-experimental-features flakes \
-            .#devShells.x86_64-linux.default --command ./build_for_extension.sh ../../media/ui.js ../../media/ct_vscode.js ../../backend/db-backend
+            .#devShells.x86_64-linux.default --command \
+            ./build_for_extension.sh "${ext_dir}/media" "${ext_dir}/backend/replay-server"
     )
-    # Re-build the webpack frontend bundle with `--devtool false`.
-    #
-    # `build_for_extension.sh` builds the frontend entry via codetracer's
-    # `webpack.config.js`, which runs in `mode: development`. Webpack's
-    # development mode defaults `devtool` to `eval`, which wraps every one
-    # of ~3500 modules in a separate `eval()` call. Five CodeTracer webview
-    # panels each load this bundle, and `eval`-mode parsing is so expensive
-    # that loading it in several webviews at once exhausted the single
-    # shared VS Code renderer process and crashed it ("renderer closed the
-    # MessagePort"). A `devtool: false` build emits an ordinary
-    # function-wrapped bundle that V8 can lazily parse, removing the crash.
-    (
-        cd libs/codetracer
-        node node_modules/webpack-cli/bin/cli.js --config webpack.config.js --devtool false
-    )
-    # Copy the complete webpack output — the frontend entry AND every
-    # code-split chunk (`*.frontend_imports.js`) plus the emitted asset
-    # files (Monaco web-workers, the oniguruma .wasm, fonts, …). The
-    # bundle's runtime resolves async `import()` chunks relative to its own
-    # script URL, so the chunks must sit next to the frontend entry in
-    # `media/` or Monaco / Nim-language loading 404s ("Error using
-    # fileReader"). The previous symlink-only step copied just the entry
-    # bundle and left every chunk missing.
-    rm -f ./media/frontend_bundle.js
-    if [[ -f libs/codetracer/src/public/dist/frontend_imports.js ]]; then
-        cp -f libs/codetracer/src/public/dist/frontend_imports.js ./media/frontend_bundle.js
-    elif [[ -f libs/codetracer/src/public/dist/frontend_bundle.js ]]; then
-        cp -f libs/codetracer/src/public/dist/frontend_bundle.js ./media/frontend_bundle.js
-    else
-        echo "codetracer webpack frontend entry is missing from libs/codetracer/src/public/dist" >&2
-        exit 1
-    fi
-    node -e '
-      const fs = require("fs");
-      const bundle = "./media/frontend_bundle.js";
-      const text = fs.readFileSync(bundle, "utf8");
-      const publicPath = [
-        "var scriptUrl;",
-        "/******/     if (document.currentScript) scriptUrl = document.currentScript.src;",
-        "/******/     __webpack_require__.p = scriptUrl.replace(/#.*$/, \"\").replace(/\\\\?.*$/, \"\").replace(/\\\\/[^\\\\/]+$/, \"/\");"
-      ].join(String.fromCharCode(10));
-      fs.writeFileSync(
-        bundle,
-        text
-          .replace(/__webpack_require__\.p = "[^"]*\/src\/public\/dist";/g, publicPath)
-          .replace(/__webpack_require__\.p = "";?/g, publicPath)
-      );
-    '
-    for asset in libs/codetracer/src/public/dist/*; do
-        case "$asset" in
-            */frontend_imports.js) ;;
-            */frontend_bundle.js) ;;
-            *.LICENSE.txt) ;;
-            *) cp -f "$asset" ./media/ ;;
-        esac
-    done
-    if [[ ! -e ./media/third_party && ! -d ./media/third_party ]]; then
-        rm -rf ./media/third_party
-        ln -s $(pwd)/libs/codetracer/src/public/third_party media/third_party
-    fi;
-    # Always copy (not symlink) the CSS so we can patch the relative URLs below.
-    # The Electron app's build puts this CSS at build-debug/frontend/styles/ where
-    # relative paths like ../../../../libs/ resolve correctly from that real location.
-    # In a VS Code webview the CSS is served at media/styles/ so we must adjust the
-    # paths: ../../../../libs/codetracer-design-system/ → ../../libs/codetracer/libs/
-    # codetracer-design-system/ and ../../../public/resources/origin-icons/ →
-    # ../../public/resources/origin-icons/ (where origin-icons is copied below).
+
+    # The theme. A webview may load only from `media/` (`localResourceRoots`),
+    # so the icons and fonts the stylesheet refers to are copied there and its
+    # URLs rewritten to point at the copies:
+    #   ../../public/resources/, ../../../public/resources/  -> ../resources/
+    #   ../../../../libs/codetracer-design-system/           -> ../design-system/
     mkdir -p ./media/styles
-    cp libs/codetracer/src/build-debug/frontend/styles/default_dark_theme_extension.css \
-       ./media/styles/default_dark_theme_extension.css
+    (
+        cd "${ct_dir}"
+        node node_modules/stylus/bin/stylus \
+            -o "${ext_dir}/media/styles/default_dark_theme_extension.css" \
+            src/frontend/styles/default_dark_theme_extension.styl
+    )
     sed -i \
-        -e 's|url("\.\./\.\./\.\./public/resources/origin-icons/|url("../../public/resources/origin-icons/|g' \
-        -e 's|url("\.\./\.\./\.\./\.\./libs/codetracer-design-system/|url("../../libs/codetracer/libs/codetracer-design-system/|g' \
+        -e 's#\.\./\.\./\.\./public/resources/#../resources/#g' \
+        -e 's#\.\./\.\./public/resources/#../resources/#g' \
+        -e 's#\.\./\.\./\.\./\.\./libs/codetracer-design-system/#../design-system/#g' \
         ./media/styles/default_dark_theme_extension.css
-    # Copy origin-icons from the codetracer build so ../../public/resources/origin-icons/
-    # resolves correctly when the CSS is served from media/styles/.
-    rm -rf ./public/resources/origin-icons
-    cp -r libs/codetracer/src/build-debug/public/resources/origin-icons \
-          ./public/resources/origin-icons
-    if [[ ! -e ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf && ! -f ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf ]]; then
-        rm -f ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf
-        mkdir -p ./media/fonts
-        ln -s $(pwd)/libs/codetracer/src/public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf
-    fi;
+    rm -rf ./media/resources ./media/design-system
+    cp -r "${ct_dir}/src/public/resources" ./media/resources
+    if [[ -d "${ct_dir}/libs/codetracer-design-system/SpaceGrotesk_Complete" ]]; then
+        cp -r "${ct_dir}/libs/codetracer-design-system" ./media/design-system
+    else
+        echo "warning: ${ct_dir}/libs/codetracer-design-system is not checked out; the panels fall back to system fonts" >&2
+    fi
 
     npm run compile:ts
     cp ./media/ct_vscode.js out/ct_vscode.js
