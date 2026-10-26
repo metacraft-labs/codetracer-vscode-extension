@@ -255,7 +255,7 @@ record_trace() {
 # ---------------------------------------------------------------------------
 LANGUAGES=("$@")
 if [ ${#LANGUAGES[@]} -eq 0 ]; then
-	LANGUAGES=(python ruby rust c go nim beam)
+	LANGUAGES=(python python-panels ruby rust c go nim beam)
 fi
 
 configure_nim_compiler
@@ -282,6 +282,18 @@ for lang in "${LANGUAGES[@]}"; do
 				fi
 			else
 				skip_or_fail "python" "codetracer-python-recorder not available"
+			fi
+			;;
+		python-panels)
+			# A recording longer than one window of the Call Trace and the Event
+			# Log, for the panel suites in test/wdio/specs/panels/.
+			if use_existing_trace_if_ready "python-panels"; then
+				continue
+			fi
+			if [ -n "${CODETRACER_PYTHON_RECORDER_PRESENT:-}" ]; then
+				record_trace "python-panels" "$REPO_ROOT/test/wdio/programs/python_panels/main.py"
+			else
+				skip_or_fail "python-panels" "codetracer-python-recorder not available"
 			fi
 			;;
 		ruby)

@@ -237,3 +237,37 @@ export async function panelDocuments(): Promise<PanelDocument[]> {
   }
   return found
 }
+
+/**
+ * Run `body` with WebDriver switched into the webview of panel `kind` (the
+ * frame whose `<body data-ct-panel>` names it, found as `panelDocuments`
+ * finds it), and switch back to the top frame afterwards. Element queries and
+ * gestures inside `body` (`$`, `execute`, `doubleClick`) reach the panel's
+ * own DOM. Throws when no such webview is open.
+ */
+export async function inPanel<T>(kind: string, body: () => Promise<T>): Promise<T> {
+  const isPanel = async () => browser.execute(
+    (k: string) => !!document.body && document.body.dataset.ctPanel === k, kind)
+  const enter = async (depth: number): Promise<boolean> => {
+    if (await isPanel()) return true
+    if (depth >= 3) return false
+    const frames = await browser.$$('iframe')
+    for (let i = 0; i < Math.min(frames.length, 10); i++) {
+      try {
+        await browser.switchToFrame(frames[i])
+        if (await enter(depth + 1)) return true
+      } catch { /* a frame that went away */ }
+      try { await browser.switchToParentFrame() } catch { /* ignore */ }
+    }
+    return false
+  }
+  try {
+    await browser.switchToFrame(null)
+    if (!(await enter(0))) {
+      throw new Error(`no webview of panel '${kind}' is open`)
+    }
+    return await body()
+  } finally {
+    try { await browser.switchToFrame(null) } catch { /* ignore */ }
+  }
+}

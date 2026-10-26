@@ -21,6 +21,7 @@ export {
   openScratchpadPanel,
   inspectWebviews,
   panelDocuments,
+  inPanel,
 } from './panels'
 export type { PanelDocument, PanelInfo } from './panels'
 
