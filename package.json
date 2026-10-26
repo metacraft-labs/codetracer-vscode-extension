@@ -36,7 +36,8 @@
     "onWebviewPanel:codetracer.traceLog",
     "onWebviewPanel:codetracer.flow",
     "onWebviewPanel:codetracer.pointList",
-    "onWebviewPanel:codetracer.fileTree"
+    "onWebviewPanel:codetracer.fileTree",
+    "onWebviewPanel:codetracer.requestPanel"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -201,6 +202,11 @@
       {
         "command": "ct-vscode.openFileTree",
         "title": "Open Files Panel",
+        "category": "CodeTracer"
+      },
+      {
+        "command": "ct-vscode.openRequests",
+        "title": "Open Requests Panel",
         "category": "CodeTracer"
       },
       {

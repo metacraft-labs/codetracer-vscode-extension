@@ -29,6 +29,10 @@ const PANELS: PanelSpec[] = [
   { kind: "traceLog", title: "Trace Log", command: "ct-vscode.openTraceLog" },
   { kind: "pointList", title: "Points", command: "ct-vscode.openPointList" },
   { kind: "fileTree", title: "Files", command: "ct-vscode.openFileTree" },
+  // The Request Panel role (Shared-DOM-Front-Ends Q8): the shared view over the
+  // mirrored session. Not opened with a debug session, as on the desktop, where
+  // it is not part of the default layout either (Request-Panel.md).
+  { kind: "requestPanel", title: "Requests", command: "ct-vscode.openRequests" },
 ];
 
 /** The panels a debug session opens, in this order. */

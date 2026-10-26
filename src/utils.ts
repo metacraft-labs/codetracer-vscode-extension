@@ -133,7 +133,8 @@ export type PanelKind =
   | "traceLog"
   | "flow"
   | "pointList"
-  | "fileTree";
+  | "fileTree"
+  | "requestPanel";
 
 /**
  * The HTML of one CodeTracer panel's webview.
