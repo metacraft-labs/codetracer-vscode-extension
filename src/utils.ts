@@ -9,14 +9,6 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ) {
     const webview = webviewView.webview;
-    const fontUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(
-        this.context.extensionUri,
-        'media',
-        'fonts',
-        'SpaceGrotesk-VariableFont_wght.ttf'
-      )
-    );
 
     const darkCssUri = webview.asWebviewUri(
       vscode.Uri.joinPath(
@@ -34,7 +26,7 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
       ],
     };
 
-    webview.html = this.getHtml(darkCssUri, fontUri);
+    webview.html = this.getHtml(darkCssUri);
     webviewView.webview.onDidReceiveMessage((message) => {
       switch (message.command) {
         case "loadCurrentFile":
@@ -65,7 +57,10 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  private getHtml(cssUri: vscode.Uri, fontUri: vscode.Uri): string {
+  // The menu's typeface is the theme's own `SpaceGrotesk` face: the theme
+  // stylesheet declares it over the design-system fonts the build copies into
+  // `media/design-system/`, which this webview may load (`localResourceRoots`).
+  private getHtml(cssUri: vscode.Uri): string {
     return `
           <!DOCTYPE html>
           <html lang="en">
@@ -73,12 +68,8 @@ export class CodeTracerViewProvider implements vscode.WebviewViewProvider {
             <meta charset="UTF-8">
             <link id='theme' rel='stylesheet' href='${cssUri}'>
             <style>
-              @font-face {
-                font-family: 'SpaceGroteskVs';
-                src: url('${fontUri}') format('truetype');
-              }
               body {
-                font-family: 'SpaceGroteskVs' !important;
+                font-family: 'SpaceGrotesk', sans-serif !important;
               }
             </style>
           </head>
