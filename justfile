@@ -295,8 +295,9 @@ test-wdio-beam-deep: prepare-wdio-beam-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts --spec test/wdio/specs/deep/beam-deep.e2e.ts"
 
 # Run the panel suites: Call Trace scroll loading and row navigation (#37),
-# Event Log paging (#40). Needs test/traces/python-panels
-# (`just record-test-traces python-panels`).
+# Event Log paging (#40), Add to Scratchpad (#43). Needs test/traces/python-panels
+# and test/traces/python-scratchpad
+# (`just record-test-traces python-panels python-scratchpad`).
 test-wdio-panels:
     #!/usr/bin/env bash
     set -euo pipefail

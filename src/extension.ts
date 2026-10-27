@@ -238,8 +238,28 @@ function registerHostFlowDecorations(context: vscode.ExtensionContext): void {
 }
 
 /**
+ * The expression an editor gesture names: the selected text when there is a
+ * selection, otherwise the word under the cursor; `""` when neither has text.
+ * Shared by "Add to Scratchpad" and "Show Value Origin".
+ */
+function editorExpression(editor: vscode.TextEditor): string {
+  const selection = editor.selection;
+  let expression = "";
+  if (!selection.isEmpty) {
+    expression = editor.document.getText(selection).trim();
+  }
+  if (expression.length === 0) {
+    const wordRange = editor.document.getWordRangeAtPosition(selection.active);
+    if (wordRange) {
+      expression = editor.document.getText(wordRange).trim();
+    }
+  }
+  return expression;
+}
+
+/**
  * Resolve the expression to query for "Show Value Origin" from the active
- * editor. Mirrors the heuristic used by `ct-vscode.addToScratchpad`:
+ * editor. Uses `editorExpression`, as `ct-vscode.addToScratchpad` does:
  *
  *   1. If the user has a non-empty selection, use the selected text verbatim
  *      (this is the path the `editor/context` menu entry takes when the
@@ -259,16 +279,7 @@ function resolveValueOriginExpression(
   }
 
   const selection = editor.selection;
-  let expression = "";
-  if (!selection.isEmpty) {
-    expression = editor.document.getText(selection).trim();
-  }
-  if (expression.length === 0) {
-    const wordRange = editor.document.getWordRangeAtPosition(selection.active);
-    if (wordRange) {
-      expression = editor.document.getText(wordRange).trim();
-    }
-  }
+  const expression = editorExpression(editor);
   if (expression.length === 0) {
     return undefined;
   }
@@ -1475,17 +1486,24 @@ async function reinitCommands(context: vscode.ExtensionContext) {
       ctSourceLineJump(dapVsCodeApi!, ed.selection.active.line + 1, ed.document.uri.fsPath, CtJumpBehaviour.BackwardJump);
     });
 
-    register('ct-vscode.addToScratchpad', () => {
+    register('ct-vscode.addToScratchpad', async () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed) { vscode.window.showErrorMessage('No active editor!'); return; }
-      const pos = ed.selection.active;
-      const word = ed.document.getWordRangeAtPosition(pos);
-      const expr = word ? ed.document.getText(word) : '';
+      const expr = editorExpression(ed);
+      if (!expr) {
+        vscode.window.showInformationMessage('Select an expression or place the cursor on a name to add it to the scratchpad.');
+        return;
+      }
+      // The Scratchpad is revealed in every case: a value, or an error value
+      // saying why there is none (Scratchpad-Pane.md § Adding Values).
       openPanel(context, "scratchpad");
-      if (!sessionHost.addToScratchpad(expr)) {
+      const { outcome, detail } = await sessionHost.addToScratchpad(expr);
+      if (outcome === "noSession") {
         vscode.window.showInformationMessage(
-          `'${expr}' has no value at this stop: it is not a local or a watch.`
+          `'${expr}' was not added to the scratchpad: ${detail}.`
         );
+      } else if (outcome === "error") {
+        vscode.window.showWarningMessage(`'${expr}' has no value at this stop: ${detail}.`);
       }
     });
 

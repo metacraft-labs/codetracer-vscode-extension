@@ -37,7 +37,11 @@ interface HostModule {
   ctHostSetSourceFiles(host: unknown, id: string, paths: string[]): void;
   ctHostOnOpenFile(host: unknown, listener: (filePath: string) => void): void;
   ctHostRevealFile(host: unknown, filePath: string): void;
-  ctHostAddToScratchpad(host: unknown, expression: string): boolean;
+  ctHostAddToScratchpad(
+    host: unknown,
+    expression: string,
+    done: (outcome: ScratchpadAddOutcome, detail: string) => void
+  ): void;
   ctHostHistory(host: unknown, back: boolean): void;
   ctHostDispose(host: unknown): void;
 }
@@ -228,11 +232,33 @@ export function revealFile(filePath: string): void {
 }
 
 /**
- * Add `expression`'s value at the current stop to the scratchpad. `false`
- * when the stop has no local or watch of that name (or no session is hosted).
+ * What "Add to Scratchpad" did (codetracer `entries/vscode_host`
+ * `ScratchpadAddOutcome`): a local or watch was `added`, an expression was
+ * `evaluated`, its evaluation failed and the scratchpad shows an `error` value,
+ * or `noSession` is hosted so nothing was added.
  */
-export function addToScratchpad(expression: string): boolean {
-  return mod?.ctHostAddToScratchpad(host, expression) ?? false;
+export type ScratchpadAddOutcome = "noSession" | "added" | "evaluated" | "error";
+
+/**
+ * Add `expression`'s value at the current stop to the scratchpad. A local or
+ * watch of that name is added as the State pane shows it; anything else is
+ * evaluated by the session host through the watch path. Resolves once with
+ * the outcome and, for `error` / `noSession`, the reason.
+ */
+export function addToScratchpad(
+  expression: string
+): Promise<{ outcome: ScratchpadAddOutcome; detail: string }> {
+  if (!mod) {
+    return Promise.resolve({
+      outcome: "noSession",
+      detail: "the CodeTracer session host is not loaded",
+    });
+  }
+  return new Promise((resolve) => {
+    mod!.ctHostAddToScratchpad(host, expression, (outcome, detail) =>
+      resolve({ outcome, detail })
+    );
+  });
 }
 
 /** The debug toolbar's history back (`back`) or forward. */

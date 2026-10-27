@@ -255,7 +255,7 @@ record_trace() {
 # ---------------------------------------------------------------------------
 LANGUAGES=("$@")
 if [ ${#LANGUAGES[@]} -eq 0 ]; then
-	LANGUAGES=(python python-panels ruby rust c go nim beam)
+	LANGUAGES=(python python-panels python-scratchpad ruby rust c go nim beam)
 fi
 
 configure_nim_compiler
@@ -294,6 +294,18 @@ for lang in "${LANGUAGES[@]}"; do
 				record_trace "python-panels" "$REPO_ROOT/test/wdio/programs/python_panels/main.py"
 			else
 				skip_or_fail "python-panels" "codetracer-python-recorder not available"
+			fi
+			;;
+		python-scratchpad)
+			# A short recording with a list local one Call Trace row away, for
+			# the "Add to Scratchpad" suite (test/wdio/specs/panels/).
+			if use_existing_trace_if_ready "python-scratchpad"; then
+				continue
+			fi
+			if [ -n "${CODETRACER_PYTHON_RECORDER_PRESENT:-}" ]; then
+				record_trace "python-scratchpad" "$REPO_ROOT/test/wdio/programs/python_scratchpad/main.py"
+			else
+				skip_or_fail "python-scratchpad" "codetracer-python-recorder not available"
 			fi
 			;;
 		ruby)
