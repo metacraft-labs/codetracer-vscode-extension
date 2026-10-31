@@ -70,11 +70,6 @@
                 url = "https://storage.googleapis.com/chrome-for-testing-public/${version}/linux-arm64/chromedriver-linux-arm64.zip";
                 sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # TODO: fill in for arm64
               }
-            else if pkgs.stdenv.isDarwin then
-              pkgs.fetchurl {
-                url = "https://storage.googleapis.com/chrome-for-testing-public/${version}/mac-x64/chromedriver-mac-x64.zip";
-                sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # TODO: fill in for macOS
-              }
             else throw "Unsupported platform for chromedriver-pinned";
 
           nativeBuildInputs = [ pkgs.unzip pkgs.autoPatchelfHook ];
@@ -155,18 +150,20 @@
             rustc
             cargo
             gcc
+            vscodeInsiders
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            # Linux's Electron needs explicit runtime libraries and Xvfb. macOS
+            # uses its native frameworks; WDIO resolves its own matching driver.
             rr
             # WebdriverIO testing dependencies
             chromium
             chromedriver-pinned  # must match VS Code Insiders' Electron (currently Chrome 148)
             xorg.xorgserver      # provides Xvfb for headless VS Code on Linux
             fontconfig           # fc-list/fc-match — used by the _xvfb-run font preflight
-            vscodeInsiders
-          ] ++ chromiumLibs ++ fontPackages;
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux (chromiumLibs ++ fontPackages);
 
           shellHook = ''
             echo "CodeTracer Extension Dev Shell: Node $(node -v)"
-            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath chromiumLibs}:''${LD_LIBRARY_PATH:-}
             # Point WDIO at the nix-provided VS Code Insiders binary
             export VSCODE_INSIDERS_PATH="${vscodeInsiders}/bin/code-insiders"
             # The Electron executable `just test-vscode` (@vscode/test-electron,
@@ -176,14 +173,16 @@
             # detached and exits 0 at once, so the test run "passed" without a
             # single test reporting. On Darwin the path follows nixpkgs'
             # `$out/Applications/<longName>.app` layout and test-electron's own
-            # `Contents/MacOS/Electron` convention; it has not been verified on a
-            # Darwin host, and .vscode-test.mjs refuses it loudly if it is wrong.
+            # `Contents/MacOS/Electron` convention (verified executable on
+            # aarch64-darwin). .vscode-test.mjs also validates the executable.
             export VSCODE_INSIDERS_EXECUTABLE="${
               if pkgs.stdenv.isDarwin then
                 "${vscodeInsiders}/Applications/Visual Studio Code - Insiders.app/Contents/MacOS/Electron"
               else
                 "${vscodeInsiders}/lib/vscode/code-insiders"
             }"
+            ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+            export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath chromiumLibs}:''${LD_LIBRARY_PATH:-}
             # Use nix-provided chromedriver for WDIO (npm binary won't run on NixOS).
             # Must match the Chrome version embedded in VS Code Insiders' Electron.
             export CHROMEDRIVER_PATH="${chromedriver-pinned}/bin/chromedriver"
@@ -193,6 +192,7 @@
             # has fonts, on hosts with /etc/fonts and on bare CI images alike.
             # Without this the renderer traps in Blink (see fontsConf above).
             export FONTCONFIG_FILE="${fontsConf}"
+            ''}
             if [ -d "$PWD/.ct-bin" ]; then
               export PATH="$PWD/.ct-bin:$PATH"
             fi

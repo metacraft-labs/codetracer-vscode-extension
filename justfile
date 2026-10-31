@@ -322,4 +322,8 @@ test-wdio: prepare-wdio-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts"
 
 # Run every repo-local test/check entrypoint; full WDIO needs siblings/fixtures.
-test: lint compile-ts compile-wdio test-vscode test-vscode-control test-wdio
+test: test-dev-shell lint compile-ts compile-wdio test-vscode test-vscode-control test-wdio
+
+# Evaluate the locked development environment on every advertised platform.
+test-dev-shell:
+    bash scripts/test-dev-shell.sh
