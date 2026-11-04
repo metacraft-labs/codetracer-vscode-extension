@@ -190,24 +190,16 @@ export async function loadEvents(): Promise<DapResult> {
   return dapRequest('ct/event-load', {}, 15000)
 }
 
-/**
- * Map language names to their numeric IDs matching the Rust `Lang` enum
- * (repr(u8), serde_repr). The db-backend deserializes `lang` as a u8.
- */
-// Ordinals must match `Lang` (repr(u8), serde_repr) in
-// codetracer/src/db-backend/src/lang.rs.  A spurious ``Small: 21``
-// here shifted every entry after CppWasm by one — Erlang ended up
-// as 39 which the server rejected with ``JSON error: invalid
-// value: 39, expected one of: 0, ..., 38``.  No such ``Small``
-// variant exists in the Rust enum.
-const LANG_IDS: Record<string, number> = {
-  C: 0, Cpp: 1, Rust: 2, Nim: 3, Go: 4, Pascal: 5, Fortran: 6,
-  D: 7, Crystal: 8, Lean: 9, Julia: 10, Ada: 11, Python: 12,
-  Ruby: 13, RubyDb: 14, Javascript: 15, Lua: 16, Asm: 17, Noir: 18,
-  RustWasm: 19, CppWasm: 20, PythonDb: 21, Unknown: 22,
-  Bash: 23, Zsh: 24, Solidity: 25, Masm: 26, Sway: 27, Move: 28,
-  PolkaVM: 29, Cairo: 30, Circom: 31, Leo: 32, Tolk: 33, Aiken: 34,
-  Cadence: 35, Solana: 36, Elixir: 37, Erlang: 38,
+// ct/load-locals accepts ct-lang's Lang::wire_name, never an ordinal.
+// Most fixture labels already match after lowercasing. These older labels
+// need the current language spelling; VM targets alone do not identify one.
+const LANG_WIRE_ALIASES: Record<string, string> = {
+  python: 'pythondb',
+  ruby: 'rubydb',
+  rustwasm: 'rust',
+  cppwasm: 'cpp',
+  polkavm: 'unknown',
+  solana: 'unknown',
 }
 
 /** Load local variables at the current position. */
@@ -220,14 +212,12 @@ export async function loadLocals(opts: {
 } = {}): Promise<DapResult> {
   // Field names must be camelCase to match the Rust struct's
   // #[serde(rename_all = "camelCase")] deserialization.
-  // The `lang` field is a repr(u8) enum and must be sent as a number.
-  const langName = opts.lang ?? 'Rust'
-  const langId = LANG_IDS[langName] ?? LANG_IDS.Unknown
+  const langName = (opts.lang ?? 'Rust').toLowerCase()
   return dapRequest('ct/load-locals', {
     rrTicks: opts.rrTicks ?? 0,
     countBudget: opts.countBudget ?? 100,
     minCountLimit: 10,
-    lang: langId,
+    lang: LANG_WIRE_ALIASES[langName] ?? langName,
     watchExpressions: opts.watchExpressions ?? [],
     depthLimit: opts.depthLimit ?? 3,
   })
