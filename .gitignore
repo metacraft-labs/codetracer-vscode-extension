@@ -44,11 +44,7 @@ test/wdio/diagnostics/
 # in either case it must not enter the index.
 test/wdio/fixtures/
 # Stylus trace fixture (generated, not committed — regenerate with scripts/prepare-stylus-fixture.sh)
-test/fixtures/stylus-fund-trace/trace.json
-test/fixtures/stylus-fund-trace/trace.bin
-test/fixtures/stylus-fund-trace/trace_metadata.json
-test/fixtures/stylus-fund-trace/trace_paths.json
-test/fixtures/stylus-fund-trace/files/
+test/fixtures/stylus-fund-trace/
 
 # macOS
 .DS_Store

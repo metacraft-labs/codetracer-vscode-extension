@@ -262,6 +262,10 @@ prepare-wdio-solidity-fixture:
 prepare-wdio-stylus-fixture:
     scripts/prepare-stylus-fixture.sh
 
+# Run the real offline repacker and assert sibling tracked inputs stay intact.
+test-stylus-fixture:
+    bash scripts/test-stylus-fixture.sh
+
 prepare-wdio-value-origin-fixtures:
     scripts/prepare-wdio-fixtures.sh value-origin
 
@@ -322,7 +326,7 @@ test-wdio: prepare-wdio-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts"
 
 # Run every repo-local test/check entrypoint; full WDIO needs siblings/fixtures.
-test: test-dev-shell lint compile-ts compile-wdio test-vscode test-vscode-control test-wdio
+test: test-dev-shell lint compile-ts compile-wdio test-stylus-fixture test-vscode test-vscode-control test-wdio
 
 # Evaluate the locked development environment on every advertised platform.
 test-dev-shell:

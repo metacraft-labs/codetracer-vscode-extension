@@ -114,14 +114,14 @@ Tests that the DAP server (db-backend) correctly handles Stylus traces. Uses
 pre-recorded fixtures — does NOT need a devnode.
 
 ```bash
-cd ../codetracer/src/db-backend && cargo nextest run test_stylus_dap_event_only_trace
+cd ../codetracer/src/db-backend && cargo nextest run test_stylus_dap_trace
 # or with cargo test:
-cd ../codetracer/src/db-backend && cargo test test_stylus_dap_event_only_trace
+cd ../codetracer/src/db-backend && cargo test test_stylus_dap_trace
 ```
 
 Test files:
 - `../codetracer/src/db-backend/tests/stylus_flow_integration.rs`
-  - `test_stylus_dap_event_only_trace` — loads fixture, verifies DAP init/launch
+  - `test_stylus_dap_trace` — loads fixture, verifies DAP init/launch
 - Fixture: `../codetracer/src/db-backend/tests/fixtures/stylus-fund-trace/`
 
 **Current Stylus trace limitations**: Stylus traces contain ONLY Event entries (EVM
@@ -172,17 +172,21 @@ and the recipe fails when the output lacks mocha's `<N> passing` summary.
 
 ### Generating the Stylus trace fixture for Tier 3
 
-The Stylus trace fixture used by `stylus-trace-load.e2e.ts` must be generated from a
-live devnode recording:
+The Stylus trace fixture is repacked offline from CodeTracer's committed event
+stream and metadata; preparing it does not require a devnode:
 
 ```bash
-# From the codetracer repo, with devnode running:
-STYLUS_FIXTURE_OUTPUT_DIR=../codetracer-vscode-extension/test/fixtures/stylus-fund-trace \
-  just test-stylus-flow-full
+just prepare-wdio-stylus-fixture
+just test-stylus-fixture
 ```
 
-This runs `test_stylus_trace_analysis` which records a trace and exports it to the
-specified directory.
+The preparer asks CodeTracer's `stylus_fixture_rebuild` helper to write directly
+into this repository's ignored `test/fixtures/stylus-fund-trace/` directory using
+`STYLUS_FIXTURE_OUTPUT_DIR`. The regression test invokes that real pipeline,
+requires a nonempty ignored container, and verifies the sibling's tracked input
+files retain their bytes. CodeTracer's explicit regeneration helper still writes
+in place when no output override is set. Capturing new source recording data is
+a separate recording-tier operation that needs the live devnode.
 
 ## Testing your TypeScript changes
 
