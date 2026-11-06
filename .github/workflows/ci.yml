@@ -200,9 +200,13 @@ jobs:
       - name: Build codetracer (ct + db-backend binaries)
         run: |
           cd ../codetracer
-          FLAKE_OVERRIDE="--override-input codetracer-trace-format path:./libs/codetracer-trace-format"
-          nix build -L ".?submodules=1#codetracer" $FLAKE_OVERRIDE
-          nix build -L ".?submodules=1#db-backend" $FLAKE_OVERRIDE -o result-db-backend
+          # codetracer-trace-format is a locked flake input of codetracer's
+          # own. It is no longer a submodule (codetracer e901eb6c8 moved it to
+          # a sibling repo), so the former
+          # `--override-input codetracer-trace-format path:./libs/codetracer-trace-format`
+          # names a path that does not exist and fails the evaluation.
+          nix build -L ".?submodules=1#codetracer"
+          nix build -L ".?submodules=1#db-backend" -o result-db-backend
 
       # Build recorder components that ct needs to record traces for each
       # language family.  These are separate repos (restored as siblings above)
@@ -212,7 +216,10 @@ jobs:
         run: |
           if [ -d ../codetracer-native-backend ]; then
             cd ../codetracer-native-backend
-            nix build -L ".?submodules=1#ct-native-replay" -o result-native-replay
+            # The flake's package is `codetracer-rr-support`; it installs the
+            # `ct-native-replay` binary (Cargo [[bin]]). There is no
+            # `#ct-native-replay` attribute.
+            nix build -L ".?submodules=1#codetracer-rr-support" -o result-native-replay
           elif [ -d ../codetracer-rr-backend ]; then
             cd ../codetracer-rr-backend
             nix build -L ".?submodules=1#codetracer-rr-support" -o result-rr-support
