@@ -191,23 +191,51 @@ export async function loadEvents(): Promise<DapResult> {
 }
 
 /**
- * Map language names to their numeric IDs matching the Rust `Lang` enum
- * (repr(u8), serde_repr). The db-backend deserializes `lang` as a u8.
+ * The `lang` the specs name (`langId` in their smoke configs) -> the
+ * language's wire name on `ct/load-locals`.
+ *
+ * The replay server reads `CtLoadLocalsArguments.lang` by NAME: the spelling
+ * of `Lang::wire_name` in codetracer's `libs/ct-lang/src/lib.rs` (and
+ * `langWireName` in `src/common/common_lang.nim`), decoded with
+ * `ct_lang::lang_wire`. It refuses an integer ("invalid type: integer `0`,
+ * expected a string") and an unknown name, so the enum's declaration order is
+ * no longer a wire contract -- the ordinal table this replaces had drifted
+ * from it twice.
+ *
+ * Python and Ruby are `pythondb` / `rubydb`, the only Python and Ruby members
+ * `Lang` has. PolkaVM and Solana are not languages: codetracer retired those
+ * members (a PolkaVM blob or a Solana program has no source language; the VM
+ * is the recording's target ISA), so codetracer itself sends `unknown` for
+ * them, and so does this table.
  */
-// Ordinals must match `Lang` (repr(u8), serde_repr) in
-// codetracer/src/db-backend/src/lang.rs.  A spurious ``Small: 21``
-// here shifted every entry after CppWasm by one — Erlang ended up
-// as 39 which the server rejected with ``JSON error: invalid
-// value: 39, expected one of: 0, ..., 38``.  No such ``Small``
-// variant exists in the Rust enum.
-const LANG_IDS: Record<string, number> = {
-  C: 0, Cpp: 1, Rust: 2, Nim: 3, Go: 4, Pascal: 5, Fortran: 6,
-  D: 7, Crystal: 8, Lean: 9, Julia: 10, Ada: 11, Python: 12,
-  Ruby: 13, RubyDb: 14, Javascript: 15, Lua: 16, Asm: 17, Noir: 18,
-  RustWasm: 19, CppWasm: 20, PythonDb: 21, Unknown: 22,
-  Bash: 23, Zsh: 24, Solidity: 25, Masm: 26, Sway: 27, Move: 28,
-  PolkaVM: 29, Cairo: 30, Circom: 31, Leo: 32, Tolk: 33, Aiken: 34,
-  Cadence: 35, Solana: 36, Elixir: 37, Erlang: 38,
+const LANG_WIRE_NAMES: Readonly<Record<string, string>> = {
+  Unknown: 'unknown',
+  C: 'c', Cpp: 'cpp', Rust: 'rust', Nim: 'nim', Go: 'go',
+  Pascal: 'pascal', Fortran: 'fortran', D: 'd', Crystal: 'crystal',
+  Lean: 'lean', Julia: 'julia', Ada: 'ada',
+  Python: 'pythondb', PythonDb: 'pythondb', Ruby: 'rubydb', RubyDb: 'rubydb',
+  Javascript: 'javascript', Lua: 'lua', Asm: 'asm', Noir: 'noir',
+  Bash: 'bash', Zsh: 'zsh', Solidity: 'solidity', MASM: 'masm', Masm: 'masm',
+  Sway: 'sway', Move: 'move', Cairo: 'cairo', Circom: 'circom', Leo: 'leo',
+  Tolk: 'tolk', Aiken: 'aiken', Cadence: 'cadence', Elixir: 'elixir',
+  Erlang: 'erlang', Php: 'php', GDScript: 'gdscript',
+  PolkaVM: 'unknown', Solana: 'unknown',
+}
+
+/**
+ * The wire name for a spec's language. Throws on a name the table does not
+ * know rather than sending `unknown`: the old table fell back silently, which
+ * is how `MASM` (spelled `Masm` there) was sent as Unknown unnoticed.
+ */
+export function langWireName(langName: string): string {
+  const wireName = LANG_WIRE_NAMES[langName]
+  if (wireName === undefined) {
+    throw new Error(
+      `loadLocals: no ct/load-locals wire name for language '${langName}'; ` +
+      'add it to LANG_WIRE_NAMES (test/wdio/helpers/dap-client.ts)',
+    )
+  }
+  return wireName
 }
 
 /** Load local variables at the current position. */
@@ -220,14 +248,11 @@ export async function loadLocals(opts: {
 } = {}): Promise<DapResult> {
   // Field names must be camelCase to match the Rust struct's
   // #[serde(rename_all = "camelCase")] deserialization.
-  // The `lang` field is a repr(u8) enum and must be sent as a number.
-  const langName = opts.lang ?? 'Rust'
-  const langId = LANG_IDS[langName] ?? LANG_IDS.Unknown
   return dapRequest('ct/load-locals', {
     rrTicks: opts.rrTicks ?? 0,
     countBudget: opts.countBudget ?? 100,
     minCountLimit: 10,
-    lang: langId,
+    lang: langWireName(opts.lang ?? 'Rust'),
     watchExpressions: opts.watchExpressions ?? [],
     depthLimit: opts.depthLimit ?? 3,
   })
