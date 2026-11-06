@@ -43,12 +43,13 @@ test/wdio/diagnostics/
 # because the entry is a symlink (POSIX) or a copied tree (Windows) and
 # in either case it must not enter the index.
 test/wdio/fixtures/
-# Stylus trace fixture (generated, not committed — regenerate with scripts/prepare-stylus-fixture.sh)
-test/fixtures/stylus-fund-trace/trace.json
-test/fixtures/stylus-fund-trace/trace.bin
-test/fixtures/stylus-fund-trace/trace_metadata.json
-test/fixtures/stylus-fund-trace/trace_paths.json
-test/fixtures/stylus-fund-trace/files/
+# Stylus trace fixture (generated, not committed — regenerate with
+# scripts/prepare-stylus-fixture.sh). The script deletes the directory and
+# copies codetracer's whole stylus-fund-trace fixture into it, which is now a
+# CTFS bundle (stylus_fund_tracking_demo.ct, trace.events.json, its
+# regenerate script) rather than the trace.json/trace.bin layout the per-file
+# entries used to list, so the directory is ignored as a whole.
+test/fixtures/stylus-fund-trace/
 
 # macOS
 .DS_Store
