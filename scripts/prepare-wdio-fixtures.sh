@@ -63,8 +63,23 @@ path_exists() {
 	[ -e "$path" ]
 }
 
+# True when $1 is a single-file CTFS container: a regular file that starts
+# with the CTFS magic bytes C0 DE 72 AC E2 (src/ctfs.ts, CTFS_MAGIC).
+ctfs_container_file() {
+	local path="$1"
+	[ -f "$path" ] || return 1
+	[ "$(head -c 5 "$path" | od -An -tx1 | tr -d ' \n')" = "c0de72ace2" ]
+}
+
+# A trace is materialized when it is a trace directory carrying one of the
+# recorders' layouts, or a single-file CTFS `.ct` container. The latter is how
+# codetracer's `ct record-web` writes a browser session since codetracer
+# 01068538c ("browser sessions are recorded as a single-file CTFS .ct"), so the
+# cross-process fixture's frontend.ct / frontend-wasm.ct are files, not
+# directories (backend.ct is still a directory).
 trace_materialized() {
 	local trace_dir="$1"
+	ctfs_container_file "$trace_dir" && return 0
 	[ -d "$trace_dir" ] || return 1
 	[ -f "$trace_dir/trace.json" ] && return 0
 	[ -f "$trace_dir/trace_metadata.json" ] && return 0
@@ -134,11 +149,21 @@ run_value_origin_regenerator() {
 	fi
 }
 
+# Run one of codetracer's per-scenario `origin/<lang>/<scenario>/regenerate.sh`
+# scripts in codetracer's own development environment, as the cross-process
+# regenerator above is run. Those scripts invoke the recorder by its bare name
+# (`codetracer-python-recorder`, `codetracer-ruby-recorder`, `rustc`, ...) and
+# expect the environment that codetracer's dev shell provides ("after
+# `nix develop` provides the recorder on $PATH", their headers say); this
+# extension's own dev shell does not carry the Python recorder at all. PATH
+# keeps .ct-bin (exported by the caller), so the recorders prepared there are
+# still found first.
 run_origin_regenerator() {
 	local script="$1"
+	local codetracer_root="$2"
 	[ -x "$script" ] || fail "value-origin regenerator is missing or not executable: $script"
 	echo "Value-origin trace is missing; regenerating with $script ..."
-	if ! bash "$script"; then
+	if ! (cd "$codetracer_root" && repro exec . -- bash "$script"); then
 		fail "value-origin regenerator failed: $script"
 	fi
 }
@@ -150,7 +175,7 @@ prepare_origin_trace() {
 	local trace_dir="$origin_root/$language/$scenario/trace"
 
 	if ! trace_tree_materialized "$trace_dir"; then
-		run_origin_regenerator "$script"
+		run_origin_regenerator "$script" "$codetracer_root"
 	fi
 	trace_tree_materialized "$trace_dir" ||
 		fail "value-origin trace did not materialize: $trace_dir"

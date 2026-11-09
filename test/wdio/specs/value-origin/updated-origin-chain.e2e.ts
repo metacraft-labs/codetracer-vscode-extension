@@ -52,6 +52,9 @@ describe('Value Origin Tracking M6 — ct/updated-origin-chain forwarding', () =
     if (!started) {
       throw new Error(`codetracer-debug session must start for ${traceFolder}`)
     }
+    // The session exists before the replay has loaded the trace; a request
+    // sent earlier is refused ("no trace is loaded in the 'stable' thread").
+    await debug.waitForBackendReady()
 
     // Probe: is a CodeTracer debug session live?
     const sessionState = await browser.executeWorkbench(async (vscode) => {

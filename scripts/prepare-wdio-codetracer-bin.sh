@@ -245,19 +245,45 @@ EOF
 
 ensure_ruby_recorder_shim() {
 	local recorder_repo="$CODETRACER_REPO/../codetracer-ruby-recorder"
-	local package_bin="$recorder_repo/result/bin/codetracer-ruby-recorder"
-	local source_bin="$recorder_repo/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder"
+	local gem_dir="$recorder_repo/gems/codetracer-ruby-recorder"
+	local source_bin="$gem_dir/bin/codetracer-ruby-recorder"
+	# The native tracer the source shim loads (lib/codetracer/native.rb
+	# requires it from here, named with Ruby's DLEXT: `.so` on Linux,
+	# `.bundle` on macOS); it exists only once the sibling's `just build`
+	# (build-extension) has run.
+	local native_ext="$gem_dir/ext/native_tracer/target/release/codetracer_ruby_recorder"
+	local package_bin
 
 	[ -d "$recorder_repo" ] || return 0
 	mkdir -p "$REPO_ROOT/.ct-bin"
 
-	if [ -x "$package_bin" ]; then
-		replace_symlink "$package_bin" "$REPO_ROOT/.ct-bin/codetracer-ruby-recorder"
-		return 0
-	fi
+	# A packaged recorder (`nix build .#codetracer-ruby-recorder`) carries its
+	# native tracer. `result` is nix's default out-link; CI's wdio-integration
+	# job builds with `-o result-ruby-recorder` (.github/workflows/ci.yml), and
+	# must not have that package replaced by the source shim below.
+	for package_bin in \
+		"$recorder_repo/result/bin/codetracer-ruby-recorder" \
+		"$recorder_repo/result-ruby-recorder/bin/codetracer-ruby-recorder"; do
+		if [ -x "$package_bin" ]; then
+			replace_symlink "$package_bin" "$REPO_ROOT/.ct-bin/codetracer-ruby-recorder"
+			return 0
+		fi
+	done
 
 	if [ ! -x "$source_bin" ]; then
 		return 0
+	fi
+
+	# The source shim is a checked-in, always-executable Ruby script, so its
+	# presence says nothing about whether it can record: without the native
+	# tracer `ct record` of a Ruby program fails with "native tracer
+	# unavailable". Build the extension the way the sibling defines it.
+	if [ ! -f "$native_ext.so" ] && [ ! -f "$native_ext.bundle" ]; then
+		echo "codetracer-ruby-recorder native tracer missing; building sibling recorder with repro exec ..." >&2
+		run_in_repo_env "$recorder_repo" just build
+	fi
+	if [ ! -f "$native_ext.so" ] && [ ! -f "$native_ext.bundle" ]; then
+		fail "codetracer-ruby-recorder native tracer is still missing after 'just build': $native_ext.{so,bundle}"
 	fi
 
 	replace_symlink "$source_bin" "$REPO_ROOT/.ct-bin/codetracer-ruby-recorder"

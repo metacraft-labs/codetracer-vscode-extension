@@ -190,16 +190,52 @@ export async function loadEvents(): Promise<DapResult> {
   return dapRequest('ct/event-load', {}, 15000)
 }
 
-// ct/load-locals accepts ct-lang's Lang::wire_name, never an ordinal.
-// Most fixture labels already match after lowercasing. These older labels
-// need the current language spelling; VM targets alone do not identify one.
-const LANG_WIRE_ALIASES: Record<string, string> = {
-  python: 'pythondb',
-  ruby: 'rubydb',
-  rustwasm: 'rust',
-  cppwasm: 'cpp',
-  polkavm: 'unknown',
-  solana: 'unknown',
+/**
+ * The `lang` the specs name (`langId` in their smoke configs) -> the
+ * language's wire name on `ct/load-locals`.
+ *
+ * The replay server reads `CtLoadLocalsArguments.lang` by NAME: the spelling
+ * of `Lang::wire_name` in codetracer's `libs/ct-lang/src/lib.rs` (and
+ * `langWireName` in `src/common/common_lang.nim`), decoded with
+ * `ct_lang::lang_wire`. It refuses an integer ("invalid type: integer `0`,
+ * expected a string") and an unknown name, so the enum's declaration order is
+ * no longer a wire contract -- the ordinal table this replaces had drifted
+ * from it twice.
+ *
+ * Python and Ruby are `pythondb` / `rubydb`, the only Python and Ruby members
+ * `Lang` has. PolkaVM and Solana are not languages: codetracer retired those
+ * members (a PolkaVM blob or a Solana program has no source language; the VM
+ * is the recording's target ISA), so codetracer itself sends `unknown` for
+ * them, and so does this table.
+ */
+const LANG_WIRE_NAMES: Readonly<Record<string, string>> = {
+  Unknown: 'unknown',
+  C: 'c', Cpp: 'cpp', Rust: 'rust', Nim: 'nim', Go: 'go',
+  Pascal: 'pascal', Fortran: 'fortran', D: 'd', Crystal: 'crystal',
+  Lean: 'lean', Julia: 'julia', Ada: 'ada',
+  Python: 'pythondb', PythonDb: 'pythondb', Ruby: 'rubydb', RubyDb: 'rubydb',
+  Javascript: 'javascript', Lua: 'lua', Asm: 'asm', Noir: 'noir',
+  Bash: 'bash', Zsh: 'zsh', Solidity: 'solidity', MASM: 'masm', Masm: 'masm',
+  Sway: 'sway', Move: 'move', Cairo: 'cairo', Circom: 'circom', Leo: 'leo',
+  Tolk: 'tolk', Aiken: 'aiken', Cadence: 'cadence', Elixir: 'elixir',
+  Erlang: 'erlang', Php: 'php', GDScript: 'gdscript',
+  PolkaVM: 'unknown', Solana: 'unknown',
+}
+
+/**
+ * The wire name for a spec's language. Throws on a name the table does not
+ * know rather than sending `unknown`: the old table fell back silently, which
+ * is how `MASM` (spelled `Masm` there) was sent as Unknown unnoticed.
+ */
+export function langWireName(langName: string): string {
+  const wireName = LANG_WIRE_NAMES[langName]
+  if (wireName === undefined) {
+    throw new Error(
+      `loadLocals: no ct/load-locals wire name for language '${langName}'; ` +
+      'add it to LANG_WIRE_NAMES (test/wdio/helpers/dap-client.ts)',
+    )
+  }
+  return wireName
 }
 
 /** Load local variables at the current position. */
@@ -212,33 +248,21 @@ export async function loadLocals(opts: {
 } = {}): Promise<DapResult> {
   // Field names must be camelCase to match the Rust struct's
   // #[serde(rename_all = "camelCase")] deserialization.
-  const langName = (opts.lang ?? 'Rust').toLowerCase()
   return dapRequest('ct/load-locals', {
     rrTicks: opts.rrTicks ?? 0,
     countBudget: opts.countBudget ?? 100,
     minCountLimit: 10,
-    lang: LANG_WIRE_ALIASES[langName] ?? langName,
+    lang: langWireName(opts.lang ?? 'Rust'),
     watchExpressions: opts.watchExpressions ?? [],
     depthLimit: opts.depthLimit ?? 3,
   })
 }
 
-/** Load flow data for the current location.
- *
- * The flow arrives on the `ct/updated-flow` event; the `ct/load-flow`
- * response that follows it is an acknowledgement, so the flow is
- * delivered once (CodeTracer-DAP-Extensions: `ct/load-flow`). `data` is the
- * event's `FlowUpdate` body. The event is observed through the extension's
- * `registerPanelOverride` test seam, which hears every event the adapter
- * sends. The engine emits a request's event immediately before its response,
- * so the last `ct/updated-flow` observed once the response has resolved is
- * this request's; on a transport that delivered the response first, the next
- * one is awaited until the timeout.
- */
-export async function loadFlow(flowMode = 0, timeoutMs = 10000): Promise<DapResult> {
+/** Load flow data for the current location. */
+export async function loadFlow(flowMode = 0): Promise<DapResult> {
   // Field names must be camelCase to match the Rust struct's
   // #[serde(rename_all = "camelCase")] deserialization.
-  const args = {
+  return dapRequest('ct/load-flow', {
     flowMode,
     location: {
       path: '', line: 0, functionName: '', highLevelPath: '',
@@ -248,50 +272,7 @@ export async function loadFlow(flowMode = 0, timeoutMs = 10000): Promise<DapResu
       callstackDepth: 0, originatingInstructionAddress: 0,
       key: '', globalCallKey: '',
     },
-  }
-  return browser.executeWorkbench(async (vscode, a, t) => {
-    const session = vscode.debug.activeDebugSession
-    if (!session) return { ok: false, error: 'no active debug session' }
-    const exports = vscode.extensions.getExtension('metacraft-labs.ct-vscode')?.exports as any
-    if (!exports || typeof exports.registerPanelOverride !== 'function') {
-      return { ok: false, error: 'registerPanelOverride export missing' }
-    }
-    let flow: any = undefined
-    let wake: (() => void) | undefined
-    const fakePanel = {
-      webview: {
-        postMessage(message: any) {
-          if (message?.command === 'ct/updated-flow') {
-            flow = message.value
-            wake?.()
-          }
-          return Promise.resolve(true)
-        },
-      },
-    }
-    const dispose = exports.registerPanelOverride('wdio-load-flow', fakePanel)
-    const deadline = Date.now() + t
-    try {
-      await Promise.race([
-        session.customRequest('ct/load-flow', a),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('DAP request timeout')), t)),
-      ])
-      if (flow === undefined) {
-        await new Promise<void>((resolve, reject) => {
-          wake = resolve
-          setTimeout(
-            () => reject(new Error('ct/load-flow was acknowledged but no ct/updated-flow arrived')),
-            Math.max(0, deadline - Date.now()),
-          )
-        })
-      }
-      return { ok: true, data: flow }
-    } catch (e: any) {
-      return { ok: false, error: e.message }
-    } finally {
-      dispose()
-    }
-  }, args, timeoutMs) as DapResult
+  })
 }
 
 /** Load terminal output. */
