@@ -258,11 +258,22 @@ export async function loadLocals(opts: {
   })
 }
 
-/** Load flow data for the current location. */
-export async function loadFlow(flowMode = 0): Promise<DapResult> {
+/** Load flow data for the current location.
+ *
+ * The flow arrives on the `ct/updated-flow` event; the `ct/load-flow`
+ * response that follows it is an acknowledgement, so the flow is
+ * delivered once (CodeTracer-DAP-Extensions: `ct/load-flow`). `data` is the
+ * event's `FlowUpdate` body. The event is observed through the extension's
+ * `registerPanelOverride` test seam, which hears every event the adapter
+ * sends. The engine emits a request's event immediately before its response,
+ * so the last `ct/updated-flow` observed once the response has resolved is
+ * this request's; on a transport that delivered the response first, the next
+ * one is awaited until the timeout.
+ */
+export async function loadFlow(flowMode = 0, timeoutMs = 10000): Promise<DapResult> {
   // Field names must be camelCase to match the Rust struct's
   // #[serde(rename_all = "camelCase")] deserialization.
-  return dapRequest('ct/load-flow', {
+  const args = {
     flowMode,
     location: {
       path: '', line: 0, functionName: '', highLevelPath: '',
@@ -272,7 +283,50 @@ export async function loadFlow(flowMode = 0): Promise<DapResult> {
       callstackDepth: 0, originatingInstructionAddress: 0,
       key: '', globalCallKey: '',
     },
-  })
+  }
+  return browser.executeWorkbench(async (vscode, a, t) => {
+    const session = vscode.debug.activeDebugSession
+    if (!session) return { ok: false, error: 'no active debug session' }
+    const exports = vscode.extensions.getExtension('metacraft-labs.ct-vscode')?.exports as any
+    if (!exports || typeof exports.registerPanelOverride !== 'function') {
+      return { ok: false, error: 'registerPanelOverride export missing' }
+    }
+    let flow: any = undefined
+    let wake: (() => void) | undefined
+    const fakePanel = {
+      webview: {
+        postMessage(message: any) {
+          if (message?.command === 'ct/updated-flow') {
+            flow = message.value
+            wake?.()
+          }
+          return Promise.resolve(true)
+        },
+      },
+    }
+    const dispose = exports.registerPanelOverride('wdio-load-flow', fakePanel)
+    const deadline = Date.now() + t
+    try {
+      await Promise.race([
+        session.customRequest('ct/load-flow', a),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('DAP request timeout')), t)),
+      ])
+      if (flow === undefined) {
+        await new Promise<void>((resolve, reject) => {
+          wake = resolve
+          setTimeout(
+            () => reject(new Error('ct/load-flow was acknowledged but no ct/updated-flow arrived')),
+            Math.max(0, deadline - Date.now()),
+          )
+        })
+      }
+      return { ok: true, data: flow }
+    } catch (e: any) {
+      return { ok: false, error: e.message }
+    } finally {
+      dispose()
+    }
+  }, args, timeoutMs) as DapResult
 }
 
 /** Load terminal output. */
