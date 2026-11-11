@@ -1650,8 +1650,10 @@ async function maybeStartMarketingListener(context: vscode.ExtensionContext): Pr
  *   - `registerPanelOverride(id, panel)` is the WDIO suites' seam: `panel`'s
  *     `webview.postMessage` is handed the value-origin traffic as
  *     `{ command, value }` — each `showValueOrigin` request with its
- *     expression, and each event the replay sends the host's sessions (such
- *     as `ct/updated-origin-chain`). The result removes it.
+ *     expression, and each event a CodeTracer debug adapter sends (such as
+ *     `ct/updated-origin-chain` or `ct/updated-flow`), whether or not the
+ *     Nim session host (`media/vscode_host.js`) is built. The result removes
+ *     it.
  */
 export interface CodeTracerExtensionExports {
   showValueOrigin(expression: string): boolean;
@@ -1669,6 +1671,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<CodeTr
   // the host makes active (SDF-AREQ9), and each has a command that opens it.
   registerPanelSerializers(context);
   registerPanelCommands(context);
+  // The test seam hears the debug adapter's events whether or not the Nim
+  // session host loads (`registerPanelOverride` below).
+  context.subscriptions.push(sessionHost.registerEventObservation());
   // initial (stub or real)
   await reinitCommands(context);
   // Marketing/test driver listener (opt-in via setting).

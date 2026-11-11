@@ -62,9 +62,9 @@ const DEBUG_TYPE = "codetracer-debug";
 
 /**
  * What the value-origin path carries, as `{ command, value }`: each
- * `showValueOrigin` request with its expression, and each event the replay
- * sends the host's sessions. The WDIO suites observe it through the
- * extension's `registerPanelOverride` export; nothing in the product reads it.
+ * `showValueOrigin` request with its expression, and each event a CodeTracer
+ * debug adapter sends. The WDIO suites observe it through the extension's
+ * `registerPanelOverride` export; nothing in the product reads it.
  */
 export interface ObservedMessage {
   command: string;
@@ -77,6 +77,32 @@ const observers: Set<(message: ObservedMessage) => void> = new Set();
 export function observeMessages(listener: (message: ObservedMessage) => void): vscode.Disposable {
   observers.add(listener);
   return { dispose: () => observers.delete(listener) };
+}
+
+/**
+ * Hand every event a CodeTracer debug adapter sends to the observers.
+ *
+ * This tracker is registered at activation, independently of the session
+ * host, because the observers must hear the adapter in every configuration
+ * the extension supports: a TypeScript-only build has no `vscode_host.js`, so
+ * `startSessionHost` returns before registering its own tracker, yet the
+ * replay still runs and its events still reach VS Code. The WDIO helpers wait
+ * on these events (for example `ct/updated-flow`, which carries the answer to
+ * `ct/load-flow`), so tying them to the Nim bundle made those helpers time
+ * out in every consumer that builds only the TypeScript.
+ */
+export function registerEventObservation(): vscode.Disposable {
+  return vscode.debug.registerDebugAdapterTrackerFactory(DEBUG_TYPE, {
+    createDebugAdapterTracker() {
+      return {
+        onDidSendMessage(message: any) {
+          if (observers.size > 0 && message?.type === "event") {
+            notifyObservers({ command: String(message.event), value: message.body });
+          }
+        },
+      };
+    },
+  });
 }
 
 function notifyObservers(message: ObservedMessage): void {
@@ -132,9 +158,6 @@ export function startSessionHost(context: vscode.ExtensionContext): boolean {
           onDidSendMessage(message: any) {
             if (message?.type === "event") {
               mod?.ctHostDeliverEvent(host, session.id, message);
-              if (observers.size > 0) {
-                notifyObservers({ command: String(message.event), value: message.body });
-              }
             }
           },
         };
