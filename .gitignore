@@ -71,3 +71,7 @@ Thumbs.db
 # /nix/store/65h17wjrrlsj2rj540igylrx7fqcd6vq-glibc-2.40-36/lib/ld-linux-x86-64.so.2
 # interpreter, which does not exist even on the machine that measured it.
 db-backend/
+
+# Scenario runs: the runner, the staged arm and the runs' recordings
+# (scripts/scenarios.sh).
+build/

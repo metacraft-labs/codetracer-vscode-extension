@@ -321,6 +321,26 @@ test-wdio-value-origin: prepare-wdio-value-origin-fixtures
         just _xvfb-run "npx wdio run wdio.conf.ts --spec $spec"
     done
 
+# CodeTracer's user-level scenarios on VS Code (test/scenarios/): the pack is
+# codetracer's, the runner DemoVideoScript's and the arm
+# DemoVideoScript-WebDriverIO's, all sibling checkouts; the binding is this
+# repository's (test/scenarios/codetracer-binding.ts). scripts/scenarios.sh
+# says what each needs. A failed run's recording is under build/scenario-runs/.
+scenario-build:
+    bash scripts/scenarios.sh build
+
+# Every scenario against the pack: no step may reach application code.
+scenario-lint:
+    bash scripts/scenarios.sh lint
+
+# The vscode lane: every scenario in fast and realistic mode, under Xvfb.
+scenario-lane:
+    just _xvfb-run "bash scripts/scenarios.sh lane"
+
+# One scenario, under Xvfb: `just scenario-run test/scenarios/panels/requests-panel-mounts.yaml --mode realistic`.
+scenario-run scenario *args:
+    just _xvfb-run "bash scripts/scenarios.sh run {{scenario}} {{args}}"
+
 # Run all WDIO tests
 test-wdio: prepare-wdio-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts"

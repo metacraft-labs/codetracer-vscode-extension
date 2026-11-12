@@ -1,0 +1,17 @@
+# The VS Code flavour of CodeTracer's scenarios: VS Code with this extension,
+# started through its WebDriver service, driven by DemoVideoScript-WebDriverIO's
+# arm with the extension's WebDriverIO binding (../codetracer-binding.ts). The
+# pack is codetracer's (the sibling checkout). Run from the repository root:
+# `just scenario-lane` (under Xvfb).
+lane: 1
+name: vscode
+pack: ../../../../codetracer/src/tests/scenarios/pack/codetracer.pack.yaml
+backend: "cmd:node build/scenario-arm/src/main.ts --binding test/scenarios/codetracer-binding.ts"
+modes: [fast, realistic]
+retention: { runs: 5, failure-days: 7 }
+# Only scenarios measured green on this lane are applicable. The others under
+# ../panels and ../value-origin are written and lint clean against the pack
+# but have not run green yet (see the commit that adds them).
+applicable:
+  - ../panels/requests-panel-mounts.yaml
+unsupported: []
