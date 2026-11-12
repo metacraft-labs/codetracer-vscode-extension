@@ -1,0 +1,75 @@
+scenario: 1
+name: panels/scratchpad-add-from-editor
+pack: codetracer
+summary: >-
+  At a stop where `board` is a local, "Add to Scratchpad" from the editor's
+  context menu on a selection adds the local with its value, evaluates an
+  expression that is not a local (without adding it to the State panel), and
+  shows an expression the replay cannot evaluate as an error value.
+
+stage:
+  - use: record-program
+    with: { program: test/wdio/programs/python_scratchpad/main.py }
+  - use: open-recording
+    with: { panes: "variables, scratchpad, call-trace" }
+
+steps:
+  - beat: stop-in-check
+    steps:
+      - wait: { until: replay-idle, timeout: 120s }
+      - wait: { until: call-trace.loaded, timeout: 60s }
+      - click: { at: 'call-trace/call[name="check"]', count: 2 }
+      - wait: { until: { at: 'call-trace/call[name="check"]', selected: true }, timeout: 30s }
+      - wait: { until: replay-idle, timeout: 60s }
+      - expect: { at: 'editor[file="main.py"]', assert: "stopped-within(12, 13)" }
+
+  - beat: expressions
+    narration: { text: "A scratch document holds the expressions to add." }
+    steps:
+      - click: { at: 'editor[file="main.py"]/line[number="13"]', anchor: text-end }
+      - chord: Ctrl+n
+      - wait: { until: { at: 'editor[file="Untitled-1"]', focused: true }, timeout: 30s }
+      - type: "board"
+      - key: Enter
+      - type: "board[0]"
+      - key: Enter
+      - type: "board.no_such_field"
+      - expect:
+          at: 'editor[file="Untitled-1"]'
+          text: { subsequence: ["board", "board[0]", "board.no_such_field"] }
+      - click: { at: 'pane-tab[label="Scratchpad"]' }
+
+  - beat: add-local
+    steps:
+      - click: { at: 'editor[file="Untitled-1"]/line[number="1"]', anchor: text-start }
+      - chord: Shift+End
+      - click: { at: 'editor[file="Untitled-1"]/line[number="1"]', anchor: "column(2)", button: right }
+      - click: { at: 'context-menu/menu-item[label="Add to Scratchpad"]' }
+      - wait: { until: { at: 'scratchpad/scratch-entry[expression="board"]', present: true }, timeout: 30s }
+      - expect: { at: 'scratchpad/scratch-entry[expression="board"]', error: false, value: { matches: "\\S" } }
+
+  - beat: add-expression
+    steps:
+      - click: { at: 'editor[file="Untitled-1"]/line[number="2"]', anchor: text-start }
+      - chord: Shift+End
+      - click: { at: 'editor[file="Untitled-1"]/line[number="2"]', anchor: "column(2)", button: right }
+      - click: { at: 'context-menu/menu-item[label="Add to Scratchpad"]' }
+      - wait: { until: { at: 'scratchpad/scratch-entry[expression="board[0]"]', present: true }, timeout: 30s }
+      - expect: { at: 'scratchpad/scratch-entry[expression="board[0]"]', error: false, value: { matches: "\\S" } }
+      - click: { at: 'pane-tab[label="State"]' }
+      - wait: { until: variables.loaded, timeout: 30s }
+      - expect: { at: variables, assert: "has-variable(board)" }
+      - expect: { at: 'variables/variable[name="board[0]"]', absent: true }
+      - click: { at: 'pane-tab[label="Scratchpad"]' }
+
+  - beat: add-error
+    steps:
+      - click: { at: 'editor[file="Untitled-1"]/line[number="3"]', anchor: text-start }
+      - chord: Shift+End
+      - click: { at: 'editor[file="Untitled-1"]/line[number="3"]', anchor: "column(2)", button: right }
+      - click: { at: 'context-menu/menu-item[label="Add to Scratchpad"]' }
+      - wait: { until: { at: 'scratchpad/scratch-entry[expression="board.no_such_field"]', present: true }, timeout: 30s }
+      - expect:
+          at: 'scratchpad/scratch-entry[expression="board.no_such_field"]'
+          error: true
+          value: { matches: "\\S" }

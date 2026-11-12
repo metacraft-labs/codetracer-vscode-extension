@@ -1,0 +1,27 @@
+scenario: 1
+name: panels/event-log-pages-on-scroll
+pack: codetracer
+summary: >-
+  The Event Log panel first shows a window of a long recording's events, its
+  footer reporting fewer rows shown than the log holds; the wheel scrolls it
+  to its end, the last event renders and the footer reaches the total.
+
+stage:
+  - use: record-program
+    with: { program: test/wdio/programs/python_panels/main.py }
+  - use: open-recording
+    with: { panes: event-log }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: event-log, count: { gt: 0 } }, timeout: 60s }
+  # 201 printed lines: more than one window.
+  - expect: { at: event-log, total: 201, assert: "pages-remain" }
+  - expect: { at: 'event-log/event[text="total 2646700"]', absent: true }
+  # to its end, a few turns of the wheel at a time
+  - wheel: { at: event-log, direction: down, amount: 35 }
+  - wheel: { at: event-log, direction: down, amount: 35 }
+  - wheel: { at: event-log, direction: down, amount: 35 }
+  - wait: { until: { at: event-log, assert: "shows-all" }, timeout: 60s }
+  - expect: { at: event-log, total: 201, last-shown: 201 }
+  - expect: { at: 'event-log/event[text="total 2646700"]', present: true }

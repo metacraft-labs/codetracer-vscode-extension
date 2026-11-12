@@ -1,0 +1,35 @@
+scenario: 1
+name: value-origin/c-cross-thread-copy
+pack: codetracer
+summary: >-
+  A value one thread wrote and another read: in a C (rr) recording stopped at
+  the `printf` of `local`, its Origin Chain has a CrossThreadCopy hop, drawn
+  with its confidence of 0.6.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/c/cross_thread_copy/main.c }
+  - use: open-recording
+    with: { panes: variables }
+
+steps:
+  - beat: stop
+    steps:
+      - wait: { until: replay-idle, timeout: 180s }
+      - wait: { until: { at: 'editor[file="main.c"]/line[number="43"]', present: true }, timeout: 60s }
+      - click: { at: 'editor[file="main.c"]/line[number="43"]', anchor: text-start }
+      - key: F9
+      - expect: { at: 'editor[file="main.c"]/line[number="43"]', breakpoint: true }
+      - key: F5
+        settle: false
+      - wait: { until: { at: 'editor[file="main.c"]', assert: "stopped-at(43)" }, timeout: 120s }
+      - wait: { until: replay-idle, timeout: 60s }
+  - beat: ask
+    narration: { text: "Where did `local` come from? Select it and ask for its origin." }
+    steps:
+      - click: { at: 'editor[file="main.c"]/line[number="43"]', anchor: "column(20)", count: 2 }
+      - chord: { bound: variables.show-value-origin }
+        settle: false
+      - wait: { until: origin-chain.loaded, timeout: 120s }
+      - expect: { at: origin-chain, assert: "has-hop(CrossThreadCopy)" }
+      - expect: { at: origin-chain, assert: "has-confidence(0.6)" }

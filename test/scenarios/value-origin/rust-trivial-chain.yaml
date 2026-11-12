@@ -1,0 +1,33 @@
+scenario: 1
+name: value-origin/rust-trivial-chain
+pack: codetracer
+summary: >-
+  Stopped at the `println!` of `c` in a Rust (rr) recording, Show Value Origin
+  on `c` shows its three hops.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/rust/simple_trivial_chain/main.rs }
+  - use: open-recording
+    with: { panes: variables }
+
+steps:
+  - beat: stop
+    steps:
+      - wait: { until: replay-idle, timeout: 180s }
+      - wait: { until: { at: 'editor[file="main.rs"]/line[number="8"]', present: true }, timeout: 60s }
+      - click: { at: 'editor[file="main.rs"]/line[number="8"]', anchor: text-start }
+      - key: F9
+      - expect: { at: 'editor[file="main.rs"]/line[number="8"]', breakpoint: true }
+      - key: F5
+        settle: false
+      - wait: { until: { at: 'editor[file="main.rs"]', assert: "stopped-at(8)" }, timeout: 120s }
+      - wait: { until: replay-idle, timeout: 60s }
+  - beat: ask
+    narration: { text: "Where did `c` come from? Select it and ask for its origin." }
+    steps:
+      - click: { at: 'editor[file="main.rs"]/line[number="8"]', anchor: "column(20)", count: 2 }
+      - chord: { bound: variables.show-value-origin }
+        settle: false
+      - wait: { until: origin-chain.loaded, timeout: 120s }
+      - expect: { at: origin-chain, count: 3 }

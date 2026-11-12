@@ -1,0 +1,31 @@
+scenario: 1
+name: value-origin/event-log-correlation-markers-three-trace
+pack: codetracer
+summary: >-
+  In the frontend recording of a three-process session (a browser frontend,
+  its WebAssembly realm and a backend), the Event Log marks where the
+  recording crosses into the others: the HTTP request to the backend (key
+  620) and the JavaScript-to-WebAssembly realm, each with its chip and its
+  direction. A click on the HTTP chip makes the frontend the active
+  recording.
+
+stage:
+  - use: open-recording
+    with:
+      recording: src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/frontend.ct
+      panes: event-log
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'event-log/event-marker[boundary="account-balance-with-wasm"]', present: true }, timeout: 60s }
+  - expect:
+      at: 'event-log/event-marker[boundary="account-balance-with-wasm"]'
+      chip: "[account-balance-with-wasm]"
+      key-value: "620"
+      direction: true
+  - expect:
+      at: 'event-log/event-marker[boundary="js-wasm-realm"]'
+      chip: "[js-wasm-realm]"
+      direction: true
+  - click: { at: 'event-log/event-marker[boundary="account-balance-with-wasm"]' }
+  - wait: { until: { at: session-strip, assert: "active-is(frontend-js)" }, timeout: 30s }

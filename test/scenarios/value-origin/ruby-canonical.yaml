@@ -1,0 +1,33 @@
+scenario: 1
+name: value-origin/ruby-canonical
+pack: codetracer
+summary: >-
+  Stopped at `puts c` in a Ruby recording, Show Value Origin on `c` shows
+  three hops ending at the literal 10.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/ruby/simple_trivial_chain/main.rb }
+  - use: open-recording
+    with: { panes: variables }
+
+steps:
+  - beat: stop
+    steps:
+      - wait: { until: replay-idle, timeout: 180s }
+      - wait: { until: { at: 'editor[file="main.rb"]/line[number="6"]', present: true }, timeout: 60s }
+      - click: { at: 'editor[file="main.rb"]/line[number="6"]', anchor: text-start }
+      - key: F9
+      - expect: { at: 'editor[file="main.rb"]/line[number="6"]', breakpoint: true }
+      - key: F5
+        settle: false
+      - wait: { until: { at: 'editor[file="main.rb"]', assert: "stopped-at(6)" }, timeout: 120s }
+      - wait: { until: replay-idle, timeout: 60s }
+  - beat: ask
+    narration: { text: "Where did `c` come from? Select it and ask for its origin." }
+    steps:
+      - click: { at: 'editor[file="main.rb"]/line[number="6"]', anchor: "column(6)", count: 2 }
+      - chord: { bound: variables.show-value-origin }
+        settle: false
+      - wait: { until: origin-chain.loaded, timeout: 120s }
+      - expect: { at: origin-chain, count: 3, terminator: { contains: "10" } }

@@ -1,0 +1,39 @@
+scenario: 1
+name: panels/calltrace-panel-loads-on-scroll
+pack: codetracer
+summary: >-
+  The Call Trace panel first shows a window of a long recording's calls; the
+  wheel scrolls it to its end, and the calls past that window load. A
+  double-click on one of them moves the debugger into the call it names and
+  marks the row.
+
+stage:
+  - use: record-program
+    with: { program: test/wdio/programs/python_panels/main.py }
+  - use: open-recording
+    with: { panes: call-trace }
+
+steps:
+  - beat: first-window
+    steps:
+      - wait: { until: replay-idle, timeout: 120s }
+      # 200 calls of `square` and `report` (i = 0..199): the first window
+      # holds the first ones, not the last.
+      - wait: { until: { at: 'call-trace/call[name="report", arguments="(i=0, value=0)"]', present: true }, timeout: 60s }
+      - expect: { at: 'call-trace/call[name="report", arguments="(i=199, value=39601)"]', absent: true }
+
+  - beat: scroll
+    steps:
+      # to its end, a few turns of the wheel at a time
+      - wheel: { at: call-trace, direction: down, amount: 35 }
+      - wheel: { at: call-trace, direction: down, amount: 35 }
+      - wheel: { at: call-trace, direction: down, amount: 35 }
+      - wait: { until: { at: 'call-trace/call[name="report", arguments="(i=199, value=39601)"]', present: true }, timeout: 60s }
+      - expect: { at: 'call-trace/call[name="square", arguments="(n=199)"]', selected: false }
+
+  - beat: jump
+    steps:
+      - click: { at: 'call-trace/call[name="square", arguments="(n=199)"]', count: 2 }
+      - wait: { until: { at: 'call-trace/call[name="square", arguments="(n=199)"]', selected: true }, timeout: 60s }
+      - wait: { until: replay-idle, timeout: 60s }
+      - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(12)" }
