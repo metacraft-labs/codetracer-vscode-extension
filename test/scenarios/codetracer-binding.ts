@@ -580,11 +580,6 @@ const USER_SETTINGS: Record<string, unknown> = {
   "files.hotExit": "off",
   "window.customMenuBarAltFocus": false,
   "git.enabled": false,
-  // The extension's debugger names the languages VS Code lets a user set a
-  // breakpoint in (package.json `contributes.debuggers[].languages`), and
-  // Python, JavaScript and C are not among them: without this a user's F9 in
-  // a recording's Python source does nothing.
-  "debug.allowBreakpointsEverywhere": true,
   "git.openRepositoryInParentFolders": "never",
   "workbench.secondarySideBar.defaultVisibility": "hidden",
   "debug.internalConsoleOptions": "neverOpen",

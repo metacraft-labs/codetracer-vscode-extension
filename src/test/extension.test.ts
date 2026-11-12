@@ -69,7 +69,12 @@ suite('Extension Test Suite', () => {
 			contributes?: { debuggers?: Array<{ languages?: string[] }> };
 		};
 		const languages = pkg.contributes?.debuggers?.[0]?.languages ?? [];
-		for (const lang of ['noir', 'ruby', 'rust']) {
+		// VS Code lets a user set a breakpoint only in a file whose language a
+		// debugger names (unless `debug.allowBreakpointsEverywhere` is on), so
+		// every language CodeTracer records has to be here.  Python, JavaScript
+		// and C were missing once, and F9 in their files did nothing.
+		for (const lang of ['c', 'cpp', 'rust', 'nim', 'go', 'python', 'ruby', 'javascript',
+			'typescript', 'shellscript', 'php', 'noir', 'solidity', 'elixir', 'erlang']) {
 			assert.ok(languages.includes(lang), `expected debugger language: ${lang}`);
 		}
 	});
