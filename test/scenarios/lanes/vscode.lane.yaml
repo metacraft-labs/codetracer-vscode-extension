@@ -8,10 +8,20 @@ name: vscode
 pack: ../../../../codetracer/src/tests/scenarios/pack/codetracer.pack.yaml
 backend: "cmd:node build/scenario-arm/src/main.ts --binding test/scenarios/codetracer-binding.ts"
 modes: [fast, realistic]
+# VS Code and its webviews redraw slowly on a loaded host (one read of every
+# panel's webview took over 10 s at load 170)
+settle-timeout: 30000
+# recording a C or rr program and starting VS Code on it outlasts the default
+stage-timeout: 600000
 retention: { runs: 5, failure-days: 7 }
 # Only scenarios measured green on this lane are applicable. The others under
 # ../panels and ../value-origin are written and lint clean against the pack
 # but have not run green yet (see the commit that adds them).
 applicable:
   - ../panels/requests-panel-mounts.yaml
+  - ../value-origin/python-frame-transitions.yaml
+  - ../value-origin/python-trivial-chain.yaml
+  - ../value-origin/python-trivial-chain-badges.yaml
+  - ../value-origin/python-trivial-chain-hover.yaml
+  - ../value-origin/ruby-canonical.yaml
 unsupported: []

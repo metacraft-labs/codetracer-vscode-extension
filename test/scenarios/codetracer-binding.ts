@@ -238,7 +238,17 @@ function readWorkbench(): any {
       const sb = span?.getBoundingClientRect();
       const vb = vl?.getBoundingClientRect();
       const textLeft = sb ? sb.left : (vb ? vb.left : lb.right);
-      const charWidth = sb && t.length > 0 ? sb.width / t.length : 7;
+      // The width of a character, from the line's text tokens alone: the
+      // line's span also holds the decorations drawn after the text (the
+      // values a stopped session shows inline), which have width but no text.
+      let tokenChars = 0, tokenWidth = 0;
+      for (const tok of Array.from(span?.children ?? []) as HTMLElement[]) {
+        const n = (tok.textContent ?? "").length;
+        if (n === 0) continue;
+        tokenChars += n;
+        tokenWidth += tok.getBoundingClientRect().width;
+      }
+      const charWidth = tokenChars > 0 ? tokenWidth / tokenChars : 7;
       editorNode.children.push({
         role: "line", keys: [["number", String(r.n)]],
         props: { number: r.n, text: t, current, caret, breakpoint: near(breakpointTops, lb.top, lb.height) },
@@ -392,7 +402,7 @@ function readPanel(): any {
       el.children.push(node("event-marker", chip ?? m, {
         boundary, chip: text(chip), "key-value": m.getAttribute("data-key-value") ?? "",
         direction: !!m.querySelector("span.marker-direction-icon"),
-      }, [["boundary", boundary]]));
+      }, [["boundary", boundary], ["key-value", m.getAttribute("data-key-value") ?? ""]]));
     }
     el.props.count = el.children.length;
     out.push(el);
@@ -443,9 +453,22 @@ function readPanel(): any {
     if (host && vis(host)) {
       const oc = node("origin-chain", host, { count: hops.length, terminator: text(term) });
       hops.forEach((h, i) => {
-        const conf = h.getAttribute("data-origin-confidence");
-        const line = h.getAttribute("data-origin-line");
-        const cls = h.getAttribute("data-origin-classification") ?? h.getAttribute("data-classification") ?? "";
+        // What the side panel draws for a hop (ui/isonim_origin_chain.nim):
+        // its `path:line` as the button, `confidence <n>`, the crossing of a
+        // call, and its kind in the row's accessible name ("hop 2: trivial
+        // copy at step 478"), which is how a screen reader announces it.
+        const confText = /confidence\s+([\d.]+)/.exec(text(h.querySelector(".ct-origin-hop-confidence")));
+        const lineText = /:(\d+)\s*$/.exec(text(h.querySelector("button")));
+        const kind = /^hop \d+: (.*) at step/.exec(h.getAttribute("aria-label") ?? "")?.[1] ?? "";
+        const KINDS: Record<string, string> = {
+          "trivial copy": "TrivialCopy", "field access": "FieldAccess", "index access": "IndexAccess",
+          "computational expression": "Computational", "function call": "FunctionCall", "literal": "Literal",
+          "return capture": "ReturnCapture", "parameter pass": "ParameterPass",
+          "cross-thread copy": "CrossThreadCopy", "unknown": "Unknown",
+        };
+        const conf = h.getAttribute("data-origin-confidence") ?? confText?.[1] ?? null;
+        const line = h.getAttribute("data-origin-line") ?? lineText?.[1] ?? null;
+        const cls = h.getAttribute("data-origin-classification") ?? KINDS[kind] ?? "";
         const details = h.querySelector("details") as HTMLDetailsElement | null;
         const summary = (details?.querySelector("summary") ?? null) as HTMLElement | null;
         const hop = node("origin-hop", (h.querySelector("button") as HTMLElement | null) ?? h, {
@@ -677,6 +700,9 @@ export async function launch(opts: { width?: number; height?: number }): Promise
   // The service's page objects reach the session through WebDriverIO's
   // global `browser`, as they do in a test runner.
   (globalThis as any).browser = browser;
+  // The service's own hook gives the workbench five seconds to draw, which a
+  // loaded host does not always meet: wait for it here first.
+  await browser.$(".monaco-workbench").waitForExist({ timeout: 120_000, interval: 250 });
   await worker.before(caps, [], browser);
   // The service rejects its pending proxy calls when VS Code closes the
   // proxy's socket, which it does as the run ends.
@@ -750,6 +776,7 @@ async function openRecording(ctx: Ctx, launched: any, args: Record<string, unkno
     if (process.env.CT_SCENARIO_TIMING) console.error(`[stage] ${what} at ${Date.now() - t0} ms`);
   };
   const t0 = Date.now();
+  stopChildrenOnExit();
   const b = await launch({});
   ctx.browser = b;
   phase("VS Code up");
@@ -775,12 +802,14 @@ async function openRecording(ctx: Ctx, launched: any, args: Record<string, unkno
   if (!started) throw new Error(`open-recording: VS Code did not start a CodeTracer session on ${folder}`);
   phase("session started");
   // The session is up when the replay answers and its stop is on screen.
+  // A native recording of several threads takes minutes to load on a
+  // loaded host; the stage's own limit (the run's `stage-timeout`) bounds it.
   await waitFor("the replay did not stop at the recording's entry", () => b.executeWorkbench(async (vscode: any) => {
     const s = vscode.debug.activeDebugSession;
     if (!s) return false;
     const t = await s.customRequest("threads");
     return Array.isArray(t?.threads) && t.threads.length > 0 && !!vscode.window.activeTextEditor;
-  }), 120_000);
+  }), 300_000);
 
   // The source the session stopped in, in front of the first group. (The
   // extension also opens the recording's copy of the source, which can land
@@ -813,6 +842,19 @@ async function openRecording(ctx: Ctx, launched: any, args: Record<string, unkno
       }
     }, pane.command, pane.title);
   }
+  // The extension opens its own panels when the session starts
+  // (`initPanels`), which can land after the ones opened above and replace
+  // their arrangement: every panel asked for is open, or it is opened again.
+  const wanted = panes.map((p) => PANES[p]);
+  await waitFor(`the panels ${panes.join(", ")} did not open`, async () => {
+    const missing: string[] = await b.executeWorkbench(async (vscode: any, all: Array<{ command: string; title: string }>) => {
+      const open = new Set(vscode.window.tabGroups.all.flatMap((g: any) => g.tabs.map((t: any) => t.label)));
+      const gone = all.filter((p) => !open.has(p.title));
+      for (const p of gone) await vscode.commands.executeCommand(p.command);
+      return gone.map((p) => p.title);
+    }, wanted);
+    return missing.length === 0;
+  }, 60_000);
   phase("panes open");
   // the keyboard in the source, where a user starts
   await showStop();
@@ -849,6 +891,24 @@ function killTree(pid: number): void {
   const r = spawnSync("pgrep", ["-P", String(pid)], { encoding: "utf-8" });
   for (const c of (r.stdout ?? "").split("\n").filter((x) => x.trim())) killTree(parseInt(c, 10));
   try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+}
+
+/** Every process this one started (ChromeDriver, VS Code), with theirs. */
+function killChildren(): void {
+  const r = spawnSync("pgrep", ["-P", String(process.pid)], { encoding: "utf-8" });
+  for (const c of (r.stdout ?? "").split("\n").filter((x) => x.trim())) killTree(parseInt(c, 10));
+}
+
+let exitGuard = false;
+function stopChildrenOnExit(): void {
+  if (exitGuard) return;
+  exitGuard = true;
+  // However the arm ends — a passing run, a failed one, a signal — what it
+  // started does not outlive it.
+  process.on("exit", killChildren);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.on(sig, () => { killChildren(); process.exit(128 + (sig === "SIGINT" ? 2 : sig === "SIGTERM" ? 15 : 1)); });
+  }
 }
 
 const binding = {
@@ -929,6 +989,10 @@ const binding = {
   async close(ctx: Ctx): Promise<void> {
     // The arm ended the WebDriver session; VS Code's processes and the replay
     // servers the extension started go with the run.
+    // So does the ChromeDriver WebDriverIO started for the session: it is
+    // this process's child, started detached, and outlives the arm (with its
+    // Chromium) unless it is stopped here.
+    killChildren();
     const storage: string | undefined = ctx.state.storage;
     if (storage) {
       const r = spawnSync("pgrep", ["-f", storage], { encoding: "utf-8" });

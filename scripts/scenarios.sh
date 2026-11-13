@@ -45,6 +45,9 @@ dvs_root="${DVS_ROOT:-${ws}/DemoVideoScript}"
 arm_root="${DVS_WEBDRIVERIO_ROOT:-${ws}/DemoVideoScript-WebDriverIO}"
 pack="${CT_SCENARIO_PACK:-${ct_dir}/src/tests/scenarios/pack/codetracer.pack.yaml}"
 backend="cmd:node ${build_dir}/scenario-arm/src/main.ts --binding ${root}/${S}/codetracer-binding.ts"
+# One read of VS Code's surface descends into every panel's webview; on a
+# loaded host that outlasts the runner's default 30 s per backend call.
+export DVS_BACKEND_TIMEOUT_MS="${DVS_BACKEND_TIMEOUT_MS:-120000}"
 
 require() {
 	local what="$1" path="$2"
