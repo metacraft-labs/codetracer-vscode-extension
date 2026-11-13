@@ -84,6 +84,110 @@
         }
       }
     },
+    "breakpoints": [
+      {
+        "language": "c"
+      },
+      {
+        "language": "cpp"
+      },
+      {
+        "language": "rust"
+      },
+      {
+        "language": "nim"
+      },
+      {
+        "language": "go"
+      },
+      {
+        "language": "pascal"
+      },
+      {
+        "language": "fortran"
+      },
+      {
+        "language": "d"
+      },
+      {
+        "language": "crystal"
+      },
+      {
+        "language": "lean"
+      },
+      {
+        "language": "lean4"
+      },
+      {
+        "language": "julia"
+      },
+      {
+        "language": "ada"
+      },
+      {
+        "language": "asm"
+      },
+      {
+        "language": "python"
+      },
+      {
+        "language": "ruby"
+      },
+      {
+        "language": "javascript"
+      },
+      {
+        "language": "typescript"
+      },
+      {
+        "language": "shellscript"
+      },
+      {
+        "language": "php"
+      },
+      {
+        "language": "noir"
+      },
+      {
+        "language": "solidity"
+      },
+      {
+        "language": "vyper"
+      },
+      {
+        "language": "masm"
+      },
+      {
+        "language": "sway"
+      },
+      {
+        "language": "move"
+      },
+      {
+        "language": "cairo"
+      },
+      {
+        "language": "circom"
+      },
+      {
+        "language": "leo"
+      },
+      {
+        "language": "tolk"
+      },
+      {
+        "language": "aiken"
+      },
+      {
+        "language": "cadence"
+      },
+      {
+        "language": "elixir"
+      },
+      {
+        "language": "erlang"
+      }
+    ],
     "debuggers": [
       {
         "type": "codetracer-debug",
