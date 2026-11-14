@@ -17,11 +17,14 @@ steps:
   - wait: { until: { at: event-log, count: { gt: 0 } }, timeout: 60s }
   # 201 printed lines: more than one window.
   - expect: { at: event-log, total: 201, assert: "pages-remain" }
-  - expect: { at: 'event-log/event[text="total 2646700"]', absent: true }
+  - expect: { at: 'event-log/event[text="stdout: total 2646700"]', absent: true }
   # to its end, a few turns of the wheel at a time
   - wheel: { at: event-log, direction: down, amount: 35 }
+    settle: false
   - wheel: { at: event-log, direction: down, amount: 35 }
+    settle: false
   - wheel: { at: event-log, direction: down, amount: 35 }
+    settle: false
   - wait: { until: { at: event-log, assert: "shows-all" }, timeout: 60s }
   - expect: { at: event-log, total: 201, last-shown: 201 }
-  - expect: { at: 'event-log/event[text="total 2646700"]', present: true }
+  - expect: { at: 'event-log/event[text="stdout: total 2646700"]', present: true }

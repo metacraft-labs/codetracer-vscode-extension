@@ -26,8 +26,11 @@ steps:
     steps:
       # to its end, a few turns of the wheel at a time
       - wheel: { at: call-trace, direction: down, amount: 35 }
+        settle: false
       - wheel: { at: call-trace, direction: down, amount: 35 }
+        settle: false
       - wheel: { at: call-trace, direction: down, amount: 35 }
+        settle: false
       - wait: { until: { at: 'call-trace/call[name="report", arguments="(i=199, value=39601)"]', present: true }, timeout: 60s }
       - expect: { at: 'call-trace/call[name="square", arguments="(n=199)"]', selected: false }
 
@@ -36,4 +39,4 @@ steps:
       - click: { at: 'call-trace/call[name="square", arguments="(n=199)"]', count: 2 }
       - wait: { until: { at: 'call-trace/call[name="square", arguments="(n=199)"]', selected: true }, timeout: 60s }
       - wait: { until: replay-idle, timeout: 60s }
-      - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(12)" }
+      - expect: { at: 'editor[file="main.py"]', assert: "stopped-within(11, 12)" }

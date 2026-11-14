@@ -7,7 +7,7 @@ summary: >-
 
 stage:
   - use: record-program
-    with: { program: src/db-backend/tests/fixtures/origin/rust/simple_trivial_chain/main.rs }
+    with: { program: src/db-backend/tests/fixtures/origin/rust/simple_trivial_chain/main.rs, backend: rr }
   - use: open-recording
     with: { panes: variables }
 

@@ -19,6 +19,12 @@ retention: { runs: 5, failure-days: 7 }
 # but have not run green yet (see the commit that adds them).
 applicable:
   - ../panels/requests-panel-mounts.yaml
+  - ../panels/calltrace-panel-loads-on-scroll.yaml
+  - ../panels/event-log-pages-on-scroll.yaml
+  - ../value-origin/javascript-canonical.yaml
+  - ../value-origin/python-computational.yaml
+  - ../value-origin/python-trivial-chain-hop-jump.yaml
+  - ../value-origin/rust-trivial-chain.yaml
   - ../value-origin/python-frame-transitions.yaml
   - ../value-origin/python-trivial-chain.yaml
   - ../value-origin/python-trivial-chain-badges.yaml

@@ -300,9 +300,14 @@ function readWorkbench(): any {
     root.children.push(hc);
   }
 
-  // a context menu
-  const menu = (Array.from(document.querySelectorAll(".context-view .monaco-menu, .monaco-menu-container"))
-    .find((m) => vis(m))) as HTMLElement | undefined;
+  // a context menu (VS Code draws the editor's in a shadow root under its
+  // context view, so the menu is looked for inside shadow roots too)
+  const menuRoots: Array<Document | ShadowRoot> = [document];
+  for (const host of Array.from(document.querySelectorAll(".context-view, .context-view *, .shadow-root-host")) as HTMLElement[]) {
+    if (host.shadowRoot) menuRoots.push(host.shadowRoot);
+  }
+  const menu = (menuRoots.flatMap((r) => Array.from(r.querySelectorAll(".monaco-menu, .monaco-menu-container")))
+    .find((m) => vis(m) && m.querySelector(".action-item"))) as HTMLElement | undefined;
   if (menu) {
     const cm = node("context-menu", menu, { count: 0 });
     for (const it of Array.from(menu.querySelectorAll(".action-item")) as HTMLElement[]) {
@@ -828,33 +833,41 @@ async function openRecording(ctx: Ctx, launched: any, args: Record<string, unkno
   // The panels the scenario names, beside the source (VS Code's second editor
   // group), the last named in front: a user's side-by-side layout.
   const panes = String(args.panes ?? "").split(",").map((s) => s.trim()).filter((s) => s);
-  for (const p of panes) {
+  // Each panel the scenario names is opened, made the active tab of its
+  // group and moved to the group on the right; the last named is left in
+  // front. The extension opens several panels itself when a session starts
+  // (`initPanels`), in the source's group and behind it, and a panel's own
+  // command only reveals it there.
+  const wanted = panes.map((p) => {
     const pane = PANES[p];
     if (!pane) throw new Error(`open-recording: VS Code has no panel for pane '${p}' (${Object.keys(PANES).join(", ")})`);
-    await b.executeWorkbench(async (vscode: any, cmd: string, title: string) => {
-      await vscode.commands.executeCommand(cmd);
-      const where = vscode.window.tabGroups.all.find((g: any) => g.tabs.some((t: any) => t.label === title));
-      const tab = where?.tabs.find((t: any) => t.label === title);
-      if (where && where.viewColumn === 1) {
-        // the panel to the group on the right (made when there is none)
-        if (!tab.isActive || !where.isActive) await vscode.commands.executeCommand(cmd);
+    return pane;
+  });
+  const arrange = async () => b.executeWorkbench(async (vscode: any, all: Array<{ command: string; title: string }>) => {
+    const groupOf = (title: string) => vscode.window.tabGroups.all.find((g: any) => g.tabs.some((t: any) => t.label === title));
+    const activate = async (title: string) => {
+      const g = groupOf(title);
+      if (!g) return;
+      await vscode.commands.executeCommand(g.viewColumn === 1 ? "workbench.action.focusFirstEditorGroup"
+        : "workbench.action.focusSecondEditorGroup");
+      await vscode.commands.executeCommand("workbench.action.openEditorAtIndex",
+        g.tabs.findIndex((t: any) => t.label === title));
+    };
+    for (const p of all) {
+      if (!groupOf(p.title)) await vscode.commands.executeCommand(p.command);
+      const g = groupOf(p.title);
+      if (g && g.viewColumn !== 2) {
+        await activate(p.title);
         await vscode.commands.executeCommand("workbench.action.moveEditorToRightGroup");
       }
-    }, pane.command, pane.title);
-  }
-  // The extension opens its own panels when the session starts
-  // (`initPanels`), which can land after the ones opened above and replace
-  // their arrangement: every panel asked for is open, or it is opened again.
-  const wanted = panes.map((p) => PANES[p]);
-  await waitFor(`the panels ${panes.join(", ")} did not open`, async () => {
-    const missing: string[] = await b.executeWorkbench(async (vscode: any, all: Array<{ command: string; title: string }>) => {
-      const open = new Set(vscode.window.tabGroups.all.flatMap((g: any) => g.tabs.map((t: any) => t.label)));
-      const gone = all.filter((p) => !open.has(p.title));
-      for (const p of gone) await vscode.commands.executeCommand(p.command);
-      return gone.map((p) => p.title);
-    }, wanted);
-    return missing.length === 0;
-  }, 60_000);
+    }
+    if (all.length > 0) await activate(all[all.length - 1].title);
+    const misplaced = all.filter((p) => groupOf(p.title)?.viewColumn !== 2).map((p) => p.title);
+    const last = all.length > 0 ? groupOf(all[all.length - 1].title) : undefined;
+    const front = !last || last.activeTab?.label === all[all.length - 1].title;
+    return misplaced.length === 0 && front;
+  }, wanted);
+  await waitFor(`the panels ${panes.join(", ")} did not open beside the source`, arrange, 60_000);
   phase("panes open");
   // the keyboard in the source, where a user starts
   await showStop();
