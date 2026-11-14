@@ -14,9 +14,8 @@ settle-timeout: 30000
 # recording a C or rr program and starting VS Code on it outlasts the default
 stage-timeout: 600000
 retention: { runs: 5, failure-days: 7 }
-# Only scenarios measured green on this lane are applicable. The others under
-# ../panels and ../value-origin are written and lint clean against the pack
-# but have not run green yet (see the commit that adds them).
+# Only scenarios measured green on this lane, in fast and realistic mode, are
+# applicable.
 applicable:
   - ../panels/requests-panel-mounts.yaml
   - ../panels/calltrace-panel-loads-on-scroll.yaml
@@ -25,6 +24,9 @@ applicable:
   - ../value-origin/python-computational.yaml
   - ../value-origin/python-trivial-chain-hop-jump.yaml
   - ../value-origin/rust-trivial-chain.yaml
+  - ../panels/scratchpad-add-from-editor.yaml
+  - ../value-origin/c-cross-thread-copy.yaml
+  - ../value-origin/event-log-correlation-markers-three-trace.yaml
   - ../value-origin/python-frame-transitions.yaml
   - ../value-origin/python-trivial-chain.yaml
   - ../value-origin/python-trivial-chain-badges.yaml

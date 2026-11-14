@@ -5,27 +5,33 @@ summary: >-
   In the frontend recording of a three-process session (a browser frontend,
   its WebAssembly realm and a backend), the Event Log marks where the
   recording crosses into the others: the HTTP request to the backend (key
-  620) and the JavaScript-to-WebAssembly realm, each with its chip and its
-  direction. A click on the HTTP chip makes the frontend the active
-  recording.
+  req-0001) and the JavaScript-to-WebAssembly realm (a call, key 1, and its
+  return, key 2), each with its chip and its direction. A click on the HTTP
+  chip goes to the other side of the request: the debugger stops in the
+  backend's server, the recording that received it.
 
 stage:
+  - use: materialized-recording
+    with: { name: cross-process-three-trace }
   - use: open-recording
-    with:
-      recording: src/db-backend/tests/fixtures/cross_process/account-balance-with-wasm/frontend.ct
-      panes: event-log
+    with: { panes: event-log }
 
 steps:
   - wait: { until: replay-idle, timeout: 180s }
-  - wait: { until: { at: 'event-log/event-marker[boundary="account-balance-with-wasm"]', present: true }, timeout: 60s }
+  - wait: { until: { at: 'event-log/event-marker[boundary="account-balance", key-value="req-0001"]', present: true }, timeout: 60s }
   - expect:
-      at: 'event-log/event-marker[boundary="account-balance-with-wasm"]'
-      chip: "[account-balance-with-wasm]"
-      key-value: "620"
+      at: 'event-log/event-marker[boundary="account-balance", key-value="req-0001"]'
+      chip: "[account-balance]"
       direction: true
   - expect:
-      at: 'event-log/event-marker[boundary="js-wasm-realm"]'
+      at: 'event-log/event-marker[boundary="js-wasm-realm", key-value="1"]'
       chip: "[js-wasm-realm]"
       direction: true
-  - click: { at: 'event-log/event-marker[boundary="account-balance-with-wasm"]' }
-  - wait: { until: { at: session-strip, assert: "active-is(frontend-js)" }, timeout: 30s }
+  - expect:
+      at: 'event-log/event-marker[boundary="js-wasm-realm", key-value="2"]'
+      chip: "[js-wasm-realm]"
+      direction: true
+  - click: { at: 'event-log/event-marker[boundary="account-balance", key-value="req-0001"]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="server.js"]', current-line: { gt: 0 } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }

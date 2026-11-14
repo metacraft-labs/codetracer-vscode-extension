@@ -8,7 +8,7 @@ summary: >-
 
 stage:
   - use: record-program
-    with: { program: src/db-backend/tests/fixtures/origin/c/cross_thread_copy/main.c }
+    with: { program: src/db-backend/tests/fixtures/origin/c/cross_thread_copy/main.c, backend: rr }
   - use: open-recording
     with: { panes: variables }
 
@@ -16,6 +16,8 @@ steps:
   - beat: stop
     steps:
       - wait: { until: replay-idle, timeout: 180s }
+      # line 43 is below the window: scroll the source down to it
+      - wheel: { at: 'editor[file="main.c"]', direction: down, amount: 10 }
       - wait: { until: { at: 'editor[file="main.c"]/line[number="43"]', present: true }, timeout: 60s }
       - click: { at: 'editor[file="main.c"]/line[number="43"]', anchor: text-start }
       - key: F9

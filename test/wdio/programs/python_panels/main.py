@@ -1,6 +1,6 @@
 """A program whose recording is longer than one window of the panels.
 
-The WDIO panel suites (test/wdio/specs/panels/) run on its recording
+The panel scenarios (test/scenarios/panels/) run on its recording
 (scripts/record-test-traces.sh python-panels): 200 calls of `square` and `report`
 under `main` give the Call Trace several hundred rows, and the 201 lines it
 prints give the Event Log 201 events, both far more than either panel shows

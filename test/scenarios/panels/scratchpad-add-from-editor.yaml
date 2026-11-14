@@ -21,7 +21,7 @@ steps:
       - click: { at: 'call-trace/call[name="check"]', count: 2 }
       - wait: { until: { at: 'call-trace/call[name="check"]', selected: true }, timeout: 30s }
       - wait: { until: replay-idle, timeout: 60s }
-      - expect: { at: 'editor[file="main.py"]', assert: "stopped-within(12, 13)" }
+      - expect: { at: 'editor[file="main.py"]', assert: "stopped-within(11, 13)" }
 
   - beat: expressions
     narration: { text: "A scratch document holds the expressions to add." }
