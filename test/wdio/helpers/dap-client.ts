@@ -265,10 +265,11 @@ export async function loadLocals(opts: {
  * delivered once (CodeTracer-DAP-Extensions: `ct/load-flow`). `data` is the
  * event's `FlowUpdate` body. The event is observed through the extension's
  * `registerPanelOverride` test seam, which hears every event the adapter
- * sends. The engine emits a request's event immediately before its response,
- * so the last `ct/updated-flow` observed once the response has resolved is
- * this request's; on a transport that delivered the response first, the next
- * one is awaited until the timeout.
+ * sends, with or without the Nim session host. The engine emits a request's
+ * event immediately before its response, so the last `ct/updated-flow`
+ * observed once the response has resolved is this request's; on a transport
+ * that delivered the response first, the next one is awaited until the
+ * timeout.
  */
 export async function loadFlow(flowMode = 0, timeoutMs = 10000): Promise<DapResult> {
   // Field names must be camelCase to match the Rust struct's

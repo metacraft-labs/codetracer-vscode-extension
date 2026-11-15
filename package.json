@@ -84,19 +84,149 @@
         }
       }
     },
+    "breakpoints": [
+      {
+        "language": "c"
+      },
+      {
+        "language": "cpp"
+      },
+      {
+        "language": "rust"
+      },
+      {
+        "language": "nim"
+      },
+      {
+        "language": "go"
+      },
+      {
+        "language": "pascal"
+      },
+      {
+        "language": "fortran"
+      },
+      {
+        "language": "d"
+      },
+      {
+        "language": "crystal"
+      },
+      {
+        "language": "lean"
+      },
+      {
+        "language": "lean4"
+      },
+      {
+        "language": "julia"
+      },
+      {
+        "language": "ada"
+      },
+      {
+        "language": "asm"
+      },
+      {
+        "language": "python"
+      },
+      {
+        "language": "ruby"
+      },
+      {
+        "language": "javascript"
+      },
+      {
+        "language": "typescript"
+      },
+      {
+        "language": "shellscript"
+      },
+      {
+        "language": "php"
+      },
+      {
+        "language": "noir"
+      },
+      {
+        "language": "solidity"
+      },
+      {
+        "language": "vyper"
+      },
+      {
+        "language": "masm"
+      },
+      {
+        "language": "sway"
+      },
+      {
+        "language": "move"
+      },
+      {
+        "language": "cairo"
+      },
+      {
+        "language": "circom"
+      },
+      {
+        "language": "leo"
+      },
+      {
+        "language": "tolk"
+      },
+      {
+        "language": "aiken"
+      },
+      {
+        "language": "cadence"
+      },
+      {
+        "language": "elixir"
+      },
+      {
+        "language": "erlang"
+      }
+    ],
     "debuggers": [
       {
         "type": "codetracer-debug",
         "label": "Codetracer Debugger",
         "languages": [
-          "elixir",
-          "erlang",
-          "noir",
-          "ruby",
+          "c",
+          "cpp",
           "rust",
-          "elixir",
+          "nim",
+          "go",
+          "pascal",
+          "fortran",
+          "d",
+          "crystal",
+          "lean",
+          "lean4",
+          "julia",
+          "ada",
+          "asm",
+          "python",
+          "ruby",
+          "javascript",
+          "typescript",
+          "shellscript",
+          "php",
+          "noir",
           "solidity",
-          "vyper"
+          "vyper",
+          "masm",
+          "sway",
+          "move",
+          "cairo",
+          "circom",
+          "leo",
+          "tolk",
+          "aiken",
+          "cadence",
+          "elixir",
+          "erlang"
         ],
         "configurationAttributes": {
           "launch": {

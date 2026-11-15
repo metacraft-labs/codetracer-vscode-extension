@@ -1,0 +1,19 @@
+scenario: 1
+name: panels/requests-panel-mounts
+pack: codetracer
+summary: >-
+  Opening the Requests panel on a recording shows the shared Request Panel:
+  its table header and its body, empty for a recording that served no HTTP
+  requests.
+
+stage:
+  - use: record-program
+    with: { program: test/wdio/programs/python_panels/main.py }
+  - use: open-recording
+    with: { panes: requests }
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: requests, present: true }, timeout: 60s }
+  - expect: { at: requests, header: true, body: true, count: 0 }
+  - expect: { at: 'pane-tab[label="Requests"]', active: true }

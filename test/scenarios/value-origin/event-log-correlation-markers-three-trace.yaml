@@ -1,0 +1,37 @@
+scenario: 1
+name: value-origin/event-log-correlation-markers-three-trace
+pack: codetracer
+summary: >-
+  In the frontend recording of a three-process session (a browser frontend,
+  its WebAssembly realm and a backend), the Event Log marks where the
+  recording crosses into the others: the HTTP request to the backend (key
+  req-0001) and the JavaScript-to-WebAssembly realm (a call, key 1, and its
+  return, key 2), each with its chip and its direction. A click on the HTTP
+  chip goes to the other side of the request: the debugger stops in the
+  backend's server, the recording that received it.
+
+stage:
+  - use: materialized-recording
+    with: { name: cross-process-three-trace }
+  - use: open-recording
+    with: { panes: event-log }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  - wait: { until: { at: 'event-log/event-marker[boundary="account-balance", key-value="req-0001"]', present: true }, timeout: 60s }
+  - expect:
+      at: 'event-log/event-marker[boundary="account-balance", key-value="req-0001"]'
+      chip: "[account-balance]"
+      direction: true
+  - expect:
+      at: 'event-log/event-marker[boundary="js-wasm-realm", key-value="1"]'
+      chip: "[js-wasm-realm]"
+      direction: true
+  - expect:
+      at: 'event-log/event-marker[boundary="js-wasm-realm", key-value="2"]'
+      chip: "[js-wasm-realm]"
+      direction: true
+  - click: { at: 'event-log/event-marker[boundary="account-balance", key-value="req-0001"]' }
+    settle: false
+  - wait: { until: { at: 'editor[file="server.js"]', current-line: { gt: 0 } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }

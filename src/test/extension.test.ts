@@ -69,8 +69,34 @@ suite('Extension Test Suite', () => {
 			contributes?: { debuggers?: Array<{ languages?: string[] }> };
 		};
 		const languages = pkg.contributes?.debuggers?.[0]?.languages ?? [];
-		for (const lang of ['noir', 'ruby', 'rust']) {
+		// VS Code lets a user set a breakpoint only in a file whose language a
+		// debugger names (unless `debug.allowBreakpointsEverywhere` is on), so
+		// every language CodeTracer records has to be here.  Python, JavaScript
+		// and C were missing once, and F9 in their files did nothing.
+		for (const lang of ['c', 'cpp', 'rust', 'nim', 'go', 'python', 'ruby', 'javascript',
+			'typescript', 'shellscript', 'php', 'noir', 'solidity', 'elixir', 'erlang']) {
 			assert.ok(languages.includes(lang), `expected debugger language: ${lang}`);
+		}
+	});
+
+	test('package.json lets a user set breakpoints in every recorded language', () => {
+		const extension = vscode.extensions.getExtension(EXTENSION_ID);
+		assert.ok(extension, 'extension should be installed');
+		const pkgPath = path.join(extension!.extensionPath, 'package.json');
+		const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
+			contributes?: {
+				debuggers?: Array<{ languages?: string[] }>;
+				breakpoints?: Array<{ language?: string }>;
+			};
+		};
+		// The languages a debugger names are not what VS Code consults when a
+		// user presses F9: `Toggle Breakpoint` does nothing in a file unless
+		// some extension contributes `breakpoints` for its language. Without
+		// this contribution F9 in a recording's Python, JavaScript or C source
+		// set no breakpoint, even with the language in the debugger's list.
+		const breakpointLanguages = (pkg.contributes?.breakpoints ?? []).map((b) => b.language);
+		for (const lang of pkg.contributes?.debuggers?.[0]?.languages ?? []) {
+			assert.ok(breakpointLanguages.includes(lang), `expected breakpoints contribution: ${lang}`);
 		}
 	});
 

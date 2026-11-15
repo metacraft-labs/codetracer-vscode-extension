@@ -286,7 +286,7 @@ for lang in "${LANGUAGES[@]}"; do
 			;;
 		python-panels)
 			# A recording longer than one window of the Call Trace and the Event
-			# Log, for the panel suites in test/wdio/specs/panels/.
+			# Log, for the panel scenarios in test/scenarios/panels/.
 			if use_existing_trace_if_ready "python-panels"; then
 				continue
 			fi
@@ -298,7 +298,7 @@ for lang in "${LANGUAGES[@]}"; do
 			;;
 		python-scratchpad)
 			# A short recording with a list local one Call Trace row away, for
-			# the "Add to Scratchpad" suite (test/wdio/specs/panels/).
+			# the "Add to Scratchpad" scenario (test/scenarios/panels/).
 			if use_existing_trace_if_ready "python-scratchpad"; then
 				continue
 			fi

@@ -1,0 +1,37 @@
+scenario: 1
+name: value-origin/python-trivial-chain-hover
+pack: codetracer
+summary: >-
+  The editor's hover card over a variable offers its origin: with the replay
+  stopped, resting the pointer on `c` and holding Alt shows the card, and its
+  origin link shows the chain of `c` in the State panel.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+    with: { panes: variables }
+
+steps:
+  - beat: stop
+    steps:
+      - wait: { until: replay-idle, timeout: 180s }
+      - wait: { until: { at: 'editor[file="main.py"]/line[number="12"]', present: true }, timeout: 60s }
+      - click: { at: 'editor[file="main.py"]/line[number="12"]', anchor: text-start }
+      - key: F9
+      - expect: { at: 'editor[file="main.py"]/line[number="12"]', breakpoint: true }
+      - key: F5
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(12)" }, timeout: 120s }
+      - wait: { until: replay-idle, timeout: 60s }
+  - beat: hover
+    narration: { text: "Rest the pointer on `c`; while stopped VS Code shows its value, and Alt shows the editor's own hover card." }
+    steps:
+      - hover: { at: 'editor[file="main.py"]/line[number="12"]', anchor: "column(11)", for: 1500ms }
+      - press: Alt
+      - wait: { until: { at: 'hover-card/hover-link[label="↑ origin"]', present: true }, timeout: 30s }
+      - click: { at: 'hover-card/hover-link[label="↑ origin"]' }
+        settle: false
+      - release: Alt
+      - wait: { until: origin-chain.loaded, timeout: 120s }
+      - expect: { at: origin-chain, count: 3, terminator: { contains: "10" } }

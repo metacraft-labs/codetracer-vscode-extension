@@ -1,0 +1,35 @@
+# The VS Code flavour of CodeTracer's scenarios: VS Code with this extension,
+# started through its WebDriver service, driven by DemoVideoScript-WebDriverIO's
+# arm with the extension's WebDriverIO binding (../codetracer-binding.ts). The
+# pack is codetracer's (the sibling checkout). Run from the repository root:
+# `just scenario-lane` (under Xvfb).
+lane: 1
+name: vscode
+pack: ../../../../codetracer/src/tests/scenarios/pack/codetracer.pack.yaml
+backend: "cmd:node build/scenario-arm/src/main.ts --binding test/scenarios/codetracer-binding.ts"
+modes: [fast, realistic]
+# VS Code and its webviews redraw slowly on a loaded host (one read of every
+# panel's webview took over 10 s at load 170)
+settle-timeout: 30000
+# recording a C or rr program and starting VS Code on it outlasts the default
+stage-timeout: 600000
+retention: { runs: 5, failure-days: 7 }
+# Only scenarios measured green on this lane, in fast and realistic mode, are
+# applicable.
+applicable:
+  - ../panels/requests-panel-mounts.yaml
+  - ../panels/calltrace-panel-loads-on-scroll.yaml
+  - ../panels/event-log-pages-on-scroll.yaml
+  - ../value-origin/javascript-canonical.yaml
+  - ../value-origin/python-computational.yaml
+  - ../value-origin/python-trivial-chain-hop-jump.yaml
+  - ../value-origin/rust-trivial-chain.yaml
+  - ../panels/scratchpad-add-from-editor.yaml
+  - ../value-origin/c-cross-thread-copy.yaml
+  - ../value-origin/event-log-correlation-markers-three-trace.yaml
+  - ../value-origin/python-frame-transitions.yaml
+  - ../value-origin/python-trivial-chain.yaml
+  - ../value-origin/python-trivial-chain-badges.yaml
+  - ../value-origin/python-trivial-chain-hover.yaml
+  - ../value-origin/ruby-canonical.yaml
+unsupported: []

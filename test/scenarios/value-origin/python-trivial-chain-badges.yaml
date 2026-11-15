@@ -1,0 +1,30 @@
+scenario: 1
+name: value-origin/python-trivial-chain-badges
+pack: codetracer
+summary: >-
+  Stopped in a Python recording with its locals in the State panel, every
+  variable row offers its value's origin.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+    with: { panes: variables }
+
+steps:
+  - beat: stop
+    steps:
+      - wait: { until: replay-idle, timeout: 180s }
+      - wait: { until: { at: 'editor[file="main.py"]/line[number="12"]', present: true }, timeout: 60s }
+      - click: { at: 'editor[file="main.py"]/line[number="12"]', anchor: text-start }
+      - key: F9
+      - expect: { at: 'editor[file="main.py"]/line[number="12"]', breakpoint: true }
+      - key: F5
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(12)" }, timeout: 120s }
+      - wait: { until: replay-idle, timeout: 60s }
+  - beat: badges
+    steps:
+      - wait: { until: variables.loaded, timeout: 60s }
+      - expect: { at: variables, assert: "has-variable(c)" }
+      - expect: { at: variables, assert: "all-have-origin-badges" }
