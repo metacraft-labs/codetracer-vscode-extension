@@ -313,6 +313,23 @@ ensure_native_replay_shim() {
 		replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-native-replay"
 		replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-rr-support"
 	fi
+	ensure_native_replay_tools "$backend_repo/target/debug"
+}
+
+# The debuggers ct-native-replay drives an RR recording with, from the native
+# backend's dev shell (its shellHook links them into target/debug). It finds
+# `rr` beside itself, but looks `dlv` (Go recordings) and `gdb` up on PATH, so
+# they are linked into .ct-bin, which the WDIO runs put first on PATH. CI's
+# wdio-integration job does the same in its "Symlink replay tools" step.
+ensure_native_replay_tools() {
+	local tools_dir="$1"
+	local tool
+
+	for tool in rr dlv gdb; do
+		if [ -x "$tools_dir/$tool" ]; then
+			replace_symlink "$tools_dir/$tool" "$REPO_ROOT/.ct-bin/$tool"
+		fi
+	done
 }
 
 ensure_native_recorder_shim() {
