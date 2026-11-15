@@ -184,6 +184,24 @@ ensure_nim_compiler_shim() {
 	fi
 }
 
+# Write .ct-bin/codetracer-js-recorder as a wrapper running the sibling's
+# locally built CLI ($1). An earlier run may have left a symlink there to the
+# sibling's nix package (result/bin/...); once that result link is gone the
+# symlink dangles, and a redirect writes through it into the missing
+# directory and fails. The old entry is removed first, so the wrapper is
+# always a regular file of this repository's .ct-bin.
+write_js_recorder_wrapper() {
+	local local_bin="$1"
+	local wrapper="$REPO_ROOT/.ct-bin/codetracer-js-recorder"
+
+	rm -f "$wrapper"
+	cat >"$wrapper" <<EOF
+#!/usr/bin/env bash
+exec node "$local_bin" "\$@"
+EOF
+	chmod +x "$wrapper"
+}
+
 ensure_js_recorder_shim() {
 	local recorder_repo="$CODETRACER_REPO/../codetracer-js-recorder"
 	local package_bin="$recorder_repo/result/bin/codetracer-js-recorder"
@@ -199,11 +217,7 @@ ensure_js_recorder_shim() {
 	fi
 
 	if [ -f "$local_bin" ] && [ -f "$native_addon" ]; then
-		cat >"$REPO_ROOT/.ct-bin/codetracer-js-recorder" <<EOF
-#!/usr/bin/env bash
-exec node "$local_bin" "\$@"
-EOF
-		chmod +x "$REPO_ROOT/.ct-bin/codetracer-js-recorder"
+		write_js_recorder_wrapper "$local_bin"
 		return 0
 	fi
 
@@ -235,11 +249,7 @@ EOF
 	fi
 
 	if [ -f "$local_bin" ] && [ -f "$native_addon" ]; then
-		cat >"$REPO_ROOT/.ct-bin/codetracer-js-recorder" <<EOF
-#!/usr/bin/env bash
-exec node "$local_bin" "\$@"
-EOF
-		chmod +x "$REPO_ROOT/.ct-bin/codetracer-js-recorder"
+		write_js_recorder_wrapper "$local_bin"
 	fi
 }
 
