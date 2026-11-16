@@ -602,14 +602,13 @@ export const config: any = {
     // Capture diagnostics on test failure for all tests (individual specs
     // may also capture their own diagnostics in afterEach hooks)
     if (result.error) {
-      const label = `FAIL-${test.title.replace(/\s+/g, '-').substring(0, 40)}`
+      // `screenshot()` turns the raw title into a file name upload-artifact
+      // accepts (a `"` in a title once made it discard the whole diagnostics
+      // artifact) and reports a failed capture itself. It is loaded lazily,
+      // as `@wdio/globals` was here, because it uses the worker's `browser`.
       try {
-        const diagDir = path.resolve(__dirname, 'test', 'wdio', 'diagnostics')
-        if (!fs.existsSync(diagDir)) fs.mkdirSync(diagDir, { recursive: true })
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { browser } = require('@wdio/globals')
-        await browser.saveScreenshot(path.join(diagDir, `screenshot-${label}.png`))
-        console.log(`[diag] Failure screenshot: ${label}`)
+        const { screenshot } = require('./test/wdio/helpers/diagnostics')
+        await screenshot(`FAIL-${test.title}`)
       } catch (e: any) {
         console.log(`[diag] Failure screenshot failed: ${e.message?.substring(0, 80)}`)
       }

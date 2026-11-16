@@ -9,6 +9,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { browser } from '@wdio/globals'
+import { artifactFileName } from './artifact-names'
 
 const DIAG_DIR = path.resolve(__dirname, '..', 'diagnostics')
 
@@ -31,20 +32,34 @@ export function diagDir(): string {
   return DIAG_DIR
 }
 
-/** Write a diagnostic artifact to the diagnostics directory. */
+/**
+ * Write a diagnostic artifact to the diagnostics directory.
+ *
+ * `filename` usually embeds a label built from a test title, so it is passed
+ * through `artifactFileName`: the file always lands directly in the
+ * diagnostics directory under a name `actions/upload-artifact` accepts.
+ */
 export function writeDiag(filename: string, data: any): void {
   const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
-  const filePath = path.join(DIAG_DIR, filename)
+  const safeName = artifactFileName(filename)
+  const filePath = path.join(DIAG_DIR, safeName)
   fs.writeFileSync(filePath, content)
-  console.log(`[diag] Wrote ${filename} (${content.length} bytes)`)
+  console.log(`[diag] Wrote ${safeName} (${content.length} bytes)`)
 }
 
-/** Capture a labeled screenshot. Returns true on success. */
+/**
+ * Capture a labeled screenshot. Returns true on success.
+ *
+ * The one path every screenshot takes, including the `afterTest` failure
+ * screenshot in `wdio.conf.ts`; `label` may be a raw test title, and the
+ * file name is made safe by `artifactFileName`.
+ */
 export async function screenshot(label: string): Promise<boolean> {
   try {
-    const filePath = path.join(DIAG_DIR, `screenshot-${label}.png`)
+    const fileName = artifactFileName(`screenshot-${label}.png`)
+    const filePath = path.join(DIAG_DIR, fileName)
     await browser.saveScreenshot(filePath)
-    console.log(`[diag] Screenshot: ${label}`)
+    console.log(`[diag] Screenshot: ${fileName}`)
     return true
   } catch (e: any) {
     console.log(`[diag] Screenshot ${label} failed: ${e.message?.substring(0, 80)}`)

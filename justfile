@@ -85,6 +85,11 @@ compile-ts:
 compile-wdio:
     npm run compile:wdio
 
+# Unit-test the WDIO helpers that need no VS Code (test/wdio/helpers/*.test.ts),
+# with Node's built-in runner and the tsx loader WDIO itself loads specs with.
+test-wdio-helpers:
+    node --import tsx --test test/wdio/helpers/*.test.ts
+
 # Run the VS Code extension host tests from src/test under Xvfb. Fails when
 # vscode-test fails, and also when it exits 0 without mocha's `<N> passing`
 # summary, i.e. when no test reported (scripts/run-vscode-test.sh).
@@ -335,7 +340,7 @@ test-wdio: prepare-wdio-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts"
 
 # Run every repo-local test/check entrypoint; full WDIO needs siblings/fixtures.
-test: test-dev-shell lint compile-ts compile-wdio test-stylus-fixture test-vscode test-vscode-control test-wdio
+test: test-dev-shell lint compile-ts compile-wdio test-wdio-helpers test-stylus-fixture test-vscode test-vscode-control test-wdio
 
 # Evaluate the locked development environment on every advertised platform.
 test-dev-shell:

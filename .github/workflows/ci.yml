@@ -49,6 +49,9 @@ jobs:
       - name: Typecheck WDIO tests
         run: dev-exec just compile-wdio
 
+      - name: Unit-test WDIO helpers
+        run: dev-exec just test-wdio-helpers
+
   windows-build:
     # CIP-5: windows-latest → the Windows runner class (DIY setup-node/setup-just
     # is Windows-native here).
