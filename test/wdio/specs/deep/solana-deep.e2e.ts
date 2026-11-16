@@ -13,24 +13,47 @@
  * records a Solana BPF program's process_instruction() function which
  * computes arithmetic on u64 values and emits a log message via msg!.
  *
- * Source: codetracer-solana-recorder/test-programs/src/lib.rs
+ * Source: codetracer-solana-recorder/test-programs/src/solana_flow_test.rs
+ *
+ * Where the replay starts. A correct recording (codetracer-solana-recorder
+ * b7cade8 or later) opens in the SBF entrypoint the `entrypoint!` macro
+ * generates, in solana-program-entrypoint's own src/lib.rs, and spends ~176
+ * steps deserialising the accounts before process_instruction is entered.
+ * The suite therefore jumps to process_instruction through the call trace's
+ * search first (`jumpToFirstCall`, shared with the smoke spec), and runs the
+ * editor, locals, stepping and breakpoint tests from there.
+ *
+ * The steps of process_instruction in that recording, from its entry (the
+ * SBF build is optimised, so the lines are not in source order):
+ *   entry  solana_flow_test.rs:20   the jump lands here
+ *   +1..+4 lines 26, 25, 27, 28     sum_val = 42 is bound at 28
+ *   +5..+9 lines 29, 20, 30, 20, 30 the msg! call is split around line 20
  */
+import path from 'path'
 import { browser, expect } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
 import { captureFullDiagnostics, screenshot, writeDiag } from '../../helpers/diagnostics'
+import { jumpToFirstCall } from '../../helpers/language-smoke-helpers'
 import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 
 const TRACE_NAME = 'solana-flow-test'
+const SOURCE_FILE = 'solana_flow_test.rs'
 
 // ---- Known trace data (solana_flow_test.rs process_instruction()) ----
 // The process_instruction function computes:
 //   sum_val = a + b
 //   doubled = sum_val * 2
-//   final_result = doubled + 1
+//   final_result = doubled + a
 // Then emits a log message with the result via solana_msg::msg!.
 const KNOWN_FUNCTIONS = ['process_instruction']
 const KNOWN_VARIABLES = ['sum_val', 'doubled', 'final_result']
 const KNOWN_EVENT_TEXT = 'result'
+
+// Lines of solana_flow_test.rs, in the recorded step order above.
+const ENTRY_LINE = 20 // `fn process_instruction(`, where the jump lands
+const SUM_VAL_BOUND_LINE = 28 // the first step at which sum_val is bound
+const STEPS_TO_SUM_VAL = 4 // 20 -> 26 -> 25 -> 27 -> 28
+const BREAKPOINT_LINE = 27 // `let sum_val: u64 = a + b;`, after the entry
 
 const session = new DebugSession()
 const editor = new EditorPane()
@@ -74,6 +97,17 @@ describe('CodeTracer Extension - Solana Deep Test', () => {
     const location = await session.currentLocation()
     console.log('[Solana] Initial location:', JSON.stringify(location))
     writeDiag('solana-session-start.json', { started, active, location })
+  })
+
+  // ==================================================================
+  // Navigation: leave the entrypoint for process_instruction
+  // ==================================================================
+
+  it('jumps to process_instruction through the calltrace search', async () => {
+    await jumpToFirstCall(session, 'process_instruction', SOURCE_FILE)
+    const location = await session.currentLocation()
+    expect(path.basename(location.file)).toBe(SOURCE_FILE)
+    expect(location.line).toBe(ENTRY_LINE)
   })
 
   // ==================================================================
@@ -160,6 +194,15 @@ describe('CodeTracer Extension - Solana Deep Test', () => {
   // ==================================================================
 
   it('loads locals with variable values including sum_val', async () => {
+    // From the entry, step to the first line at which sum_val is bound.
+    let location = await session.currentLocation()
+    for (let i = 0; i < STEPS_TO_SUM_VAL; i++) {
+      location = await session.stepOver(2000)
+    }
+    console.log('[Solana] Locals position:', JSON.stringify(location))
+    expect(path.basename(location.file)).toBe(SOURCE_FILE)
+    expect(location.line).toBe(SUM_VAL_BOUND_LINE)
+
     const result = await session.loadLocals({ lang: 'Solana', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
     writeDiag('solana-deep-locals.json', result.data)
@@ -173,6 +216,11 @@ describe('CodeTracer Extension - Solana Deep Test', () => {
 
       // At least the primary variable (sum_val) should exist
       expect(dataStr).toContain('sum_val')
+
+      // ...and hold a + b = 10 + 32. A u64 local shows its value as the
+      // integer text `i` of the ct/load-locals value record.
+      const sumVal = (result.data.locals ?? []).find((l: any) => l.expression === 'sum_val')
+      expect(sumVal?.value?.i).toBe('42')
 
       // Verify at least one variable has a non-empty value
       if (result.data.locals && Array.isArray(result.data.locals)) {
@@ -211,6 +259,13 @@ describe('CodeTracer Extension - Solana Deep Test', () => {
     // Verify we actually moved through different lines
     const uniqueLines = new Set(locations.map(l => l.line))
     expect(uniqueLines.size).toBeGreaterThan(1)
+
+    // Step-over stays in process_instruction (it does not descend into the
+    // msg! call), and the first step leaves line 28 for line 29.
+    for (const loc of locations) {
+      expect(path.basename(loc.file)).toBe(SOURCE_FILE)
+    }
+    expect(locations[0].line).toBe(SUM_VAL_BOUND_LINE + 1)
   })
 
   it('step-in enters a callee and step-out returns', async () => {
@@ -234,23 +289,28 @@ describe('CodeTracer Extension - Solana Deep Test', () => {
   it('sets a breakpoint and continues to it', async () => {
     await session.removeAllBreakpoints()
 
-    // Set breakpoint at line 10 — inside the process_instruction() function
-    // body where arithmetic assignments occur.
-    const bpResult = await session.addBreakpoint(10)
+    // The steps above have run past line 27, and continue only goes
+    // forward, so go back to the entry of process_instruction first. The
+    // jump also makes solana_flow_test.rs the active editor, the file
+    // addBreakpoint sets the breakpoint in.
+    await jumpToFirstCall(session, 'process_instruction', SOURCE_FILE)
+
+    // Line 27, `let sum_val: u64 = a + b;`, is recorded after the entry
+    // (line 20), so continue from the entry must stop on it.
+    const bpResult = await session.addBreakpoint(BREAKPOINT_LINE)
     console.log('[Solana] Breakpoint result:', JSON.stringify(bpResult))
     expect(bpResult.added).toBe(true)
 
     const breakpoints = await session.getBreakpoints()
     console.log('[Solana] All breakpoints:', JSON.stringify(breakpoints))
-    expect(breakpoints.some(bp => bp.line === 10)).toBe(true)
+    expect(breakpoints.some(bp => bp.line === BREAKPOINT_LINE)).toBe(true)
 
     const location = await session.continue(3000)
     console.log('[Solana] Stopped at:', JSON.stringify(location))
 
-    expect(location.file.length).toBeGreaterThan(0)
-    expect(location.line).toBeGreaterThan(0)
-
     writeDiag('solana-deep-breakpoint.json', { bpResult, breakpoints, location })
+    expect(path.basename(location.file)).toBe(SOURCE_FILE)
+    expect(location.line).toBe(BREAKPOINT_LINE)
   })
 
   // ==================================================================
