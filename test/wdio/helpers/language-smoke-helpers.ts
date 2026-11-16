@@ -57,6 +57,18 @@ export interface LanguageSmokeConfig {
    *  (e.g., Nim) initially stop in runtime code with no source file.
    *  This steps forward so the editor opens the user's source file. */
   stepsBeforeEditorCheck?: number
+  /** Before the editor check, jump to the first call of
+   *  `calltraceFunction` through the call trace's search
+   *  (`ct/search-calltrace`, then `ct/calltrace-jump` on the result), the
+   *  way a user reaches it from the Call Trace pane. For recordings that
+   *  open in code the toolchain puts in front of the program — a Solana
+   *  program opens in the `entrypoint!` code of solana-program-entrypoint,
+   *  and its own `process_instruction` starts ~176 steps later — where a
+   *  step count (`stepsBeforeEditorCheck`) would depend on the entrypoint
+   *  crate's version and the account count. The steps that follow
+   *  (`useStepIn`, `extraStepsForLocals`) then count from the function's
+   *  entry. */
+  jumpToCalltraceFunction?: boolean
   /** When true, the locals test only verifies that loadLocals returns a
    *  valid (ok: true) response — it does not assert that a specific
    *  variable is present. This is used for rr-based languages (Rust, Nim,
@@ -220,6 +232,50 @@ export async function assertLocalsContainVariableWithValue(
   }
 }
 
+/** Whether a call-trace `Call` is a call of `functionName`: its name is
+ *  exactly that, or a path ending in `::functionName` (DWARF-named Rust
+ *  functions may be qualified). */
+function isCallOf(call: any, functionName: string): boolean {
+  const names = [call?.location?.functionName, call?.rawName]
+    .filter((n): n is string => typeof n === 'string')
+  return names.some((n) => n === functionName || n.endsWith(`::${functionName}`))
+}
+
+/**
+ * Jump to the first call of `functionName` the call trace's search finds,
+ * and verify the session stopped in `expectedFileName`.
+ *
+ * The DAP-level counterpart of the desktop scenario that types the function
+ * into the Call Trace pane's search box and activates the first result
+ * (codetracer `src/tests/scenarios/languages/solana-opens-at-entry.yaml`).
+ * The search's regex can match other names that merely contain
+ * `functionName`, so the call is chosen by `isCallOf`; when several calls
+ * match, the search returns them in recording order and the first is taken.
+ */
+export async function jumpToFirstCall(
+  session: DebugSession,
+  functionName: string,
+  expectedFileName: string,
+): Promise<void> {
+  const search = await session.searchCalltrace(functionName)
+  writeDiag(`calltrace-search-${functionName}.json`, search.data ?? search.error)
+  expect(search.ok).toBe(true)
+  const calls: any[] = Array.isArray(search.data?.calls) ? search.data.calls : []
+  const call = calls.find((c) => isCallOf(c, functionName))
+  if (!call) {
+    throw new Error(
+      `ct/search-calltrace found no call of ${functionName} among ${calls.length} result(s): ` +
+      JSON.stringify(calls.map((c) => c?.location?.functionName ?? c?.rawName)),
+    )
+  }
+  const before = await session.currentLocation()
+  const { result, location } = await session.calltraceJump(call.location)
+  writeDiag(`calltrace-jump-${functionName}.json`, { before, call: call.location, result, location })
+  expect(result.ok).toBe(true)
+  expect(path.basename(location.file)).toBe(expectedFileName)
+  expect(location.line).toBeGreaterThan(0)
+}
+
 /** Verify step-over works and changes the current location. */
 export async function assertStepWorks(
   session: DebugSession,
@@ -337,6 +393,12 @@ export function defineLanguageSmokeTests(config: LanguageSmokeConfig): void {
       }
     })
 
+    if (config.jumpToCalltraceFunction) {
+      it(`jumps to ${config.calltraceFunction} through the calltrace search`, async () => {
+        await jumpToFirstCall(session, config.calltraceFunction, config.expectedFileName)
+      })
+    }
+
     it(`opens ${config.expectedFileName} in the editor`, async () => {
       if (config.stepsBeforeEditorCheck) {
         for (let i = 0; i < config.stepsBeforeEditorCheck; i++) {
@@ -399,10 +461,17 @@ export function defineLanguageSmokeTests(config: LanguageSmokeConfig): void {
 
     if (config.eventLogText) {
       it(`event log contains "${config.eventLogText}"`, async () => {
+        // `ct/event-load` with no window answers the recorded log from its
+        // start (the replay server's `event_load`: the first 20 events,
+        // whatever the current step; `indexAtTick` only marks where the
+        // current step falls in it). So an event recorded after the current
+        // position is listed too -- Solana's `result: 94` is written ~90
+        // steps after the step the locals test leaves the session on.
+        // A failed request or an empty answer is a failure, not a pass.
         const result = await session.loadEvents()
-        if (result.ok && result.data) {
-          expect(JSON.stringify(result.data)).toContain(config.eventLogText)
-        }
+        writeDiag(`${config.language.toLowerCase()}-event-log.json`, result.data ?? result.error)
+        expect(result.ok).toBe(true)
+        expect(JSON.stringify(result.data ?? null)).toContain(config.eventLogText)
       })
     }
 

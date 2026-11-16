@@ -183,6 +183,19 @@ export class DebugSession {
     return this.currentLocation()
   }
 
+  /** Jump to a call-trace row (`ct/calltrace-jump`, see
+   *  `dap.calltraceJump`) and return the DAP response and where the session
+   *  stopped. */
+  async calltraceJump(
+    location: Record<string, unknown>,
+    settleMs = 2000,
+  ): Promise<{ result: dap.DapResult; location: StoppedLocation }> {
+    await this.ensureSourceEditorShown()
+    const result = await dap.calltraceJump(location)
+    await browser.pause(settleMs)
+    return { result, location: await this.currentLocation() }
+  }
+
   /** Continue execution and wait for the debugger to stop again. */
   async continue(settleMs = 3000): Promise<StoppedLocation> {
     await dap.dapContinue()

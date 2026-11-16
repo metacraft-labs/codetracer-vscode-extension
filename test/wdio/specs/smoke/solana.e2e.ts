@@ -4,12 +4,34 @@ import { defineLanguageSmokeTests } from '../../helpers/language-smoke-helpers'
 // It records a Solana BPF program's process_instruction() function which:
 //   - Computes arithmetic on u64 values (add, multiply, add)
 //   - Emits a log message with the result via solana_msg::msg!
+//
+// Where the replay starts. A correct recording (codetracer-solana-recorder
+// b7cade8 or later) opens in the SBF entrypoint the `entrypoint!` macro
+// generates, in solana-program-entrypoint's own src/lib.rs, and spends ~176
+// steps deserialising the accounts before process_instruction is entered.
+// The suite therefore jumps to process_instruction through the call trace's
+// search first, as codetracer's desktop scenario does
+// (src/tests/scenarios/languages/solana-opens-at-entry.yaml), and checks the
+// editor, the locals and the event log from there.
+//
+// The steps of process_instruction in that recording, from its entry (the
+// SBF build is optimised, so the lines are not in source order):
+//   entry  solana_flow_test.rs:20   the jump lands here
+//   +1     solana_flow_test.rs:26   the step-over test
+//   +2     solana_flow_test.rs:25
+//   +3     solana_flow_test.rs:27
+//   +4     solana_flow_test.rs:28   sum_val = 42 is bound
+// hence the three extra step-overs before the locals check. The event log's
+// `result: 94` is written later, by sol_log; the event-log test reads the
+// whole log, not only the events before the current step.
 defineLanguageSmokeTests({
   language: 'Solana',
   traceName: 'solana-flow-test',
   expectedFileName: 'solana_flow_test.rs',
   calltraceFunction: 'process_instruction',
+  jumpToCalltraceFunction: true,
   variableName: 'sum_val',
+  extraStepsForLocals: 3,
   langId: 'Solana',
   eventLogText: 'result',
 })

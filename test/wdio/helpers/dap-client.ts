@@ -351,3 +351,16 @@ export async function loadTerminal(): Promise<DapResult> {
 export async function searchCalltrace(query: string): Promise<DapResult> {
   return dapRequest('ct/search-calltrace', { value: query }, 30000)
 }
+
+/** Jump to a call-trace row: `ct/calltrace-jump` with the row's `Location`.
+ *
+ * `location` must be a `Location` the replay server served — a call's
+ * `location` from `ct/search-calltrace` or `ct/load-calltrace-section` —
+ * sent back unchanged, as the Call Trace pane does when a row is activated.
+ * The server refuses a payload with no `rrTicks` rather than jumping to step
+ * 0 (`location_from_jump_arguments` in codetracer's db-backend), and answers
+ * only after the move, having emitted the `stopped` event VS Code follows.
+ */
+export async function calltraceJump(location: Record<string, unknown>): Promise<DapResult> {
+  return dapRequest('ct/calltrace-jump', location, 30000)
+}
