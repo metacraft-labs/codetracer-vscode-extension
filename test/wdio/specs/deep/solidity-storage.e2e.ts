@@ -196,7 +196,19 @@ describe('CodeTracer Extension - Solidity EVM Deep Test', () => {
     const active = await session.isActive()
     expect(active).toBe(true)
 
-    const location = await session.currentLocation()
+    // The first stop, once the replay reports it. Read straight after the
+    // session starts, the stack may not be there yet and no editor shows a
+    // stop: `currentLocation` then answers { file: '', line: -1 }, and the
+    // reverse continue below, which does return to the first stop, was
+    // compared with that.
+    let location = await session.currentLocation()
+    await browser.waitUntil(
+      async () => {
+        location = await session.currentLocation()
+        return location.line > 0
+      },
+      { timeout: 30000, timeoutMsg: 'the Solidity recording reported no first stop within 30s' },
+    )
     initialLocation = location
     console.log('[Solidity] Initial location:', JSON.stringify(location))
     writeDiag('solidity-session-start.json', { started, active, location })

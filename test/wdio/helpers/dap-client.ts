@@ -351,3 +351,14 @@ export async function loadTerminal(): Promise<DapResult> {
 export async function searchCalltrace(query: string): Promise<DapResult> {
   return dapRequest('ct/search-calltrace', { value: query }, 30000)
 }
+
+/** Move to a call, as activating its row in the Call Trace does.
+ *
+ * ``location`` is the ``location`` of a call that ``ct/search-calltrace``
+ * (or ``ct/load-calltrace-section``) answered; the move lands on the call's
+ * entry and is reported like any other stop (CodeTracer-DAP-Extensions:
+ * ``ct/calltrace-jump``).
+ */
+export async function calltraceJump(location: any): Promise<DapResult> {
+  return dapRequest('ct/calltrace-jump', location, 30000)
+}

@@ -314,4 +314,26 @@ export class DebugSession {
   async loadFlow(flowMode?: number) { return dap.loadFlow(flowMode) }
   async loadTerminal() { return dap.loadTerminal() }
   async searchCalltrace(query: string) { return dap.searchCalltrace(query) }
+
+  /** Move to the first call of ``functionName``: search the call trace for
+   * it and jump to the call it finds, as the Call Trace's search and a click
+   * on its result do. Returns the location the move stopped at.
+   */
+  async jumpToCall(functionName: string, settleMs = 2000): Promise<StoppedLocation> {
+    const search = await dap.searchCalltrace(functionName)
+    if (!search.ok) {
+      throw new Error(`ct/search-calltrace for ${functionName} failed: ${search.error}`)
+    }
+    const call = search.data?.calls?.[0]
+    if (!call?.location) {
+      throw new Error(`ct/search-calltrace found no call of ${functionName}: ${JSON.stringify(search.data).slice(0, 500)}`)
+    }
+    await this.ensureSourceEditorShown()
+    const jump = await dap.calltraceJump(call.location)
+    if (!jump.ok) {
+      throw new Error(`ct/calltrace-jump to ${functionName} failed: ${jump.error}`)
+    }
+    await browser.pause(settleMs)
+    return this.currentLocation()
+  }
 }
