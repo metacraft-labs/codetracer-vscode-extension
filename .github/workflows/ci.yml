@@ -166,6 +166,10 @@ jobs:
     # language traces (Rust, C, Go, Nim).
     env:
       CODETRACER_RR_SOFT_MODE: "1"
+      # The Cairo corelib prepare-cairo-fixture.sh compiles against: the
+      # starkware-libs/cairo sibling below, which lands at ../cairo rather
+      # than the workspace's ../cairo-corelib-vendor the script looks for.
+      CAIRO_CORELIB_DIR: ${{ github.workspace }}/../cairo/corelib/src
 
     steps:
       - name: Generate CI token
@@ -181,9 +185,13 @@ jobs:
 
       # setup-dev-env installs Nix, materialises this repo's nix dev env,
       # installs the `dev-exec` wrapper, and clones the cross-repo siblings
-      # this job needs at workspace-lock-pinned revisions (replacing the
-      # former setup-nix + manifest/resolve/clone steps). codetracer and the
-      # lock-managed recorder/backend siblings resolve from the workspace lock.
+      # this job needs (replacing the former setup-nix + manifest/resolve/clone
+      # steps). Each entry is a repository name (`owner/name` outside
+      # metacraft-labs), cloned beside this checkout (../<name>) at the
+      # revision this commit's repro.lock pins;
+      # an entry needs a `depends` edge in the workspace manifest
+      # (repos/codetracer-vscode-extension.toml) and a lock refresh, or
+      # clone-siblings refuses it.
       - name: Setup dev env
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
@@ -196,6 +204,52 @@ jobs:
             codetracer-native-backend
             codetracer-ruby-recorder
             codetracer-python-recorder
+            codetracer-js-recorder
+            codetracer-beam-recorder
+            codetracer-native-recorder
+            codetracer-native-test-programs
+            codetracer-trace-format
+            codetracer-trace-format-nim
+            reprobuild-packages
+            codetracer-miden-recorder
+            codetracer-fuel-recorder
+            codetracer-move-recorder
+            codetracer-solana-recorder
+            codetracer-cardano-recorder
+            aiken-lang/stdlib
+            codetracer-flow-recorder
+            codetracer-cairo-recorder
+            starkware-libs/cairo
+            codetracer-circom-recorder
+            codetracer-leo-recorder
+            codetracer-polkavm-recorder
+            codetracer-evm-recorder
+            codetracer-ton-recorder
+      # What each sibling above is for:
+      # - codetracer: `ct`, db-backend, the value-origin fixture catalogue
+      #   and the Stylus staging inputs (prepare-stylus-fixture.sh).
+      # - codetracer-native-backend: ct-native-replay and the rr/dlv/gdb it
+      #   drives; its dev shell records the native traces.
+      # - the ruby, python, js and beam recorders, codetracer-native-recorder
+      #   (`ct-mcr`) and codetracer-native-test-programs (the Rust, C, Go and
+      #   Nim sudoku solvers): `just record-test-traces`, through
+      #   prepare-wdio-codetracer-bin.sh and record-test-traces.sh.
+      # - one recorder per blockchain fixture `just
+      #   prepare-wdio-blockchain-fixtures` records (scripts/prepare-*-fixture.sh):
+      #   miden (MASM), fuel (Sway), move, solana, cardano (Aiken), flow
+      #   (Cadence), cairo, circom, leo, polkavm, evm (Solidity) and ton (Tolk).
+      #   Each script exits 1 when its recorder checkout is missing.
+      # - codetracer-trace-format and codetracer-trace-format-nim: the
+      #   recorders' Cargo path dependencies and repro.nim develop siblings.
+      # - aiken-lang/stdlib: the Cardano recorder resolves
+      #   `aiken/collection/list` from ../stdlib.
+      # - starkware-libs/cairo: the Cairo corelib (CAIRO_CORELIB_DIR below);
+      #   the workspace checks it out as cairo-corelib-vendor, a clone here
+      #   lands at ../cairo.
+      # - reprobuild-packages: codetracer's repro.nim imports recipes from
+      #   ../reprobuild-packages, so `repro exec .` in ../codetracer (the
+      #   value-origin regenerators prepare-wdio-fixtures.sh runs there) cannot
+      #   enter codetracer's environment without it.
 
       - name: Build codetracer (ct + db-backend binaries)
         run: |
