@@ -189,9 +189,13 @@ jobs:
       # steps). Each entry is a repository name (`owner/name` outside
       # metacraft-labs), cloned beside this checkout (../<name>) at the
       # revision this commit's repro.lock pins;
-      # an entry needs a `depends` edge in the workspace manifest
-      # (repos/codetracer-vscode-extension.toml) and a lock refresh, or
-      # clone-siblings refuses it.
+      # a bare entry needs a `uses:` line in repro.nim and a lock refresh
+      # (`repro lock refresh .`), or clone-siblings refuses it. The workspace
+      # manifest's `depends` no longer feeds the lock. aiken-lang/stdlib and
+      # starkware-libs/cairo declare no reprobuild package, so the lock cannot
+      # pin them: they are pinned here by commit, at the revisions the
+      # workspace manifest records (stdlib release/v3 for Aiken v1.1.21;
+      # cairo v2.17.0-rc.4, the cairo-lang-compiler the Cairo recorder uses).
       - name: Setup dev env
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
@@ -216,10 +220,10 @@ jobs:
             codetracer-move-recorder
             codetracer-solana-recorder
             codetracer-cardano-recorder
-            aiken-lang/stdlib
+            aiken-lang/stdlib=62f92b09555dbb9184c6581a0401fde482afb7a5
             codetracer-flow-recorder
             codetracer-cairo-recorder
-            starkware-libs/cairo
+            starkware-libs/cairo=88fd4e946fa37cc5c0102f2e847f5a0cbcce477f
             codetracer-circom-recorder
             codetracer-leo-recorder
             codetracer-polkavm-recorder
