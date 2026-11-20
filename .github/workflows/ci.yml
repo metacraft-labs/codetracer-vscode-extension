@@ -302,6 +302,23 @@ jobs:
           nix build -L ".?submodules=1#codetracer"
           nix build -L ".?submodules=1#db-backend" -o result-db-backend
 
+      # The codetracer build above takes over two hours, and the Git CLI
+      # credential setup-dev-env installed is frozen into GIT_CONFIG_* from
+      # the job-start token, which expires after one hour (the broker renews
+      # only the Nix access-tokens, which a git+https fetch does not use;
+      # setup-dev-env README, "Which token each step is handed"). The
+      # native-backend build fetches the private lldb-sys.rs Cargo git
+      # dependency at evaluation time (builtins.fetchGit, which runs the
+      # `git` CLI with this job's Git configuration), so with the stale
+      # header it failed with "could not read Username for
+      # 'https://github.com'" 2 h 22 min after the token was minted (run
+      # 44688110742). Re-mint Git's token before the recorder builds.
+      - name: Refresh build authentication
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # Build recorder components that ct needs to record traces for each
       # language family.  These are separate repos (restored as siblings above)
       # with their own flake.nix.  The built binaries are symlinked into
