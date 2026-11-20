@@ -270,6 +270,27 @@ jobs:
       #   value-origin regenerators prepare-wdio-fixtures.sh runs there) cannot
       #   enter codetracer's environment without it.
 
+      # `repro` for the steps below: record-test-traces.sh records every trace
+      # through `repro exec ../codetracer`, and prepare-wdio-codetracer-bin.sh,
+      # prepare-wdio-fixtures.sh and prepare-stylus-fixture.sh enter sibling
+      # environments the same way. setup-dev-env installs the CLI only for
+      # env-flavor: reprobuild, so until now this job ran whatever `repro` the
+      # runner image happened to carry. On the GARM Linux golden that was a
+      # repro-portable bundle (reprobuild 0.2.18), which runs inside its own
+      # chroot: it cannot see the Nix this job installs, nor /lib64, so it
+      # reported "this host has no Nix" and failed every recording with
+      # "/usr/bin/cc ... could not run it: No such file or directory" (run
+      # 44610114615). The image no longer ships a `repro` at all.
+      #
+      # A verified release archive runs natively, finds the job's Nix, and
+      # compiles recipes with the pinned nixpkgs gcc. v0.2.28 is the newest
+      # release; pinned so a new release cannot change this job unreviewed.
+      - name: Install repro
+        uses: metacraft-labs/metacraft-github-actions/setup-reprobuild@dev
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
+          repro-version: v0.2.28
+
       - name: Build codetracer (ct + db-backend binaries)
         run: |
           cd ../codetracer
