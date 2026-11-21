@@ -191,23 +191,51 @@ export async function loadEvents(): Promise<DapResult> {
 }
 
 /**
- * Map language names to their numeric IDs matching the Rust `Lang` enum
- * (repr(u8), serde_repr). The db-backend deserializes `lang` as a u8.
+ * The `lang` the specs name (`langId` in their smoke configs) -> the
+ * language's wire name on `ct/load-locals`.
+ *
+ * The replay server reads `CtLoadLocalsArguments.lang` by NAME: the spelling
+ * of `Lang::wire_name` in codetracer's `libs/ct-lang/src/lib.rs` (and
+ * `langWireName` in `src/common/common_lang.nim`), decoded with
+ * `ct_lang::lang_wire`. It refuses an integer ("invalid type: integer `0`,
+ * expected a string") and an unknown name, so the enum's declaration order is
+ * no longer a wire contract -- the ordinal table this replaces had drifted
+ * from it twice.
+ *
+ * Python and Ruby are `pythondb` / `rubydb`, the only Python and Ruby members
+ * `Lang` has. PolkaVM and Solana are not languages: codetracer retired those
+ * members (a PolkaVM blob or a Solana program has no source language; the VM
+ * is the recording's target ISA), so codetracer itself sends `unknown` for
+ * them, and so does this table.
  */
-// Ordinals must match `Lang` (repr(u8), serde_repr) in
-// codetracer/src/db-backend/src/lang.rs.  A spurious ``Small: 21``
-// here shifted every entry after CppWasm by one — Erlang ended up
-// as 39 which the server rejected with ``JSON error: invalid
-// value: 39, expected one of: 0, ..., 38``.  No such ``Small``
-// variant exists in the Rust enum.
-const LANG_IDS: Record<string, number> = {
-  C: 0, Cpp: 1, Rust: 2, Nim: 3, Go: 4, Pascal: 5, Fortran: 6,
-  D: 7, Crystal: 8, Lean: 9, Julia: 10, Ada: 11, Python: 12,
-  Ruby: 13, RubyDb: 14, Javascript: 15, Lua: 16, Asm: 17, Noir: 18,
-  RustWasm: 19, CppWasm: 20, PythonDb: 21, Unknown: 22,
-  Bash: 23, Zsh: 24, Solidity: 25, Masm: 26, Sway: 27, Move: 28,
-  PolkaVM: 29, Cairo: 30, Circom: 31, Leo: 32, Tolk: 33, Aiken: 34,
-  Cadence: 35, Solana: 36, Elixir: 37, Erlang: 38,
+const LANG_WIRE_NAMES: Readonly<Record<string, string>> = {
+  Unknown: 'unknown',
+  C: 'c', Cpp: 'cpp', Rust: 'rust', Nim: 'nim', Go: 'go',
+  Pascal: 'pascal', Fortran: 'fortran', D: 'd', Crystal: 'crystal',
+  Lean: 'lean', Julia: 'julia', Ada: 'ada',
+  Python: 'pythondb', PythonDb: 'pythondb', Ruby: 'rubydb', RubyDb: 'rubydb',
+  Javascript: 'javascript', Lua: 'lua', Asm: 'asm', Noir: 'noir',
+  Bash: 'bash', Zsh: 'zsh', Solidity: 'solidity', MASM: 'masm', Masm: 'masm',
+  Sway: 'sway', Move: 'move', Cairo: 'cairo', Circom: 'circom', Leo: 'leo',
+  Tolk: 'tolk', Aiken: 'aiken', Cadence: 'cadence', Elixir: 'elixir',
+  Erlang: 'erlang', Php: 'php', GDScript: 'gdscript',
+  PolkaVM: 'unknown', Solana: 'unknown',
+}
+
+/**
+ * The wire name for a spec's language. Throws on a name the table does not
+ * know rather than sending `unknown`: the old table fell back silently, which
+ * is how `MASM` (spelled `Masm` there) was sent as Unknown unnoticed.
+ */
+export function langWireName(langName: string): string {
+  const wireName = LANG_WIRE_NAMES[langName]
+  if (wireName === undefined) {
+    throw new Error(
+      `loadLocals: no ct/load-locals wire name for language '${langName}'; ` +
+      'add it to LANG_WIRE_NAMES (test/wdio/helpers/dap-client.ts)',
+    )
+  }
+  return wireName
 }
 
 /** Load local variables at the current position. */
@@ -220,24 +248,33 @@ export async function loadLocals(opts: {
 } = {}): Promise<DapResult> {
   // Field names must be camelCase to match the Rust struct's
   // #[serde(rename_all = "camelCase")] deserialization.
-  // The `lang` field is a repr(u8) enum and must be sent as a number.
-  const langName = opts.lang ?? 'Rust'
-  const langId = LANG_IDS[langName] ?? LANG_IDS.Unknown
   return dapRequest('ct/load-locals', {
     rrTicks: opts.rrTicks ?? 0,
     countBudget: opts.countBudget ?? 100,
     minCountLimit: 10,
-    lang: langId,
+    lang: langWireName(opts.lang ?? 'Rust'),
     watchExpressions: opts.watchExpressions ?? [],
     depthLimit: opts.depthLimit ?? 3,
   })
 }
 
-/** Load flow data for the current location. */
-export async function loadFlow(flowMode = 0): Promise<DapResult> {
+/** Load flow data for the current location.
+ *
+ * The flow arrives on the `ct/updated-flow` event; the `ct/load-flow`
+ * response that follows it is an acknowledgement, so the flow is
+ * delivered once (CodeTracer-DAP-Extensions: `ct/load-flow`). `data` is the
+ * event's `FlowUpdate` body. The event is observed through the extension's
+ * `registerPanelOverride` test seam, which hears every event the adapter
+ * sends, with or without the Nim session host. The engine emits a request's
+ * event immediately before its response, so the last `ct/updated-flow`
+ * observed once the response has resolved is this request's; on a transport
+ * that delivered the response first, the next one is awaited until the
+ * timeout.
+ */
+export async function loadFlow(flowMode = 0, timeoutMs = 10000): Promise<DapResult> {
   // Field names must be camelCase to match the Rust struct's
   // #[serde(rename_all = "camelCase")] deserialization.
-  return dapRequest('ct/load-flow', {
+  const args = {
     flowMode,
     location: {
       path: '', line: 0, functionName: '', highLevelPath: '',
@@ -247,7 +284,50 @@ export async function loadFlow(flowMode = 0): Promise<DapResult> {
       callstackDepth: 0, originatingInstructionAddress: 0,
       key: '', globalCallKey: '',
     },
-  })
+  }
+  return browser.executeWorkbench(async (vscode, a, t) => {
+    const session = vscode.debug.activeDebugSession
+    if (!session) return { ok: false, error: 'no active debug session' }
+    const exports = vscode.extensions.getExtension('metacraft-labs.ct-vscode')?.exports as any
+    if (!exports || typeof exports.registerPanelOverride !== 'function') {
+      return { ok: false, error: 'registerPanelOverride export missing' }
+    }
+    let flow: any = undefined
+    let wake: (() => void) | undefined
+    const fakePanel = {
+      webview: {
+        postMessage(message: any) {
+          if (message?.command === 'ct/updated-flow') {
+            flow = message.value
+            wake?.()
+          }
+          return Promise.resolve(true)
+        },
+      },
+    }
+    const dispose = exports.registerPanelOverride('wdio-load-flow', fakePanel)
+    const deadline = Date.now() + t
+    try {
+      await Promise.race([
+        session.customRequest('ct/load-flow', a),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('DAP request timeout')), t)),
+      ])
+      if (flow === undefined) {
+        await new Promise<void>((resolve, reject) => {
+          wake = resolve
+          setTimeout(
+            () => reject(new Error('ct/load-flow was acknowledged but no ct/updated-flow arrived')),
+            Math.max(0, deadline - Date.now()),
+          )
+        })
+      }
+      return { ok: true, data: flow }
+    } catch (e: any) {
+      return { ok: false, error: e.message }
+    } finally {
+      dispose()
+    }
+  }, args, timeoutMs) as DapResult
 }
 
 /** Load terminal output. */
@@ -270,4 +350,15 @@ export async function loadTerminal(): Promise<DapResult> {
  */
 export async function searchCalltrace(query: string): Promise<DapResult> {
   return dapRequest('ct/search-calltrace', { value: query }, 30000)
+}
+
+/** Move to a call, as activating its row in the Call Trace does.
+ *
+ * ``location`` is the ``location`` of a call that ``ct/search-calltrace``
+ * (or ``ct/load-calltrace-section``) answered; the move lands on the call's
+ * entry and is reported like any other stop (CodeTracer-DAP-Extensions:
+ * ``ct/calltrace-jump``).
+ */
+export async function calltraceJump(location: any): Promise<DapResult> {
+  return dapRequest('ct/calltrace-jump', location, 30000)
 }

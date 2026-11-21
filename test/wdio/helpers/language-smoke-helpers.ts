@@ -57,6 +57,16 @@ export interface LanguageSmokeConfig {
    *  (e.g., Nim) initially stop in runtime code with no source file.
    *  This steps forward so the editor opens the user's source file. */
   stepsBeforeEditorCheck?: number
+  /** The file the recording opens in, when it is not `expectedFileName`:
+   *  a recording that starts in code generated around the program, such as
+   *  the SBF entrypoint the Solana `entrypoint!` macro expands to, which is
+   *  drawn from `solana-program-entrypoint`'s own `src/lib.rs`. The editor
+   *  must open it first, as a file it can read. */
+  entryFileName?: string
+  /** Reach `expectedFileName` through the call trace: search for this
+   *  function and jump to its first call, as the Call Trace's search and a
+   *  click on its result do. Used with `entryFileName`. */
+  jumpToCall?: string
   /** When true, the locals test only verifies that loadLocals returns a
    *  valid (ok: true) response — it does not assert that a specific
    *  variable is present. This is used for rr-based languages (Rust, Nim,
@@ -338,6 +348,13 @@ export function defineLanguageSmokeTests(config: LanguageSmokeConfig): void {
     })
 
     it(`opens ${config.expectedFileName} in the editor`, async () => {
+      if (config.entryFileName) {
+        await assertEditorLoadsFile(editor, config.entryFileName)
+      }
+      if (config.jumpToCall) {
+        const location = await session.jumpToCall(config.jumpToCall)
+        console.log(`[${config.language}] At ${config.jumpToCall}:`, JSON.stringify(location))
+      }
       if (config.stepsBeforeEditorCheck) {
         for (let i = 0; i < config.stepsBeforeEditorCheck; i++) {
           await session.stepOver(2000)

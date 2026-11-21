@@ -1,0 +1,35 @@
+scenario: 1
+name: value-origin/python-trivial-chain
+pack: codetracer
+summary: >-
+  Stopped at `print(c)` in a Python recording, Show Value Origin on `c` (its
+  shortcut) shows the chain c <- b <- a <- 10: three hops, ending at the literal 10.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/python/simple_trivial_chain/main.py }
+  - use: open-recording
+    with: { panes: variables }
+
+steps:
+  - beat: stop
+    steps:
+      - wait: { until: replay-idle, timeout: 180s }
+      - wait: { until: { at: 'editor[file="main.py"]/line[number="12"]', present: true }, timeout: 60s }
+      - click: { at: 'editor[file="main.py"]/line[number="12"]', anchor: text-start }
+      - key: F9
+      - expect: { at: 'editor[file="main.py"]/line[number="12"]', breakpoint: true }
+      - key: F5
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(12)" }, timeout: 120s }
+      - wait: { until: replay-idle, timeout: 60s }
+  - beat: ask
+    narration: { text: "Where did `c` come from? Select it and ask for its origin." }
+    steps:
+      - click: { at: 'editor[file="main.py"]/line[number="12"]', anchor: "column(11)", count: 2 }
+      - chord: { bound: variables.show-value-origin }
+        settle: false
+      - wait: { until: origin-chain.loaded, timeout: 120s }
+      - expect: { at: origin-chain, count: 3, terminator: { contains: "10" } }
+      - expect: { at: 'origin-chain/origin-hop[number="1"]', line: 11 }
+      - expect: { at: 'origin-chain/origin-hop[number="3"]', line: 9 }

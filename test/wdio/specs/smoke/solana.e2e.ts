@@ -4,12 +4,24 @@ import { defineLanguageSmokeTests } from '../../helpers/language-smoke-helpers'
 // It records a Solana BPF program's process_instruction() function which:
 //   - Computes arithmetic on u64 values (add, multiply, add)
 //   - Emits a log message with the result via solana_msg::msg!
+//
+// The recording starts in the SBF entrypoint the `entrypoint!` macro
+// generates, whose source is solana-program-entrypoint's own src/lib.rs;
+// process_instruction is reached through the call trace, as in CodeTracer's
+// desktop scenario languages/solana-opens-at-entry. At its entry only the
+// parameters are bound: the release SBF build's debug info binds sum_val
+// from line 28 on, four step-overs in (the step test takes one,
+// extraStepsForLocals the other three; the release build's line order is
+// 26, 25, 27, 28).
 defineLanguageSmokeTests({
   language: 'Solana',
   traceName: 'solana-flow-test',
+  entryFileName: 'lib.rs',
+  jumpToCall: 'process_instruction',
   expectedFileName: 'solana_flow_test.rs',
   calltraceFunction: 'process_instruction',
   variableName: 'sum_val',
   langId: 'Solana',
   eventLogText: 'result',
+  extraStepsForLocals: 3,
 })

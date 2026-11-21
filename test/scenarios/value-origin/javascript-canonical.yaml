@@ -1,0 +1,33 @@
+scenario: 1
+name: value-origin/javascript-canonical
+pack: codetracer
+summary: >-
+  Stopped at `console.log(c)` in a JavaScript recording, Show Value Origin on
+  `c` shows three hops ending at the literal 10.
+
+stage:
+  - use: record-program
+    with: { program: src/db-backend/tests/fixtures/origin/javascript/simple_trivial_chain/main.js }
+  - use: open-recording
+    with: { panes: variables }
+
+steps:
+  - beat: stop
+    steps:
+      - wait: { until: replay-idle, timeout: 180s }
+      - wait: { until: { at: 'editor[file="main.js"]/line[number="7"]', present: true }, timeout: 60s }
+      - click: { at: 'editor[file="main.js"]/line[number="7"]', anchor: text-start }
+      - key: F9
+      - expect: { at: 'editor[file="main.js"]/line[number="7"]', breakpoint: true }
+      - key: F5
+        settle: false
+      - wait: { until: { at: 'editor[file="main.js"]', assert: "stopped-at(7)" }, timeout: 120s }
+      - wait: { until: replay-idle, timeout: 60s }
+  - beat: ask
+    narration: { text: "Where did `c` come from? Select it and ask for its origin." }
+    steps:
+      - click: { at: 'editor[file="main.js"]/line[number="7"]', anchor: "column(13)", count: 2 }
+      - chord: { bound: variables.show-value-origin }
+        settle: false
+      - wait: { until: origin-chain.loaded, timeout: 120s }
+      - expect: { at: origin-chain, count: 3, terminator: { contains: "10" } }

@@ -1,102 +1,62 @@
+# Build the extension from the codetracer checkout beside it (CODETRACER_DIR,
+# default `../codetracer`, the workspace layout). codetracer builds the Nim
+# and Rust artefacts into `media/` and `backend/` (its `build_for_extension.sh`):
+#
+#   media/vscode_panel.js   every panel webview's script: one panel's view over
+#                           a mirror of the session the extension host owns
+#   media/vscode_host.js    the extension host's sessions (`src/sessionHost.ts`)
+#   media/ct_vscode.js      the extension host's middleware
+#   backend/replay-server   the replay backend
+#
+# and this recipe adds the theme CSS (compiled from codetracer's stylus
+# sources), the icons and fonts it refers to, and the TypeScript.
 build:
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p ./media
-    mkdir -p ./backend
+    ct_dir="${CODETRACER_DIR:-../codetracer}"
+    if [[ ! -f "${ct_dir}/build_for_extension.sh" ]]; then
+        echo "codetracer checkout not found at '${ct_dir}' (set CODETRACER_DIR)" >&2
+        exit 1
+    fi
+    ct_dir="$(cd "${ct_dir}" && pwd)"
+    ext_dir="$(pwd)"
+    mkdir -p ./media ./backend
     npm install
 
-    rm -f ./backend/db-backend
+    rm -f ./backend/replay-server ./backend/db-backend ./media/vscode_panel.js ./media/vscode_host.js ./media/ct_vscode.js
     (
-        cd libs/codetracer
+        cd "${ct_dir}"
         nix develop \
             --extra-experimental-features nix-command \
             --extra-experimental-features flakes \
-            .#devShells.x86_64-linux.default --command ./build_for_extension.sh ../../media/ui.js ../../media/ct_vscode.js ../../backend/db-backend
+            .#devShells.x86_64-linux.default --command \
+            ./build_for_extension.sh "${ext_dir}/media" "${ext_dir}/backend/replay-server"
     )
-    # Re-build the webpack frontend bundle with `--devtool false`.
-    #
-    # `build_for_extension.sh` builds the frontend entry via codetracer's
-    # `webpack.config.js`, which runs in `mode: development`. Webpack's
-    # development mode defaults `devtool` to `eval`, which wraps every one
-    # of ~3500 modules in a separate `eval()` call. Five CodeTracer webview
-    # panels each load this bundle, and `eval`-mode parsing is so expensive
-    # that loading it in several webviews at once exhausted the single
-    # shared VS Code renderer process and crashed it ("renderer closed the
-    # MessagePort"). A `devtool: false` build emits an ordinary
-    # function-wrapped bundle that V8 can lazily parse, removing the crash.
-    (
-        cd libs/codetracer
-        node node_modules/webpack-cli/bin/cli.js --config webpack.config.js --devtool false
-    )
-    # Copy the complete webpack output — the frontend entry AND every
-    # code-split chunk (`*.frontend_imports.js`) plus the emitted asset
-    # files (Monaco web-workers, the oniguruma .wasm, fonts, …). The
-    # bundle's runtime resolves async `import()` chunks relative to its own
-    # script URL, so the chunks must sit next to the frontend entry in
-    # `media/` or Monaco / Nim-language loading 404s ("Error using
-    # fileReader"). The previous symlink-only step copied just the entry
-    # bundle and left every chunk missing.
-    rm -f ./media/frontend_bundle.js
-    if [[ -f libs/codetracer/src/public/dist/frontend_imports.js ]]; then
-        cp -f libs/codetracer/src/public/dist/frontend_imports.js ./media/frontend_bundle.js
-    elif [[ -f libs/codetracer/src/public/dist/frontend_bundle.js ]]; then
-        cp -f libs/codetracer/src/public/dist/frontend_bundle.js ./media/frontend_bundle.js
-    else
-        echo "codetracer webpack frontend entry is missing from libs/codetracer/src/public/dist" >&2
-        exit 1
-    fi
-    node -e '
-      const fs = require("fs");
-      const bundle = "./media/frontend_bundle.js";
-      const text = fs.readFileSync(bundle, "utf8");
-      const publicPath = [
-        "var scriptUrl;",
-        "/******/     if (document.currentScript) scriptUrl = document.currentScript.src;",
-        "/******/     __webpack_require__.p = scriptUrl.replace(/#.*$/, \"\").replace(/\\\\?.*$/, \"\").replace(/\\\\/[^\\\\/]+$/, \"/\");"
-      ].join(String.fromCharCode(10));
-      fs.writeFileSync(
-        bundle,
-        text
-          .replace(/__webpack_require__\.p = "[^"]*\/src\/public\/dist";/g, publicPath)
-          .replace(/__webpack_require__\.p = "";?/g, publicPath)
-      );
-    '
-    for asset in libs/codetracer/src/public/dist/*; do
-        case "$asset" in
-            */frontend_imports.js) ;;
-            */frontend_bundle.js) ;;
-            *.LICENSE.txt) ;;
-            *) cp -f "$asset" ./media/ ;;
-        esac
-    done
-    if [[ ! -e ./media/third_party && ! -d ./media/third_party ]]; then
-        rm -rf ./media/third_party
-        ln -s $(pwd)/libs/codetracer/src/public/third_party media/third_party
-    fi;
-    # Always copy (not symlink) the CSS so we can patch the relative URLs below.
-    # The Electron app's build puts this CSS at build-debug/frontend/styles/ where
-    # relative paths like ../../../../libs/ resolve correctly from that real location.
-    # In a VS Code webview the CSS is served at media/styles/ so we must adjust the
-    # paths: ../../../../libs/codetracer-design-system/ → ../../libs/codetracer/libs/
-    # codetracer-design-system/ and ../../../public/resources/origin-icons/ →
-    # ../../public/resources/origin-icons/ (where origin-icons is copied below).
+
+    # The theme. A webview may load only from `media/` (`localResourceRoots`),
+    # so the icons and fonts the stylesheet refers to are copied there and its
+    # URLs rewritten to point at the copies:
+    #   ../../public/resources/, ../../../public/resources/  -> ../resources/
+    #   ../../../../libs/codetracer-design-system/           -> ../design-system/
     mkdir -p ./media/styles
-    cp libs/codetracer/src/build-debug/frontend/styles/default_dark_theme_extension.css \
-       ./media/styles/default_dark_theme_extension.css
+    (
+        cd "${ct_dir}"
+        node node_modules/stylus/bin/stylus \
+            -o "${ext_dir}/media/styles/default_dark_theme_extension.css" \
+            src/frontend/styles/default_dark_theme_extension.styl
+    )
     sed -i \
-        -e 's|url("\.\./\.\./\.\./public/resources/origin-icons/|url("../../public/resources/origin-icons/|g' \
-        -e 's|url("\.\./\.\./\.\./\.\./libs/codetracer-design-system/|url("../../libs/codetracer/libs/codetracer-design-system/|g' \
+        -e 's#\.\./\.\./\.\./public/resources/#../resources/#g' \
+        -e 's#\.\./\.\./public/resources/#../resources/#g' \
+        -e 's#\.\./\.\./\.\./\.\./libs/codetracer-design-system/#../design-system/#g' \
         ./media/styles/default_dark_theme_extension.css
-    # Copy origin-icons from the codetracer build so ../../public/resources/origin-icons/
-    # resolves correctly when the CSS is served from media/styles/.
-    rm -rf ./public/resources/origin-icons
-    cp -r libs/codetracer/src/build-debug/public/resources/origin-icons \
-          ./public/resources/origin-icons
-    if [[ ! -e ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf && ! -f ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf ]]; then
-        rm -f ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf
-        mkdir -p ./media/fonts
-        ln -s $(pwd)/libs/codetracer/src/public/resources/fonts/space_grotesk/SpaceGrotesk-VariableFont_wght.ttf ./media/fonts/SpaceGrotesk-VariableFont_wght.ttf
-    fi;
+    rm -rf ./media/resources ./media/design-system
+    cp -r "${ct_dir}/src/public/resources" ./media/resources
+    if [[ -d "${ct_dir}/libs/codetracer-design-system/SpaceGrotesk_Complete" ]]; then
+        cp -r "${ct_dir}/libs/codetracer-design-system" ./media/design-system
+    else
+        echo "warning: ${ct_dir}/libs/codetracer-design-system is not checked out; the panels fall back to system fonts" >&2
+    fi
 
     npm run compile:ts
     cp ./media/ct_vscode.js out/ct_vscode.js
@@ -125,9 +85,16 @@ compile-ts:
 compile-wdio:
     npm run compile:wdio
 
-# Run the VS Code extension host tests from src/test under Xvfb.
+# Run the VS Code extension host tests from src/test under Xvfb. Fails when
+# vscode-test fails, and also when it exits 0 without mocha's `<N> passing`
+# summary, i.e. when no test reported (scripts/run-vscode-test.sh).
 test-vscode:
-    just _xvfb-run "npx vscode-test"
+    just _xvfb-run "bash scripts/run-vscode-test.sh"
+
+# Positive control for test-vscode: a run of an always-throwing test must exit
+# non-zero and name that test (scripts/check-test-vscode-control.sh).
+test-vscode-control:
+    just _xvfb-run "bash scripts/check-test-vscode-control.sh"
 
 # Helper: start Xvfb and run a command with DISPLAY set.
 # Usage: just _xvfb-run "npx wdio run wdio.conf.ts --spec ..."
@@ -209,6 +176,57 @@ _xvfb-run +CMD:
     # binary, but that alone is insufficient when user namespaces are
     # unavailable.
     export CHROME_DEVEL_SANDBOX=""
+    # Font preflight.
+    #
+    # Chromium hard-requires at least one resolvable font. With zero fonts the
+    # renderer does not degrade -- it hits a Blink NOTREACHED in
+    # remote_font_face_source.cc and aborts via __builtin_trap, so VS Code dies
+    # with "renderer process gone (reason: crashed, code: 133)" (133 = 128+5,
+    # SIGTRAP). The workbench never renders, and WDIO only reports it ~60s later
+    # as "invalid session id" / "Connection timeout exceeded" -- a failure that
+    # says nothing about fonts, buried under thousands of lines of chromedriver
+    # INFO output. Check up front and name the actual cause.
+    #
+    # NOTE ON WHAT THIS ASSERTS. A naive "fc-list | wc -l -gt 0" does NOT work:
+    # nixpkgs' fontconfig is built with dejavu-fonts-minimal compiled in as a
+    # last-resort fallback, so `fc-list` reports 1 font even when FONTCONFIG_FILE
+    # points at a file that does not exist. That threshold could never fire. The
+    # invariant that actually broke in CI was "fontconfig has no config at all"
+    # (Fontconfig error: Cannot load default config file), so assert that
+    # directly, then assert that sans and monospace resolve to files that exist.
+    font_preflight_failed=""
+    if [ -z "${FONTCONFIG_FILE:-}" ]; then
+        echo "_xvfb-run: FATAL: FONTCONFIG_FILE is unset." >&2
+        font_preflight_failed=1
+    elif [ ! -f "${FONTCONFIG_FILE}" ]; then
+        echo "_xvfb-run: FATAL: FONTCONFIG_FILE=${FONTCONFIG_FILE} does not exist." >&2
+        font_preflight_failed=1
+    elif command -v fc-match >/dev/null 2>&1; then
+        for _family in sans monospace; do
+            _file="$(fc-match -f '%{file}' "$_family" 2>/dev/null || true)"
+            if [ -z "$_file" ] || [ ! -f "$_file" ]; then
+                echo "_xvfb-run: FATAL: font family '$_family' resolves to '${_file:-<nothing>}', which is not a file." >&2
+                font_preflight_failed=1
+            else
+                echo "_xvfb-run: font '$_family' -> $_file"
+            fi
+        done
+    else
+        echo "_xvfb-run: FATAL: fc-match is unavailable; cannot verify usable fonts." >&2
+        font_preflight_failed=1
+    fi
+    if [ -n "$font_preflight_failed" ]; then
+        echo "  Chromium/Electron cannot render without a font. The renderer does not" >&2
+        echo "  degrade gracefully: it hits a Blink NOTREACHED in" >&2
+        echo "  remote_font_face_source.cc, aborts via __builtin_trap, and VS Code" >&2
+        echo "  reports 'renderer process gone (reason: crashed, code: 133)'." >&2
+        echo "  WDIO then surfaces that ~60s later as an opaque 'invalid session id'" >&2
+        echo "  / 'Connection timeout exceeded' that never mentions fonts." >&2
+        echo "  Failing fast with the real reason instead." >&2
+        echo "  Fix: run under the repo's nix dev shell, which sets FONTCONFIG_FILE" >&2
+        echo "  and ships dejavu_fonts + liberation_ttf (see flake.nix)." >&2
+        exit 1
+    fi
     if [ -d "$(pwd)/.ct-bin" ]; then
         export PATH="$(pwd)/.ct-bin:$PATH"
     fi
@@ -243,6 +261,10 @@ prepare-wdio-solidity-fixture:
 
 prepare-wdio-stylus-fixture:
     scripts/prepare-stylus-fixture.sh
+
+# Run the real offline repacker and assert sibling tracked inputs stay intact.
+test-stylus-fixture:
+    bash scripts/test-stylus-fixture.sh
 
 prepare-wdio-value-origin-fixtures:
     scripts/prepare-wdio-fixtures.sh value-origin
@@ -288,9 +310,33 @@ test-wdio-value-origin: prepare-wdio-value-origin-fixtures
         just _xvfb-run "npx wdio run wdio.conf.ts --spec $spec"
     done
 
+# CodeTracer's user-level scenarios on VS Code (test/scenarios/): the pack is
+# codetracer's, the runner DemoVideoScript's and the arm
+# DemoVideoScript-WebDriverIO's, all sibling checkouts; the binding is this
+# repository's (test/scenarios/codetracer-binding.ts). scripts/scenarios.sh
+# says what each needs. A failed run's recording is under build/scenario-runs/.
+scenario-build:
+    bash scripts/scenarios.sh build
+
+# Every scenario against the pack: no step may reach application code.
+scenario-lint:
+    bash scripts/scenarios.sh lint
+
+# The vscode lane: every scenario in fast and realistic mode, under Xvfb.
+scenario-lane:
+    just _xvfb-run "bash scripts/scenarios.sh lane"
+
+# One scenario, under Xvfb: `just scenario-run test/scenarios/panels/requests-panel-mounts.yaml --mode realistic`.
+scenario-run scenario *args:
+    just _xvfb-run "bash scripts/scenarios.sh run {{scenario}} {{args}}"
+
 # Run all WDIO tests
 test-wdio: prepare-wdio-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts"
 
 # Run every repo-local test/check entrypoint; full WDIO needs siblings/fixtures.
-test: lint compile-ts compile-wdio test-vscode test-wdio
+test: test-dev-shell lint compile-ts compile-wdio test-stylus-fixture test-vscode test-vscode-control test-wdio
+
+# Evaluate the locked development environment on every advertised platform.
+test-dev-shell:
+    bash scripts/test-dev-shell.sh

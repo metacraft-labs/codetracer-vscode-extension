@@ -20,8 +20,10 @@ export {
   openTerminalPanel,
   openScratchpadPanel,
   inspectWebviews,
+  panelDocuments,
+  inPanel,
 } from './panels'
-export type { PanelInfo } from './panels'
+export type { PanelDocument, PanelInfo } from './panels'
 
 export {
   OriginChainPanelPageObject,

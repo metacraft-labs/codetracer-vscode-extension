@@ -3,15 +3,16 @@
  *
  * `test_extension_forwards_show_value_origin_into_embedded_webview`
  *
- * Invoking `ct-vscode.showValueOrigin` must post a `showValueOrigin`
- * message into the embedded CodeTracer webview via
- * `panel.webview.postMessage(...)`. Per spec §8.2 the extension does NOT
- * render a TreeView, a standalone webview panel, or any other origin
- * UI — it is a thin command/menu bridge.
+ * Invoking `ct-vscode.showValueOrigin` must hand the expression to the
+ * extension host's session, whose State pane — mirrored by the panels —
+ * shows the chain. Per spec §8.2 the extension does NOT render a TreeView,
+ * a standalone webview panel, or any other origin UI — it is a thin
+ * command/menu bridge.
  *
- * The test installs a fake panel via the extension's `registerPanelOverride`
- * test seam (see `CodeTracerExtensionExports` in `src/extension.ts`), then
- * executes the command and asserts the message landed on the override.
+ * The test observes the request through the extension's
+ * `registerPanelOverride` test seam (see `CodeTracerExtensionExports` in
+ * `src/extension.ts`), then executes the command and asserts the
+ * `showValueOrigin` message carried an expression.
  *
  * Spec: codetracer-specs/Planned-Features/Value-Origin-Tracking.milestones.org M6.
  */

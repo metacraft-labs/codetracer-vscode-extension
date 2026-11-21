@@ -184,6 +184,24 @@ ensure_nim_compiler_shim() {
 	fi
 }
 
+# Write .ct-bin/codetracer-js-recorder as a wrapper running the sibling's
+# locally built CLI ($1). An earlier run may have left a symlink there to the
+# sibling's nix package (result/bin/...); once that result link is gone the
+# symlink dangles, and a redirect writes through it into the missing
+# directory and fails. The old entry is removed first, so the wrapper is
+# always a regular file of this repository's .ct-bin.
+write_js_recorder_wrapper() {
+	local local_bin="$1"
+	local wrapper="$REPO_ROOT/.ct-bin/codetracer-js-recorder"
+
+	rm -f "$wrapper"
+	cat >"$wrapper" <<EOF
+#!/usr/bin/env bash
+exec node "$local_bin" "\$@"
+EOF
+	chmod +x "$wrapper"
+}
+
 ensure_js_recorder_shim() {
 	local recorder_repo="$CODETRACER_REPO/../codetracer-js-recorder"
 	local package_bin="$recorder_repo/result/bin/codetracer-js-recorder"
@@ -199,11 +217,7 @@ ensure_js_recorder_shim() {
 	fi
 
 	if [ -f "$local_bin" ] && [ -f "$native_addon" ]; then
-		cat >"$REPO_ROOT/.ct-bin/codetracer-js-recorder" <<EOF
-#!/usr/bin/env bash
-exec node "$local_bin" "\$@"
-EOF
-		chmod +x "$REPO_ROOT/.ct-bin/codetracer-js-recorder"
+		write_js_recorder_wrapper "$local_bin"
 		return 0
 	fi
 
@@ -235,29 +249,51 @@ EOF
 	fi
 
 	if [ -f "$local_bin" ] && [ -f "$native_addon" ]; then
-		cat >"$REPO_ROOT/.ct-bin/codetracer-js-recorder" <<EOF
-#!/usr/bin/env bash
-exec node "$local_bin" "\$@"
-EOF
-		chmod +x "$REPO_ROOT/.ct-bin/codetracer-js-recorder"
+		write_js_recorder_wrapper "$local_bin"
 	fi
 }
 
 ensure_ruby_recorder_shim() {
 	local recorder_repo="$CODETRACER_REPO/../codetracer-ruby-recorder"
-	local package_bin="$recorder_repo/result/bin/codetracer-ruby-recorder"
-	local source_bin="$recorder_repo/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder"
+	local gem_dir="$recorder_repo/gems/codetracer-ruby-recorder"
+	local source_bin="$gem_dir/bin/codetracer-ruby-recorder"
+	# The native tracer the source shim loads (lib/codetracer/native.rb
+	# requires it from here, named with Ruby's DLEXT: `.so` on Linux,
+	# `.bundle` on macOS); it exists only once the sibling's `just build`
+	# (build-extension) has run.
+	local native_ext="$gem_dir/ext/native_tracer/target/release/codetracer_ruby_recorder"
+	local package_bin
 
 	[ -d "$recorder_repo" ] || return 0
 	mkdir -p "$REPO_ROOT/.ct-bin"
 
-	if [ -x "$package_bin" ]; then
-		replace_symlink "$package_bin" "$REPO_ROOT/.ct-bin/codetracer-ruby-recorder"
-		return 0
-	fi
+	# A packaged recorder (`nix build .#codetracer-ruby-recorder`) carries its
+	# native tracer. `result` is nix's default out-link; CI's wdio-integration
+	# job builds with `-o result-ruby-recorder` (.github/workflows/ci.yml), and
+	# must not have that package replaced by the source shim below.
+	for package_bin in \
+		"$recorder_repo/result/bin/codetracer-ruby-recorder" \
+		"$recorder_repo/result-ruby-recorder/bin/codetracer-ruby-recorder"; do
+		if [ -x "$package_bin" ]; then
+			replace_symlink "$package_bin" "$REPO_ROOT/.ct-bin/codetracer-ruby-recorder"
+			return 0
+		fi
+	done
 
 	if [ ! -x "$source_bin" ]; then
 		return 0
+	fi
+
+	# The source shim is a checked-in, always-executable Ruby script, so its
+	# presence says nothing about whether it can record: without the native
+	# tracer `ct record` of a Ruby program fails with "native tracer
+	# unavailable". Build the extension the way the sibling defines it.
+	if [ ! -f "$native_ext.so" ] && [ ! -f "$native_ext.bundle" ]; then
+		echo "codetracer-ruby-recorder native tracer missing; building sibling recorder with repro exec ..." >&2
+		run_in_repo_env "$recorder_repo" just build
+	fi
+	if [ ! -f "$native_ext.so" ] && [ ! -f "$native_ext.bundle" ]; then
+		fail "codetracer-ruby-recorder native tracer is still missing after 'just build': $native_ext.{so,bundle}"
 	fi
 
 	replace_symlink "$source_bin" "$REPO_ROOT/.ct-bin/codetracer-ruby-recorder"
@@ -277,6 +313,23 @@ ensure_native_replay_shim() {
 		replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-native-replay"
 		replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-rr-support"
 	fi
+	ensure_native_replay_tools "$backend_repo/target/debug"
+}
+
+# The debuggers ct-native-replay drives an RR recording with, from the native
+# backend's dev shell (its shellHook links them into target/debug). It finds
+# `rr` beside itself, but looks `dlv` (Go recordings) and `gdb` up on PATH, so
+# they are linked into .ct-bin, which the WDIO runs put first on PATH. CI's
+# wdio-integration job does the same in its "Symlink replay tools" step.
+ensure_native_replay_tools() {
+	local tools_dir="$1"
+	local tool
+
+	for tool in rr dlv gdb; do
+		if [ -x "$tools_dir/$tool" ]; then
+			replace_symlink "$tools_dir/$tool" "$REPO_ROOT/.ct-bin/$tool"
+		fi
+	done
 }
 
 ensure_native_recorder_shim() {

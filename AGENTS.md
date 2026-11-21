@@ -2,28 +2,40 @@ Activate the flake-backed environment with `repro allow` and the repro shell hoo
 
 # Build Process
 
-The extension has a multi-stage build pipeline that combines Nim-compiled JavaScript,
-Rust binaries, and TypeScript. The canonical build command is:
+The extension is built from the **codetracer checkout beside it** —
+`CODETRACER_DIR`, default `../codetracer` (the workspace layout); there is no
+codetracer submodule. The canonical build command is:
 
 ```bash
-just build
+just build                                  # or: CODETRACER_DIR=/path/to/codetracer just build
 ```
 
 This runs the following stages (see `justfile`):
 
 1. **`npm install`** — install Node.js dependencies
-2. **`build_for_extension.sh`** (inside `nix develop` devShell) — compiles the Nim frontend:
-   - `nim js src/frontend/ui_js.nim` → `media/ui.js` (renderer UI)
-   - `nim js src/frontend/middleware.nim` → `media/ct_vscode.js` (extension middleware)
-   - `just build-once` in codetracer repo (tup incremental build + webpack)
-   - `cargo build` in `src/db-backend` → `backend/db-backend` (DAP server binary)
-3. **Symlinks** — creates symlinks from `libs/codetracer/src/public/` into `media/`:
-   - `media/frontend_bundle.js` → webpack bundle
-   - `media/third_party/` → jstree, etc.
-   - `media/styles/default_dark_theme_extension.css` → theme CSS
-   - `media/fonts/SpaceGrotesk-VariableFont_wght.ttf` → font
+2. **codetracer's `build_for_extension.sh`** (inside codetracer's `nix develop`
+   devShell) — builds into `media/` and `backend/`:
+   - `media/vscode_panel.js` — every panel webview's one script: that panel's
+     view over a mirror of the session the extension host owns
+     (`src/frontend/entries/vscode_panel.nim`)
+   - `media/vscode_host.js` — the extension host's sessions, one per
+     CodeTracer debug session (`src/frontend/entries/vscode_host.nim`),
+     loaded by `src/sessionHost.ts`
+   - `media/ct_vscode.js` — the extension host's middleware
+   - `backend/replay-server` — the replay backend (`cargo build`)
+3. **Theme** — compiles codetracer's `default_dark_theme_extension.styl` into
+   `media/styles/`, copies the icons and fonts it refers to into
+   `media/resources/` and `media/design-system/`, and rewrites its URLs to
+   them (a webview may load only from `media/`)
 4. **`npm run compile:ts`** (`tsc -p ./`) — compile TypeScript to `out/`
 5. **`cp media/ct_vscode.js out/ct_vscode.js`** — restore Nim-compiled middleware
+
+The panels hold no debugger state: `src/sessionHost.ts` routes VS Code's debug
+sessions, their adapter's events (a debug adapter tracker) and each panel's
+messages to `vscode_host.js`, which serves every panel a mirror of the active
+session. Panels are restored with the window (`registerWebviewPanelSerializer`),
+and `codetracer.panels.fileTree` chooses CodeTracer's Files panel or VS Code's
+Explorer as the file tree.
 
 ### CRITICAL: The ct_vscode.js overwrite bug
 
@@ -52,20 +64,23 @@ an incomplete build that produces a broken extension.
 ### Required media assets
 
 After a full build, these files must exist and be non-empty:
-- `media/ui.js` — Nim-compiled renderer (~2.5 MB)
-- `media/ct_vscode.js` — Nim-compiled middleware (~1.2 MB)
-- `media/frontend_bundle.js` — webpack bundle (symlink)
-- `media/third_party/jstree.min.js` — jsTree library (symlink)
-- `media/styles/default_dark_theme_extension.css` — theme (symlink)
-- `backend/db-backend` — DAP server binary
+- `media/vscode_panel.js` — the panel webviews' script
+- `media/vscode_host.js` — the extension host's sessions
+- `media/ct_vscode.js` — Nim-compiled middleware
+- `media/styles/default_dark_theme_extension.css` — theme
+- `backend/replay-server` — DAP server binary
+
+The WDIO smoke suite (`just test-wdio-smoke`) opens the State panel and
+asserts its webview loads `vscode_panel.js` alone and mounts; it skips that
+case without a built bundle unless `CT_EXPECT_PANEL_BUNDLE=1`, which CI's
+integration job sets.
 
 ### Nim compilation integration note
 
-The Nim compilation currently requires the Nix devShell from the codetracer repo
-(`libs/codetracer`). This is invoked via `nix develop` in the `just build` target.
-There is no way to run Nim compilation from a bare `npm run compile` — it always
-requires the Nix environment. The `vscode:prepublish` script calls `just build`
-to ensure a full build before packaging.
+The Nim compilation requires codetracer's Nix devShell, which `just build`
+enters with `nix develop` in `CODETRACER_DIR`. There is no way to run Nim
+compilation from a bare `npm run compile`. The `vscode:prepublish` script calls
+`just build` to ensure a full build before packaging.
 
 # Testing
 
@@ -99,14 +114,14 @@ Tests that the DAP server (db-backend) correctly handles Stylus traces. Uses
 pre-recorded fixtures — does NOT need a devnode.
 
 ```bash
-cd ../codetracer/src/db-backend && cargo nextest run test_stylus_dap_event_only_trace
+cd ../codetracer/src/db-backend && cargo nextest run test_stylus_dap_trace
 # or with cargo test:
-cd ../codetracer/src/db-backend && cargo test test_stylus_dap_event_only_trace
+cd ../codetracer/src/db-backend && cargo test test_stylus_dap_trace
 ```
 
 Test files:
 - `../codetracer/src/db-backend/tests/stylus_flow_integration.rs`
-  - `test_stylus_dap_event_only_trace` — loads fixture, verifies DAP init/launch
+  - `test_stylus_dap_trace` — loads fixture, verifies DAP init/launch
 - Fixture: `../codetracer/src/db-backend/tests/fixtures/stylus-fund-trace/`
 
 **Current Stylus trace limitations**: Stylus traces contain ONLY Event entries (EVM
@@ -143,19 +158,35 @@ Test files:
 - `wdio.conf.ts` — WDIO configuration with VS Code Insiders resolution, chromedriver
   setup, and test workspace configuration
 
+### Extension host tests (`just test-vscode`)
+
+`just test-vscode` runs the mocha suites in `src/test/` inside VS Code through
+`npx vscode-test` (`.vscode-test.mjs`). In the dev shell it launches the
+Electron executable named by `VSCODE_INSIDERS_EXECUTABLE` (flake.nix), not the
+`bin/code-insiders` CLI launcher in `VSCODE_INSIDERS_PATH` that WDIO uses: the
+launcher detaches VS Code and exits 0, so no test ever reported.
+`.vscode-test.mjs` refuses a missing, non-executable or script path by name,
+and the recipe fails when the output lacks mocha's `<N> passing` summary.
+`just test-vscode-control` runs an always-throwing test
+(`src/test-control/throws.control.ts`) and requires the run to fail naming it.
+
 ### Generating the Stylus trace fixture for Tier 3
 
-The Stylus trace fixture used by `stylus-trace-load.e2e.ts` must be generated from a
-live devnode recording:
+The Stylus trace fixture is repacked offline from CodeTracer's committed event
+stream and metadata; preparing it does not require a devnode:
 
 ```bash
-# From the codetracer repo, with devnode running:
-STYLUS_FIXTURE_OUTPUT_DIR=../codetracer-vscode-extension/test/fixtures/stylus-fund-trace \
-  just test-stylus-flow-full
+just prepare-wdio-stylus-fixture
+just test-stylus-fixture
 ```
 
-This runs `test_stylus_trace_analysis` which records a trace and exports it to the
-specified directory.
+The preparer asks CodeTracer's `stylus_fixture_rebuild` helper to write directly
+into this repository's ignored `test/fixtures/stylus-fund-trace/` directory using
+`STYLUS_FIXTURE_OUTPUT_DIR`. The regression test invokes that real pipeline,
+requires a nonempty ignored container, and verifies the sibling's tracked input
+files retain their bytes. CodeTracer's explicit regeneration helper still writes
+in place when no output override is set. Capturing new source recording data is
+a separate recording-tier operation that needs the live devnode.
 
 ## Testing your TypeScript changes
 
