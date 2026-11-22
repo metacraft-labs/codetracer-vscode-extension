@@ -287,10 +287,12 @@ jobs:
           COMBINED_BIN="$(pwd)/.ct-bin"
           mkdir -p "$COMBINED_BIN"
           # Symlink ct from the codetracer package.
-          # Try multiple locations: nix build result, then build-debug.
+          # Try multiple locations: nix build result, then the build output
+          # (build-debug-repro; build-debug is what older checkouts hold).
           CT_SRC=""
           for candidate in \
             ../codetracer/result/bin/ct \
+            ../codetracer/src/build-debug-repro/bin/ct \
             ../codetracer/src/build-debug/bin/ct; do
             resolved="$(realpath "$candidate" 2>/dev/null || true)"
             if [ -x "$resolved" ]; then
@@ -302,7 +304,7 @@ jobs:
             ln -sf "$CT_SRC" "$COMBINED_BIN/ct"
             echo "ct binary: $CT_SRC"
           else
-            echo "WARNING: ct binary not found in ../codetracer/result/bin/ or ../codetracer/src/build-debug/bin/"
+            echo "WARNING: ct binary not found in ../codetracer/result/bin/ or ../codetracer/src/build-debug-repro/bin/"
           fi
           # Symlink db-backend from the db-backend package.
           DB_SRC="$(realpath ../codetracer/result-db-backend/bin/db-backend 2>/dev/null || true)"

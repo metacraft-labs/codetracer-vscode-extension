@@ -69,9 +69,13 @@ _ext_detect_summary() {
 # Exports: CODETRACER_PATH, CODETRACER_CT_PATH (ct binary), CODETRACER_DB_BACKEND_PATH
 if [ -n "$_EXT_WORKSPACE_ROOT" ] && [ -d "$_EXT_WORKSPACE_ROOT/codetracer/src/db-backend" ]; then
 	export CODETRACER_PATH="$_EXT_WORKSPACE_ROOT/codetracer"
-	# Prefer nix result, then build-debug
+	# Prefer nix result, then the build output (src/build-debug-repro, which is
+	# where codetracer's only build writes), then the older src/build-debug that
+	# a checkout last built before that may still hold.
 	if [ -x "$_EXT_WORKSPACE_ROOT/codetracer/result/bin/ct" ]; then
 		export CODETRACER_CT_PATH="$_EXT_WORKSPACE_ROOT/codetracer/result/bin/ct"
+	elif [ -x "$_EXT_WORKSPACE_ROOT/codetracer/src/build-debug-repro/bin/ct" ]; then
+		export CODETRACER_CT_PATH="$_EXT_WORKSPACE_ROOT/codetracer/src/build-debug-repro/bin/ct"
 	elif [ -x "$_EXT_WORKSPACE_ROOT/codetracer/src/build-debug/bin/ct" ]; then
 		export CODETRACER_CT_PATH="$_EXT_WORKSPACE_ROOT/codetracer/src/build-debug/bin/ct"
 	fi
