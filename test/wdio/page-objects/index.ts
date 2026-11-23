@@ -5,7 +5,7 @@ export { EditorPane } from './editor-pane'
 export type { EditorState, EditorContent } from './editor-pane'
 
 export { DebugSession } from './debug-session'
-export type { BreakpointInfo, StoppedLocation } from './debug-session'
+export type { BreakpointInfo, StoppedFrame, StoppedLocation } from './debug-session'
 
 export { ExtensionState } from './extension-state'
 export type { ExtensionInfo, NimBackendState } from './extension-state'

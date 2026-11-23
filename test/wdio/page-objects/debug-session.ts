@@ -19,6 +19,14 @@ export interface StoppedLocation {
   line: number // 1-based
 }
 
+/** A stop as the debugger reports it: location plus innermost frame name. */
+export interface StoppedFrame extends StoppedLocation {
+  /** 1-based column of the stop, as the innermost DAP stack frame reports it. */
+  column: number
+  /** Name of the innermost DAP stack frame (the function stopped in). */
+  frame: string
+}
+
 export class DebugSession {
   /** Start a CodeTracer debug session and wait for it to be active. */
   async start(traceFolder: string): Promise<boolean> {
@@ -122,6 +130,34 @@ export class DebugSession {
         line: editor.selection.active.line + 1,
       }
     })
+  }
+
+  /**
+   * The stop the debugger reports: source path, 1-based line and column, and
+   * name of the innermost DAP stack frame of the first thread.
+   *
+   * Unlike `currentLocation()`, this never falls back to the editor cursor,
+   * so a spec that asserts where a navigation stopped checks what the
+   * debugger says rather than what the editor last showed. Throws when the
+   * `threads` or `stackTrace` request fails or reports no frame.
+   */
+  async currentStop(): Promise<StoppedFrame> {
+    const threads = await dap.getThreads()
+    const threadId = threads.ok ? threads.data?.threads?.[0]?.id : undefined
+    if (typeof threadId !== 'number') {
+      throw new Error(`Threads request returned no thread: ${threads.error ?? JSON.stringify(threads.data)}`)
+    }
+    const trace = await dap.dapRequest('stackTrace', { threadId, startFrame: 0, levels: 1 })
+    const frame = trace.ok ? trace.data?.stackFrames?.[0] : undefined
+    if (!frame || typeof frame.line !== 'number') {
+      throw new Error(`StackTrace returned no frame: ${trace.error ?? JSON.stringify(trace.data)}`)
+    }
+    return {
+      file: String(frame.source?.path ?? ''),
+      line: frame.line,
+      column: typeof frame.column === 'number' ? frame.column : 0,
+      frame: String(frame.name ?? ''),
+    }
   }
 
   // ---- Step operations ----
