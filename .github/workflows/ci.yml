@@ -226,6 +226,11 @@ jobs:
             codetracer-js-recorder
             codetracer-beam-recorder
             codetracer-native-recorder
+            nim-stackable-hooks
+            codetracer-visual-replay
+            isonim
+            isonim-tui
+            nim-everywhere
             codetracer-native-test-programs
             codetracer-trace-format
             codetracer-trace-format-nim
@@ -253,6 +258,18 @@ jobs:
       #   (`ct-mcr`) and codetracer-native-test-programs (the Rust, C, Go and
       #   Nim sudoku solvers): `just record-test-traces`, through
       #   prepare-wdio-codetracer-bin.sh and record-test-traces.sh.
+      # - nim-stackable-hooks and codetracer-visual-replay: sources the native
+      #   recorder's `just build-ct-mcr` compiles against
+      #   (ct_interpose/config.nims reads ../nim-stackable-hooks/src,
+      #   ct_cli/config.nims ../codetracer-visual-replay/src);
+      #   prepare-wdio-codetracer-bin.sh builds ct-mcr there.
+      # - isonim, isonim-tui and nim-everywhere: Nim sources codetracer's
+      #   config.nims puts on the path from ../<name>/src, which `just build`
+      #   below imports when it compiles the panel, host and middleware
+      #   bundles (without them vscode_panel.nim stops at "cannot open file:
+      #   isonim/core/owner"). codetracer's config.nims names further siblings
+      #   (isonim-gpui, nim-agents, ...) that none of the three bundles import,
+      #   so they are not cloned.
       # - one recorder per blockchain fixture `just
       #   prepare-wdio-blockchain-fixtures` records (scripts/prepare-*-fixture.sh):
       #   miden (MASM), fuel (Sway), move, solana, cardano (Aiken), flow
@@ -283,13 +300,13 @@ jobs:
       # 44610114615). The image no longer ships a `repro` at all.
       #
       # A verified release archive runs natively, finds the job's Nix, and
-      # compiles recipes with the pinned nixpkgs gcc. v0.2.28 is the newest
-      # release; pinned so a new release cannot change this job unreviewed.
+      # compiles recipes with the pinned nixpkgs gcc. Pinned to a release so a
+      # new one cannot change this job unreviewed; move it to each new release.
       - name: Install repro
         uses: metacraft-labs/metacraft-github-actions/setup-reprobuild@dev
         with:
           gh-token: ${{ steps.app-token.outputs.token }}
-          repro-version: v0.2.28
+          repro-version: v0.2.31
 
       - name: Build codetracer (ct + db-backend binaries)
         run: |
@@ -323,20 +340,14 @@ jobs:
       # language family.  These are separate repos (restored as siblings above)
       # with their own flake.nix.  The built binaries are symlinked into
       # COMBINED_BIN below so ct can discover them via PATH.
-      - name: Build ct-native-replay (native language recording)
-        run: |
-          if [ -d ../codetracer-native-backend ]; then
-            cd ../codetracer-native-backend
-            # The flake's package is `codetracer-rr-support`; it installs the
-            # `ct-native-replay` binary (Cargo [[bin]]). There is no
-            # `#ct-native-replay` attribute.
-            nix build -L ".?submodules=1#codetracer-rr-support" -o result-native-replay
-          elif [ -d ../codetracer-rr-backend ]; then
-            cd ../codetracer-rr-backend
-            nix build -L ".?submodules=1#codetracer-rr-support" -o result-rr-support
-          else
-            echo "WARNING: codetracer-native-backend not found — native language recording will fail"
-          fi
+      # ct-native-replay is not built here as a Nix package. The package is a
+      # release build that bakes Nix's SOURCE_DATE_EPOCH (1980-01-01) as its
+      # build time, and the native backend's binary-lifetime check then
+      # refuses every replay ("older than its supported lifetime", exit 3),
+      # so every native WDIO test failed although the recordings succeeded.
+      # scripts/prepare-wdio-codetracer-bin.sh (the "Record test traces"
+      # step) builds the backend's debug binaries with `just build` instead,
+      # which bake the build's wall-clock time.
 
       - name: Build codetracer-ruby-recorder
         run: |
@@ -352,10 +363,15 @@ jobs:
       # (which provides the Rust toolchain, capnproto, and Python needed to
       # compile the native extension).  The default dev shell has multiple
       # Python versions; the package requires >=3.12, so we use python3.12.
+      # The venv is codetracer's `.python-recorder-venv`, where codetracer's
+      # scripts/detect-siblings.sh and scripts/prepare-wdio-codetracer-bin.sh
+      # look for it; the latter puts its `codetracer-python-recorder` console
+      # script into .ct-bin, which is where `ct record` finds the recorder (on
+      # PATH). CODETRACER_PYTHON_INTERPRETER alone does not make `ct` find it.
       - name: Set up Python recorder
         run: |
           if [ -d ../codetracer-python-recorder/codetracer-python-recorder ]; then
-            VENV_DIR="$(pwd)/.python-recorder-venv"
+            VENV_DIR="$(cd ../codetracer && pwd)/.python-recorder-venv"
             cd ../codetracer-python-recorder
             nix develop . --accept-flake-config -c bash -c '
               python3.12 -m venv "'"$VENV_DIR"'"
@@ -412,22 +428,19 @@ jobs:
           else
             echo "WARNING: ct binary not found in ../codetracer/result/bin/ or ../codetracer/src/build-debug/bin/"
           fi
-          # Symlink db-backend from the db-backend package.
-          DB_SRC="$(realpath ../codetracer/result-db-backend/bin/db-backend 2>/dev/null || true)"
+          # Symlink the DAP backend from the db-backend package. Its binary
+          # is `replay-server` (codetracer src/db-backend/Cargo.toml); the
+          # extension looks for that name, then the former `db-backend`, beside
+          # runnablePath (src/extension.ts, DAP_SERVER_BINARY_NAMES).
+          DB_SRC="$(realpath ../codetracer/result-db-backend/bin/replay-server 2>/dev/null || true)"
           if [ -x "$DB_SRC" ]; then
-            ln -sf "$DB_SRC" "$COMBINED_BIN/db-backend"
+            ln -sf "$DB_SRC" "$COMBINED_BIN/replay-server"
           else
-            echo "WARNING: db-backend not found in ../codetracer/result-db-backend/bin/"
+            echo "WARNING: replay-server not found in ../codetracer/result-db-backend/bin/"
           fi
-          # Symlink ct-native-replay for native language recording (Rust, C, Go, Nim).
-          RR_SRC="$(realpath ../codetracer-native-backend/result-native-replay/bin/ct-native-replay 2>/dev/null \
-                    || realpath ../codetracer-rr-backend/result-rr-support/bin/ct-rr-support 2>/dev/null || true)"
-          if [ -x "$RR_SRC" ]; then
-            ln -sf "$RR_SRC" "$COMBINED_BIN/ct-native-replay"
-            echo "ct-native-replay: $RR_SRC"
-          else
-            echo "WARNING: ct-native-replay not found — native language recording will fail"
-          fi
+          # ct-native-replay (Rust, C, Go and Nim) is built and linked into
+          # COMBINED_BIN by scripts/prepare-wdio-codetracer-bin.sh in the
+          # "Record test traces" step.
           # rr is resolved later in the "Record test traces" step (which
           # enters the rr-backend dev shell) and symlinked into COMBINED_BIN.
           # Symlink codetracer-ruby-recorder for Ruby recording.
@@ -454,8 +467,9 @@ jobs:
           # Also add to PATH for the extension's findInPath fallback.
           echo "$COMBINED_BIN" >> "$GITHUB_PATH"
           # Set Python recorder interpreter for Python recording.
-          if [ -x "$(pwd)/.python-recorder-venv/bin/python" ]; then
-            echo "CODETRACER_PYTHON_INTERPRETER=$(pwd)/.python-recorder-venv/bin/python" >> "$GITHUB_ENV"
+          PYTHON_RECORDER_VENV="$(cd ../codetracer && pwd)/.python-recorder-venv"
+          if [ -x "$PYTHON_RECORDER_VENV/bin/python" ]; then
+            echo "CODETRACER_PYTHON_INTERPRETER=$PYTHON_RECORDER_VENV/bin/python" >> "$GITHUB_ENV"
           fi
 
       # Record test traces for standard languages (Python, Ruby, Rust, C, Go, Nim).
@@ -463,12 +477,21 @@ jobs:
       #   - ct record → ct-native-replay build needs compilers (gcc, rustc, go, nim)
       #   - ct record → ct-native-replay record needs rr for native language replay
       # The extension's own dev shell only has Node.js/VS Code tooling.
+      #
+      # `just prepare-wdio-traces` is what the WDIO suites below depend on:
+      # scripts/prepare-wdio-codetracer-bin.sh first completes .ct-bin with
+      # what the steps above do not provide (ct-mcr, which MCR -- ct's
+      # default native backend -- records Rust, C and Nim with; the native
+      # backend's debug ct-native-replay; the Python recorder's console
+      # script), then record-test-traces.sh records with
+      # missing prerequisites counted as failures. Running record-test-traces
+      # alone recorded without ct-mcr or the Python recorder (run 44865999648).
       - name: Record test traces
         run: |
           cd ../codetracer-native-backend
           nix develop ".?submodules=1" --accept-flake-config -c bash -c "
             cd '$GITHUB_WORKSPACE'
-            just record-test-traces
+            just prepare-wdio-traces
           "
 
       # Symlink rr, dlv, and gdb into COMBINED_BIN so ct-native-replay can

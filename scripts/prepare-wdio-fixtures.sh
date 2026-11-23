@@ -137,7 +137,7 @@ run_value_origin_regenerator() {
 	set +e
 	(
 		cd "$codetracer_root"
-		repro exec . -- env "${preserved_env[@]}" bash "$script"
+		repro exec . -- bash -c "$REGENERATOR_SCRIPT" bash "$REPO_ROOT/.ct-bin" env "${preserved_env[@]}" bash "$script"
 	)
 	local status=$?
 	set -e
@@ -155,15 +155,23 @@ run_value_origin_regenerator() {
 # (`codetracer-python-recorder`, `codetracer-ruby-recorder`, `rustc`, ...) and
 # expect the environment that codetracer's dev shell provides ("after
 # `nix develop` provides the recorder on $PATH", their headers say); this
-# extension's own dev shell does not carry the Python recorder at all. PATH
-# keeps .ct-bin (exported by the caller), so the recorders prepared there are
-# still found first.
+# extension's own dev shell does not carry the Python recorder at all.
+#
+# The recorders prepared in .ct-bin must still be found first, so .ct-bin is
+# put back at the head of PATH inside the environment: `repro exec` prepends
+# codetracer's environment to the inherited PATH, and that environment names
+# each recorder sibling's source tree (for Ruby,
+# codetracer-ruby-recorder/gems/codetracer-ruby-recorder/bin), whose native
+# extension nothing in this job builds. record-test-traces.sh does the same
+# (CT_RECORD_SCRIPT).
+REGENERATOR_SCRIPT='PATH="$1:$PATH"; shift; exec "$@"'
+
 run_origin_regenerator() {
 	local script="$1"
 	local codetracer_root="$2"
 	[ -x "$script" ] || fail "value-origin regenerator is missing or not executable: $script"
 	echo "Value-origin trace is missing; regenerating with $script ..."
-	if ! (cd "$codetracer_root" && repro exec . -- bash "$script"); then
+	if ! (cd "$codetracer_root" && repro exec . -- bash -c "$REGENERATOR_SCRIPT" bash "$REPO_ROOT/.ct-bin" bash "$script"); then
 		fail "value-origin regenerator failed: $script"
 	fi
 }

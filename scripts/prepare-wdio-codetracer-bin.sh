@@ -75,6 +75,11 @@ find_first_candidate() {
 	return 1
 }
 
+# Run a command in a sibling's development environment. A shell command given
+# to it must be a plain `bash -c`, not a login shell: a NixOS login shell
+# resets PATH to the system profile when started from a systemd service (the
+# CI runner), discarding the environment `repro exec` set up (see
+# CT_RECORD_SCRIPT in record-test-traces.sh).
 run_in_repo_env() {
 	local repo="$1"
 	shift
@@ -116,7 +121,7 @@ ensure_python_recorder_installed() {
 	fi
 
 	echo "Installing codetracer_python_recorder into CodeTracer venv with sibling dev shell ..." >&2
-	run_in_repo_env "$recorder_repo" bash -lc \
+	run_in_repo_env "$recorder_repo" bash -c \
 		'export VIRTUAL_ENV="$1"; export PYO3_PYTHON="$2"; export PATH="$1/bin:$PATH"; exec maturin develop --manifest-path codetracer-python-recorder/Cargo.toml --features integration-test' \
 		bash "$venv" "$python"
 
@@ -175,7 +180,7 @@ ensure_nim_compiler_shim() {
 	if [ -x "$nim_repo/bin/nim" ]; then
 		nim_exe="$nim_repo/bin/nim"
 	elif command -v repro >/dev/null 2>&1 && { [ -f "$nim_repo/repro.nim" ] || [ -f "$nim_repo/.envrc" ]; }; then
-		nim_exe="$(run_in_repo_env "$nim_repo" bash -lc 'command -v nim' 2>/dev/null || true)"
+		nim_exe="$(run_in_repo_env "$nim_repo" bash -c 'command -v nim' 2>/dev/null || true)"
 	fi
 
 	if [ -n "$nim_exe" ] && [ -x "$nim_exe" ]; then
@@ -234,7 +239,7 @@ ensure_js_recorder_shim() {
 
 	if [ ! -f "$local_bin" ] || [ ! -f "$native_addon" ]; then
 		echo "codetracer-js-recorder CLI missing; building sibling JS recorder with repro exec ..." >&2
-		run_in_repo_env "$recorder_repo" bash -lc '
+		run_in_repo_env "$recorder_repo" bash -c '
 			if [ ! -d node_modules ]; then
 				npm install
 			fi
@@ -368,6 +373,8 @@ build_codetracer_if_needed() {
 		"DAP backend" \
 		"$CODETRACER_REPO/result/bin/db-backend" \
 		"$CODETRACER_REPO/result/bin/replay-server" \
+		"$CODETRACER_REPO/result-db-backend/bin/replay-server" \
+		"$CODETRACER_REPO/result-db-backend/bin/db-backend" \
 		"$CODETRACER_REPO/src/db-backend/target/debug/db-backend" \
 		"$CODETRACER_REPO/src/db-backend/target/debug/replay-server" \
 		"$CODETRACER_REPO/src/build-debug/bin/db-backend" \
@@ -411,6 +418,8 @@ resolve_dap_backend_binary() {
 		"DAP backend" \
 		"$CODETRACER_REPO/result/bin/db-backend" \
 		"$CODETRACER_REPO/result/bin/replay-server" \
+		"$CODETRACER_REPO/result-db-backend/bin/replay-server" \
+		"$CODETRACER_REPO/result-db-backend/bin/db-backend" \
 		"$CODETRACER_REPO/src/db-backend/target/debug/db-backend" \
 		"$CODETRACER_REPO/src/db-backend/target/debug/replay-server" \
 		"$CODETRACER_REPO/src/build-debug/bin/db-backend" \

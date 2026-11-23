@@ -125,12 +125,20 @@ print_record_failure() {
 # ct's default, MCR). confutils requires the `=` form for named options. The
 # backend is the fifth positional argument of the inner script, so an empty
 # one adds no option at all.
+#
+# The script runs under a plain `bash -c`, never a login shell (`bash -l`). A
+# login shell sources /etc/profile, and on NixOS that re-runs the system
+# set-environment whenever __NIXOS_SET_ENVIRONMENT_DONE is empty, which it is
+# for a process started by a systemd service such as the CI runner. That
+# replaces PATH with the system profile and throws away everything
+# `repro exec` put on it, so `ct` found no ruby, rustc, gcc, go or nim (run
+# 44865999648: every native and Ruby recording failed with "not found").
 CT_RECORD_SCRIPT='PATH="$1:$PATH"; if [ -x "$1/ct-mcr" ]; then export CODETRACER_CT_MCR_PATH="$1/ct-mcr"; fi; if [ -n "$5" ]; then exec "$2" record "--backend=$5" "-o=$3" "$4"; fi; exec "$2" record "-o=$3" "$4"'
 
 ct_record_command_text() {
 	format_command \
 		repro exec "$CODETRACER_PATH" -- \
-		bash -lc "$CT_RECORD_SCRIPT" \
+		bash -c "$CT_RECORD_SCRIPT" \
 		bash "$REPO_ROOT/.ct-bin" "$CT" "$1" "$2" "${3:-}"
 }
 
@@ -140,7 +148,7 @@ run_ct_record() {
 	local backend="${3:-}"
 
 	repro exec "$CODETRACER_PATH" -- \
-		bash -lc "$CT_RECORD_SCRIPT" \
+		bash -c "$CT_RECORD_SCRIPT" \
 		bash "$REPO_ROOT/.ct-bin" "$CT" "$trace_dir" "$program" "$backend"
 }
 
@@ -162,7 +170,7 @@ configure_nim_compiler() {
 	elif command -v repro >/dev/null 2>&1 && { [ -f "$nim_repo/repro.nim" ] || [ -f "$nim_repo/.envrc" ]; }; then
 		nim_exe="$(
 			cd "$nim_repo" &&
-				repro exec . -- bash -lc 'command -v nim' 2>/dev/null || true
+				repro exec . -- bash -c 'command -v nim' 2>/dev/null || true
 		)"
 	fi
 
