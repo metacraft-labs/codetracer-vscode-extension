@@ -7,6 +7,7 @@
 import { browser } from '@wdio/globals'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { loadFlowArguments, type TrackedMove } from './flow-at-stop'
 
 /** Result of a DAP request — either success with data or failure with error. */
 export interface DapResult<T = any> {
@@ -36,6 +37,64 @@ export async function dapRequest<T = any>(
   }, command, args, timeoutMs) as DapResult<T>
 }
 
+/**
+ * Install, in the extension host, the observer that remembers the session's
+ * last stop: the `location` of each `ct/complete-move` event the debug adapter
+ * sends, and how many it has sent. `loadFlow` requests the flow of that stop
+ * (`flow-at-stop.ts` says why it must come from this event).
+ *
+ * It is stashed on the extension host's `globalThis`, where later
+ * `executeWorkbench` calls read it, and replaces the previous one, so each
+ * session starts with no stop known. Call it before `startDebugging`:
+ * `startDebugSession` does. It activates the extension first, since the event
+ * observation behind `registerPanelOverride` is registered at activation and
+ * must be in place before the adapter's first move. Throws when the extension
+ * or its test seam is missing.
+ */
+export async function installMoveTracker(): Promise<void> {
+  const error = await browser.executeWorkbench(async (vscode) => {
+    const extension = vscode.extensions.getExtension('metacraft-labs.ct-vscode')
+    if (!extension) return 'the metacraft-labs.ct-vscode extension is not installed'
+    const exports = (extension.isActive ? extension.exports : await extension.activate()) as any
+    if (!exports || typeof exports.registerPanelOverride !== 'function') {
+      return 'registerPanelOverride export missing'
+    }
+    const g = globalThis as any
+    try { g.__ctWdioMoveTracker?.dispose?.() } catch { /* a stale tracker */ }
+    // No function literal is assigned to a property in this callback: the
+    // tsx loader names such functions with an `__name` helper that does not
+    // exist in the extension host this callback is serialized into.
+    const tracker: any = { location: undefined, moves: 0, dispose: undefined }
+    tracker.dispose = exports.registerPanelOverride('wdio-move-tracker', {
+      webview: {
+        postMessage(message: any) {
+          if (message?.command === 'ct/complete-move' && message.value?.location) {
+            tracker.location = message.value.location
+            tracker.moves += 1
+          }
+          return Promise.resolve(true)
+        },
+      },
+    })
+    g.__ctWdioMoveTracker = tracker
+    return ''
+  }) as string
+  if (error) throw new Error(`installMoveTracker: ${error}`)
+}
+
+/**
+ * The last stop the adapter reported in this session (see
+ * `installMoveTracker`), or `undefined` when no tracker is installed or no
+ * `ct/complete-move` has arrived yet.
+ */
+export async function lastMove(): Promise<TrackedMove | undefined> {
+  return browser.executeWorkbench(async () => {
+    const tracker = (globalThis as any).__ctWdioMoveTracker
+    if (!tracker || tracker.moves === 0) return undefined
+    return { location: tracker.location, moves: tracker.moves }
+  }) as Promise<TrackedMove | undefined>
+}
+
 /** Start a CodeTracer debug session with the given trace folder.
  *
  * For rr-based traces (detected by the presence of an `rr/` subdirectory),
@@ -45,6 +104,9 @@ export async function dapRequest<T = any>(
  *
  * The `ct-native-replay` path is resolved from the `codetracer.rrWorkerPath`
  * VS Code setting (set by CI in .vscode/settings.json).
+ *
+ * Installs a fresh move tracker (`installMoveTracker`) first, so `loadFlow`
+ * knows this session's stops and none of a previous session's.
  */
 export async function startDebugSession(traceFolder: string): Promise<boolean> {
   // Detect rr-based traces from the test runner (Node.js context).
@@ -59,6 +121,9 @@ export async function startDebugSession(traceFolder: string): Promise<boolean> {
     process.env.CT_RR_WORKER_PATH,
     path.resolve(__dirname, '..', '..', '..', '..', 'codetracer-native-backend', 'target', 'debug', 'ct-native-replay'),
   ].find((candidate) => candidate && fs.existsSync(candidate))
+
+  // Before the session starts, so its first stop is heard too.
+  await installMoveTracker()
 
   return browser.executeWorkbench(
     async (vscode, folder: string, launchCwd: string, rrTrace: boolean, rrWorkerFallback: string | undefined) => {
@@ -258,7 +323,14 @@ export async function loadLocals(opts: {
   })
 }
 
-/** Load flow data for the current location.
+/** Load the flow of the session's current stop.
+ *
+ * The request carries the location of the last `ct/complete-move` the
+ * session reported (`installMoveTracker`), as the extension's own flow pane
+ * sends it (`loadFlowArguments` in `flow-at-stop.ts`). With no move observed
+ * this throws rather than send a zeroed location, which the replay server
+ * answers with the flow of the call containing step 0 wherever the session
+ * is stopped.
  *
  * The flow arrives on the `ct/updated-flow` event; the `ct/load-flow`
  * response that follows it is an acknowledgement, so the flow is
@@ -272,19 +344,7 @@ export async function loadLocals(opts: {
  * timeout.
  */
 export async function loadFlow(flowMode = 0, timeoutMs = 10000): Promise<DapResult> {
-  // Field names must be camelCase to match the Rust struct's
-  // #[serde(rename_all = "camelCase")] deserialization.
-  const args = {
-    flowMode,
-    location: {
-      path: '', line: 0, functionName: '', highLevelPath: '',
-      highLevelLine: 0, highLevelFunctionName: '', lowLevelPath: '',
-      lowLevelLine: 0, rrTicks: 0, functionFirst: 0, functionLast: 0,
-      event: 0, expression: '', offset: 0, error: false,
-      callstackDepth: 0, originatingInstructionAddress: 0,
-      key: '', globalCallKey: '',
-    },
-  }
+  const args = loadFlowArguments(flowMode, await lastMove())
   return browser.executeWorkbench(async (vscode, a, t) => {
     const session = vscode.debug.activeDebugSession
     if (!session) return { ok: false, error: 'no active debug session' }

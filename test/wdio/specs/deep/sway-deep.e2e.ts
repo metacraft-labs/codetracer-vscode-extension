@@ -17,6 +17,7 @@
 import { browser, expect } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
 import { captureFullDiagnostics, screenshot, writeDiag } from '../../helpers/diagnostics'
+import { assertFlowAtCurrentStop } from '../../helpers/language-smoke-helpers'
 import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 
 const TRACE_NAME = 'sway-flow-test'
@@ -254,15 +255,7 @@ describe('CodeTracer Extension - Sway (Fuel) Deep Test', () => {
   it('loads flow data for the current position', async () => {
     const result = await session.loadFlow(0)
     console.log('[Sway] Flow ok:', result.ok)
-
-    expect(result.ok).toBe(true)
-
-    if (result.data) {
-      writeDiag('sway-deep-flow.json', result.data)
-      console.log('[Sway] Flow data keys:', Object.keys(result.data))
-      const dataStr = JSON.stringify(result.data)
-      expect(dataStr.length).toBeGreaterThan(2)
-    }
+    await assertFlowAtCurrentStop(session, result, 'sway-deep-flow.json')
   })
 
   // ==================================================================

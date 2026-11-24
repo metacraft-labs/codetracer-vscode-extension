@@ -27,6 +27,7 @@
 import { expect } from '@wdio/globals'
 import { DebugSession, ExtensionState } from '../../page-objects'
 import { captureFullDiagnostics, screenshot, writeDiag } from '../../helpers/diagnostics'
+import { assertFlowAtCurrentStop } from '../../helpers/language-smoke-helpers'
 import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 
 const TRACE_NAME = 'polkavm-flow-test'
@@ -195,15 +196,7 @@ describe('CodeTracer Extension - PolkaVM Deep Test', () => {
   it('loads flow data for the current position', async () => {
     const result = await session.loadFlow(0)
     console.log('[PolkaVM] Flow ok:', result.ok)
-
-    expect(result.ok).toBe(true)
-
-    if (result.data) {
-      writeDiag('polkavm-deep-flow.json', result.data)
-      console.log('[PolkaVM] Flow data keys:', Object.keys(result.data))
-      const dataStr = JSON.stringify(result.data)
-      expect(dataStr.length).toBeGreaterThan(2)
-    }
+    await assertFlowAtCurrentStop(session, result, 'polkavm-deep-flow.json')
   })
 
   // ==================================================================

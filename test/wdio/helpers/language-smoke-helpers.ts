@@ -22,6 +22,8 @@ import {
   screenshot, writeDiag,
 } from './diagnostics'
 import { resolveTracePath, traceExists } from './trace-utils'
+import { lastMove, type DapResult } from './dap-client'
+import { checkFlowAtStop } from './flow-at-stop'
 
 // ---- Configuration ----
 
@@ -291,17 +293,40 @@ export async function assertStepWorks(
   writeDiag('step-over.json', { before, after })
 }
 
-/** Verify flow data loads (primarily for RR-based traces). */
+/**
+ * Assert that `result` (a `loadFlow` answer) is the flow of the call the
+ * session is stopped in now: the request succeeded, and the flow's function,
+ * call, starting step and lines agree with the stop DAP reports and with the
+ * last `ct/complete-move` (`checkFlowAtStop` in `flow-at-stop.ts`). A flow
+ * that merely arrived non-empty is not enough: the flow of step 0 is never
+ * empty, wherever the session is stopped.
+ *
+ * Writes the flow and the comparison to `diagName` either way.
+ */
+export async function assertFlowAtCurrentStop(
+  session: DebugSession,
+  result: DapResult,
+  diagName: string,
+): Promise<void> {
+  if (!result.ok) {
+    writeDiag(diagName, { error: result.error })
+    throw new Error(`loadFlow failed: ${result.error}`)
+  }
+  const stop = await session.currentStop()
+  const move = await lastMove()
+  const report = checkFlowAtStop(result.data, stop, move)
+  writeDiag(diagName, { flow: result.data, report })
+  console.log('[flow] at stop:', JSON.stringify({ ...report, flowLines: report.flowLines.length }))
+  expect(report.mismatches).toEqual([])
+}
+
+/** Verify the flow of the current stop loads (Playwright's
+ *  `assertFlowValueVisible`): see `assertFlowAtCurrentStop`. */
 export async function assertFlowLoads(
   session: DebugSession,
 ): Promise<void> {
   const result = await session.loadFlow(0)
-  if (result.ok && result.data) {
-    writeDiag('flow.json', result.data)
-  } else {
-    console.warn('Flow did not load:', result.error)
-    expect(result.ok).toBe(true)
-  }
+  await assertFlowAtCurrentStop(session, result, 'flow.json')
 }
 
 /** Verify terminal output contains expected text. */

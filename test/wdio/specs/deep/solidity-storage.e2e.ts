@@ -34,6 +34,7 @@ import { browser, expect } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState, type StoppedFrame, type StoppedLocation } from '../../page-objects'
 import { listLocals } from '../../helpers/locals'
 import { captureFullDiagnostics, screenshot, writeDiag } from '../../helpers/diagnostics'
+import { assertFlowAtCurrentStop } from '../../helpers/language-smoke-helpers'
 import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 
 const TRACE_NAME = 'solidity-flow-test'
@@ -528,14 +529,11 @@ describe('CodeTracer Extension - Solidity EVM Deep Test', () => {
   // ==================================================================
 
   it('loads flow data for the current EVM position', async () => {
+    // The previous test left the session at the compute() breakpoint, so the
+    // flow must be compute()'s, not that of the call containing step 0.
     const result = await session.loadFlow(0)
     console.log('[Solidity] Flow ok:', result.ok)
-
-    assertOkResult(result, 'Flow')
-    writeDiag('solidity-deep-flow.json', result.data)
-    console.log('[Solidity] Flow data keys:', Object.keys(result.data!))
-    const dataStr = JSON.stringify(result.data)
-    expect(dataStr.length).toBeGreaterThan(2)
+    await assertFlowAtCurrentStop(session, result, 'solidity-deep-flow.json')
   })
 
   // ==================================================================

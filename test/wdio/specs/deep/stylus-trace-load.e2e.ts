@@ -15,6 +15,7 @@ import { browser, expect } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
 import { getPanelStatus, inspectWebviews } from '../../page-objects/panels'
 import { captureFullDiagnostics, screenshot, writeDiag } from '../../helpers/diagnostics'
+import { assertFlowAtCurrentStop } from '../../helpers/language-smoke-helpers'
 import * as dap from '../../helpers/dap-client'
 
 // ---- Fixture path resolution ----
@@ -319,11 +320,7 @@ describe('CodeTracer Extension - Stylus Trace Loading', () => {
   it('can load flow data for the current location', async () => {
     const result = await session.loadFlow(0)
     console.log('Flow load response ok:', result.ok)
-
-    expect(result.ok).toBe(true)
-    expect(result.data).toBeDefined()
-    writeDiag('dap-flow.json', result.data)
-    console.log('Flow data keys:', Object.keys(result.data!))
+    await assertFlowAtCurrentStop(session, result, 'dap-flow.json')
   })
 
   // ==================================================================

@@ -18,6 +18,7 @@ import {
   captureExtHostLog,
 } from '../../helpers/diagnostics'
 import { resolveFixturePath } from '../../helpers/trace-utils'
+import { installMoveTracker } from '../../helpers/dap-client'
 
 const FIXTURE_DIR = resolveFixturePath('stylus-fund-trace')
 
@@ -49,6 +50,9 @@ describe('CodeTracer Debug - Full Diagnostics', () => {
 
     // ===== PHASE 2: Start debug =====
     console.log('===== PHASE 2: Start debug =====')
+    // This test starts the session itself, so it installs the observer
+    // `loadFlow` needs to know the current stop (PHASE 5).
+    await installMoveTracker()
     const startOk = await browser.executeWorkbench(async (vscode, traceFolder: string) => {
       return vscode.debug.startDebugging(
         vscode.workspace.workspaceFolders?.[0],

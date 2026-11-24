@@ -8,6 +8,7 @@
 import { browser, expect } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
 import { captureFullDiagnostics, screenshot, writeDiag } from '../../helpers/diagnostics'
+import { assertFlowAtCurrentStop } from '../../helpers/language-smoke-helpers'
 import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 
 const session = new DebugSession()
@@ -137,13 +138,7 @@ describe('CodeTracer Extension - Rust Deep Test', () => {
 
   it('loads flow data and verifies structure', async () => {
     const result = await session.loadFlow(0)
-    writeDiag('rust-deep-flow.json', result)
-    expect(result.ok).toBe(true)
-    expect(result.data).toBeDefined()
-
-    console.log('Flow data keys:', Object.keys(result.data))
-    const dataStr = JSON.stringify(result.data)
-    expect(dataStr.length).toBeGreaterThan(2)
+    await assertFlowAtCurrentStop(session, result, 'rust-deep-flow.json')
   })
 
   it('step-in and step-out complete without desynchronizing DAP replies', async () => {

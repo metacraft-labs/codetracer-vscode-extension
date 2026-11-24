@@ -33,7 +33,7 @@ import path from 'path'
 import { browser, expect } from '@wdio/globals'
 import { DebugSession, EditorPane, ExtensionState } from '../../page-objects'
 import { captureFullDiagnostics, screenshot, writeDiag } from '../../helpers/diagnostics'
-import { jumpToFirstCall } from '../../helpers/language-smoke-helpers'
+import { assertFlowAtCurrentStop, jumpToFirstCall } from '../../helpers/language-smoke-helpers'
 import { resolveTracePath, traceExists } from '../../helpers/trace-utils'
 
 const TRACE_NAME = 'solana-flow-test'
@@ -320,15 +320,7 @@ describe('CodeTracer Extension - Solana Deep Test', () => {
   it('loads flow data for the current position', async () => {
     const result = await session.loadFlow(0)
     console.log('[Solana] Flow ok:', result.ok)
-
-    expect(result.ok).toBe(true)
-
-    if (result.data) {
-      writeDiag('solana-deep-flow.json', result.data)
-      console.log('[Solana] Flow data keys:', Object.keys(result.data))
-      const dataStr = JSON.stringify(result.data)
-      expect(dataStr.length).toBeGreaterThan(2)
-    }
+    await assertFlowAtCurrentStop(session, result, 'solana-deep-flow.json')
   })
 
   // ==================================================================
