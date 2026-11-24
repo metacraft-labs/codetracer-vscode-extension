@@ -77,6 +77,16 @@ jobs:
           app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           substituters: ${{ vars.SUBSTITUTERS }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          # The read credential for the private cache named in SUBSTITUTERS.
+          # Without it setup-nix reads that cache anonymously, gets HTTP 401,
+          # removes it from nix.conf, and every path only it serves is built
+          # from source. In wdio-integration that included the Sui, Forc,
+          # Miden and cargo-build-sbf toolchains of codetracer's dev shell,
+          # which `repro exec ../codetracer` (scripts/record-test-traces.sh)
+          # realises: the first recording then built them for hours, silently,
+          # until the job hit its 6 h limit. No attic-cache is given, so this
+          # job only reads the cache and uploads nothing.
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
 
       - name: Install dependencies
         run: dev-exec just install
@@ -162,6 +172,8 @@ jobs:
           app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           substituters: ${{ vars.SUBSTITUTERS }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          # Read credential for the private cache; see the build job.
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
 
       - name: Install dependencies
         run: dev-exec just install
@@ -254,6 +266,8 @@ jobs:
           app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           substituters: ${{ vars.SUBSTITUTERS }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          # Read credential for the private cache; see the build job.
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           siblings: |
             codetracer
             codetracer-native-backend
