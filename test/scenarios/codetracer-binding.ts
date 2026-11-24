@@ -8,7 +8,9 @@
 //
 //   * `launch`: VS Code with this extension, started through VS Code's
 //     WebDriver service (wdio-vscode-service), on a workspace and user
-//     settings of the run's own;
+//     settings of the run's own, through the repository's VS Code launcher
+//     (test/wdio/helpers/run-vscode.cjs) rather than the service's, which
+//     ends VS Code once it has logged 1 MiB;
 //   * the stages: recordings are made through the pack's one stage
 //     implementation (`ct-scenario-stage`, the Nim code every CodeTracer
 //     binding runs); `open-recording` then starts VS Code, starts a
@@ -35,6 +37,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { remote } from "webdriverio";
+// CommonJS (it is shared with the WDIO suite, see the file), so it is imported whole.
+import vscodeLauncher from "../wdio/helpers/vscode-launcher.cjs";
 
 // The arm's stdout is the runner's protocol channel: what the WebDriver
 // libraries log goes to stderr, and only errors.
@@ -696,6 +700,9 @@ export async function launch(opts: { width?: number; height?: number }): Promise
   await new service.launcher({ cachePath }).onPrepare({}, [caps]);
   const worker = new service.default({}, caps);
   await worker.beforeSession({}, caps);
+  // The service's own VS Code launcher ends VS Code once it has logged 1 MiB;
+  // start it through the repository's, which passes its output through.
+  vscodeLauncher.useRepoVSCodeLauncher(caps);
   const browser: any = await remote({
     logLevel: "error",
     connectionRetryTimeout: 180_000,

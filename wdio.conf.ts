@@ -487,8 +487,12 @@ export const config: any = {
   connectionRetryTimeout: 120000,
   connectionRetryCount: 3,
 
+  // wdio-vscode-service, with VS Code started through this repository's
+  // launcher, which passes VS Code's output through instead of ending VS Code
+  // once it has logged 1 MiB (test/wdio/helpers/run-vscode.cjs). Named by path,
+  // so WDIO loads its `launcher` and its worker as it loads the package's.
   services: [
-    'vscode'
+    path.resolve(__dirname, 'test', 'wdio', 'helpers', 'vscode-service.mts')
   ],
 
   framework: 'mocha',
