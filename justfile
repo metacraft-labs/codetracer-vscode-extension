@@ -271,6 +271,12 @@ prepare-wdio-stylus-fixture:
 test-stylus-fixture:
     bash scripts/test-stylus-fixture.sh
 
+# Run the real WDIO binary preparation against a staged workspace whose
+# ct-native-replay cannot load: it must be rebuilt once, or the step must fail
+# naming it (scripts/test-prepare-wdio-codetracer-bin.sh).
+test-prepare-wdio-codetracer-bin:
+    bash scripts/test-prepare-wdio-codetracer-bin.sh
+
 prepare-wdio-value-origin-fixtures:
     scripts/prepare-wdio-fixtures.sh value-origin
 
@@ -340,7 +346,7 @@ test-wdio: prepare-wdio-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts"
 
 # Run every repo-local test/check entrypoint; full WDIO needs siblings/fixtures.
-test: test-dev-shell lint compile-ts compile-wdio test-wdio-helpers test-stylus-fixture test-vscode test-vscode-control test-wdio
+test: test-dev-shell lint compile-ts compile-wdio test-wdio-helpers test-stylus-fixture test-prepare-wdio-codetracer-bin test-vscode test-vscode-control test-wdio
 
 # Evaluate the locked development environment on every advertised platform.
 test-dev-shell:

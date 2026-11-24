@@ -84,6 +84,63 @@ run_in_repo_env() {
 	)
 }
 
+# What the last failed `binary_starts` printed, for the failure message.
+BINARY_START_OUTPUT=""
+
+# Succeed when <binary> starts: it runs <probe-arg> (its cheapest command,
+# such as `--version`) and exits 0. A present, executable file is not enough.
+# A sibling's build output names its libraries by absolute path (a Nix store
+# RUNPATH), so a garbage collection can remove a library while the binary
+# stays executable, and then the dynamic loader refuses to start it (exit 127,
+# "error while loading shared libraries"). The probe has to run the binary:
+# that is the only check that makes the loader resolve every library.
+binary_starts() {
+	local binary="$1"
+	local probe_arg="$2"
+
+	BINARY_START_OUTPUT=""
+	[ -f "$binary" ] && [ -x "$binary" ] || {
+		BINARY_START_OUTPUT="not an executable file"
+		return 1
+	}
+	if BINARY_START_OUTPUT="$("$binary" "$probe_arg" 2>&1 </dev/null)"; then
+		return 0
+	else
+		BINARY_START_OUTPUT="exit $?: $(printf '%s\n' "$BINARY_START_OUTPUT" | tail -n 3)"
+		return 1
+	fi
+}
+
+# ensure_sibling_binary_starts <label> <repo> <binary> <probe-arg> -- <build command...>
+#
+# Leave <binary> in a state where it starts, or fail naming it. A binary that
+# is missing, or present but unable to start (see `binary_starts`), is built
+# once with <build command> in <repo>'s own development environment; the
+# rebuild links it against that environment's current libraries. When the
+# rebuilt binary still cannot start, preparing the WDIO binaries fails here,
+# rather than letting every test that needs it fail later at its first use.
+ensure_sibling_binary_starts() {
+	local label="$1"
+	local repo="$2"
+	local binary="$3"
+	local probe_arg="$4"
+	shift 4
+	[ "${1:-}" = "--" ] || fail "ensure_sibling_binary_starts: expected -- before the build command"
+	shift
+
+	if binary_starts "$binary" "$probe_arg"; then
+		return 0
+	fi
+	if [ -e "$binary" ]; then
+		echo "$label at $binary cannot start ($binary $probe_arg: $BINARY_START_OUTPUT); rebuilding it with repro exec -- $* in $repo ..." >&2
+	else
+		echo "$label binary missing; building it with repro exec -- $* in $repo ..." >&2
+	fi
+	run_in_repo_env "$repo" "$@"
+	binary_starts "$binary" "$probe_arg" ||
+		fail "$label still cannot start after 'repro exec -- $*' in $repo: $binary $probe_arg: $BINARY_START_OUTPUT"
+}
+
 ensure_codetracer_runtime_assets() {
 	local src_config="$CODETRACER_REPO/src/config"
 	local build_config="$CODETRACER_REPO/src/build-debug/config"
@@ -143,13 +200,12 @@ ensure_beam_recorder_built() {
 	local recorder_repo="$CODETRACER_REPO/../codetracer-beam-recorder"
 
 	[ -d "$recorder_repo" ] || return 0
-	if [ -x "$recorder_repo/target/debug/codetracer-beam-recorder" ] ||
-	   [ -x "$recorder_repo/target/release/codetracer-beam-recorder" ]; then
+	# A packaged (release) build that starts is as good as the debug one.
+	if binary_starts "$recorder_repo/target/release/codetracer-beam-recorder" --version; then
 		return 0
 	fi
-
-	echo "codetracer-beam-recorder binary missing; building sibling recorder with repro exec ..." >&2
-	run_in_repo_env "$recorder_repo" just build
+	ensure_sibling_binary_starts codetracer-beam-recorder "$recorder_repo" \
+		"$recorder_repo/target/debug/codetracer-beam-recorder" --version -- just build
 }
 
 ensure_mcr_recorder_shim() {
@@ -157,14 +213,9 @@ ensure_mcr_recorder_shim() {
 	local mcr="$recorder_repo/ct_cli/ct_cli"
 
 	[ -d "$recorder_repo" ] || return 0
-	if [ ! -x "$mcr" ]; then
-		echo "ct-mcr binary missing; building sibling native recorder with repro exec ..." >&2
-		run_in_repo_env "$recorder_repo" just build-ct-mcr
-	fi
-	if [ -x "$mcr" ]; then
-		mkdir -p "$REPO_ROOT/.ct-bin"
-		replace_symlink "$mcr" "$REPO_ROOT/.ct-bin/ct-mcr"
-	fi
+	ensure_sibling_binary_starts ct-mcr "$recorder_repo" "$mcr" --help -- just build-ct-mcr
+	mkdir -p "$REPO_ROOT/.ct-bin"
+	replace_symlink "$mcr" "$REPO_ROOT/.ct-bin/ct-mcr"
 }
 
 ensure_nim_compiler_shim() {
@@ -294,15 +345,10 @@ ensure_native_replay_shim() {
 	local replay="$backend_repo/target/debug/ct-native-replay"
 
 	[ -d "$backend_repo" ] || return 0
-	if [ ! -x "$replay" ]; then
-		echo "ct-native-replay binary missing; building sibling native backend with repro exec ..." >&2
-		run_in_repo_env "$backend_repo" just build
-	fi
-	if [ -x "$replay" ]; then
-		mkdir -p "$REPO_ROOT/.ct-bin"
-		replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-native-replay"
-		replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-rr-support"
-	fi
+	ensure_sibling_binary_starts ct-native-replay "$backend_repo" "$replay" --version -- just build
+	mkdir -p "$REPO_ROOT/.ct-bin"
+	replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-native-replay"
+	replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-rr-support"
 }
 
 ensure_native_recorder_shim() {
@@ -310,14 +356,9 @@ ensure_native_recorder_shim() {
 	local mcr="$recorder_repo/ct_cli/ct_cli"
 
 	[ -d "$recorder_repo" ] || return 0
-	if [ ! -x "$mcr" ]; then
-		echo "codetracer-native-recorder binary missing; building sibling native recorder with repro exec ..." >&2
-		run_in_repo_env "$recorder_repo" just build-ct-mcr
-	fi
-	if [ -x "$mcr" ]; then
-		mkdir -p "$REPO_ROOT/.ct-bin"
-		replace_symlink "$mcr" "$REPO_ROOT/.ct-bin/codetracer-native-recorder"
-	fi
+	ensure_sibling_binary_starts codetracer-native-recorder "$recorder_repo" "$mcr" --help -- just build-ct-mcr
+	mkdir -p "$REPO_ROOT/.ct-bin"
+	replace_symlink "$mcr" "$REPO_ROOT/.ct-bin/codetracer-native-recorder"
 }
 
 build_codetracer_if_needed() {
