@@ -20,6 +20,7 @@ package codetracervscodeextensionEnvironment:
     "codetracer-ruby-recorder >=0"
     "codetracer-python-recorder >=0"
     "codetracer-js-recorder >=0"
+    "codetracer-wasm-instrumenter >=0"
     "codetracer-beam-recorder >=0"
     "codetracer-native-recorder >=0"
     "nim-stackable-hooks >=0"

@@ -250,8 +250,21 @@ prepare-wdio-fixtures:
 prepare-wdio-traces:
     scripts/prepare-wdio-fixtures.sh traces
 
-prepare-wdio-blockchain-fixtures:
-    scripts/prepare-wdio-fixtures.sh blockchain
+# The two sibling builds prepare-wdio-traces runs first, on their own: ct-mcr
+# (codetracer-native-recorder) and the native backend's ct-native-replay. CI
+# runs each in a step of its own after refreshing its Git credential
+# (.github/workflows/ci.yml, "GITHUB CREDENTIALS").
+prepare-wdio-ct-mcr:
+    scripts/prepare-wdio-codetracer-bin.sh ct-mcr
+
+prepare-wdio-native-replay:
+    scripts/prepare-wdio-codetracer-bin.sh native-replay
+
+# Every blockchain fixture, or only the named ones (`masm`, `sway`, `move`,
+# `solana`, `aiken`, `cadence`, `cairo`, `circom`, `leo`, `polkavm`,
+# `solidity`, `tolk`, `stylus`: scripts/prepare-<name>-fixture.sh).
+prepare-wdio-blockchain-fixtures *FIXTURES:
+    scripts/prepare-wdio-fixtures.sh blockchain {{FIXTURES}}
 
 prepare-wdio-beam-fixtures:
     scripts/prepare-beam-fixture.sh

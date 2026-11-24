@@ -26,25 +26,30 @@ prepare_trace_fixtures() {
 	REQUIRE_WDIO_FIXTURES=1 bash "$SCRIPT_DIR/record-test-traces.sh"
 }
 
-prepare_blockchain_fixtures() {
-	local scripts=(
-		"$SCRIPT_DIR/prepare-masm-fixture.sh"
-		"$SCRIPT_DIR/prepare-sway-fixture.sh"
-		"$SCRIPT_DIR/prepare-move-fixture.sh"
-		"$SCRIPT_DIR/prepare-solana-fixture.sh"
-		"$SCRIPT_DIR/prepare-aiken-fixture.sh"
-		"$SCRIPT_DIR/prepare-cadence-fixture.sh"
-		"$SCRIPT_DIR/prepare-cairo-fixture.sh"
-		"$SCRIPT_DIR/prepare-circom-fixture.sh"
-		"$SCRIPT_DIR/prepare-leo-fixture.sh"
-		"$SCRIPT_DIR/prepare-polkavm-fixture.sh"
-		"$SCRIPT_DIR/prepare-solidity-fixture.sh"
-		"$SCRIPT_DIR/prepare-tolk-fixture.sh"
-		"$SCRIPT_DIR/prepare-stylus-fixture.sh"
-	)
+# The blockchain fixtures, in the order they are prepared. Each name is a
+# script, scripts/prepare-<name>-fixture.sh.
+BLOCKCHAIN_FIXTURES=(
+	masm sway move solana aiken cadence cairo circom leo polkavm solidity tolk stylus
+)
 
-	for script in "${scripts[@]}"; do
-		run_script "$script"
+# prepare_blockchain_fixtures [NAME...]: prepare the named fixtures, or all of
+# them when none is named. An unknown name is refused before anything runs,
+# so a misspelt CI step cannot quietly prepare nothing.
+prepare_blockchain_fixtures() {
+	local names=("$@")
+	local name known
+	if [ "${#names[@]}" -eq 0 ]; then
+		names=("${BLOCKCHAIN_FIXTURES[@]}")
+	fi
+	for name in "${names[@]}"; do
+		for known in "${BLOCKCHAIN_FIXTURES[@]}"; do
+			[ "$name" = "$known" ] && continue 2
+		done
+		fail "unknown blockchain fixture: $name (known: ${BLOCKCHAIN_FIXTURES[*]})"
+	done
+
+	for name in "${names[@]}"; do
+		run_script "$SCRIPT_DIR/prepare-$name-fixture.sh"
 	done
 }
 
@@ -123,12 +128,35 @@ resolve_python() {
 	fail "required Python interpreter not found (python3, python, or $codetracer_root/.python-recorder-venv/bin/python)"
 }
 
+# Build the tools codetracer's cross-process regenerator records with --
+# ct-instrument (codetracer-wasm-instrumenter), the JS recorder's CLI
+# (packages/cli/dist/index.js) and codetracer's session-manager -- with
+# codetracer's own provisioning script, in codetracer's environment, and print
+# the session-manager executable. The script builds the two siblings with
+# codetracer's scripts/build-siblings.sh, fails naming any sibling that is not
+# checked out or does not build, and prints the path because cargo may place
+# session-manager under CARGO_TARGET_DIR, where the regenerator does not look.
+provision_cross_process_tools() {
+	local codetracer_root="$1"
+	local provisioner="$codetracer_root/scripts/provision-cross-process-recording.sh"
+	local record_web
+	[ -f "$provisioner" ] || fail "codetracer's cross-process provisioning script is missing: $provisioner"
+	record_web="$(cd "$codetracer_root" && repro exec . -- bash "$provisioner")" ||
+		fail "could not provision the cross-process value-origin recording tools (see $provisioner's report above)"
+	[ -x "$record_web" ] ||
+		fail "$provisioner did not name an executable session-manager: '$record_web'"
+	printf '%s\n' "$record_web"
+}
+
 run_value_origin_regenerator() {
 	local script="$1"
 	local codetracer_root
+	local record_web
 	local preserved_env=()
 	[ -x "$script" ] || fail "value-origin regenerator is missing or not executable: $script"
 	codetracer_root="$(cd "$(dirname "$script")/../../../../../.." && pwd -P)"
+	record_web="$(provision_cross_process_tools "$codetracer_root")"
+	preserved_env+=("CODETRACER_RECORD_WEB_BIN=$record_web")
 	if [ -n "${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-}" ]; then
 		preserved_env+=("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")
 	fi
@@ -239,12 +267,16 @@ prepare_value_origin_fixtures() {
 }
 
 mode="${1:-all}"
+[ "$#" -gt 0 ] && shift
+if [ "$#" -gt 0 ] && [ "$mode" != blockchain ]; then
+	fail "fixture preparation mode '$mode' takes no arguments (got: $*)"
+fi
 case "$mode" in
 	traces)
 		prepare_trace_fixtures
 		;;
 	blockchain)
-		prepare_blockchain_fixtures
+		prepare_blockchain_fixtures "$@"
 		;;
 	value-origin)
 		prepare_value_origin_fixtures

@@ -9,6 +9,42 @@ on:
   pull_request:
     branches: [dev, main]
 
+# GITHUB CREDENTIALS
+#
+# wdio-integration fetches private metacraft-labs repositories hours after
+# setup: Cargo's git dependency on metacraft-labs/lldb-sys.rs, which
+# codetracer-native-backend's workspace patches in and which both the native
+# recorder's `build-ct-mcr` (its license FFI) and the native backend's
+# `just build` compile, ct-mcr's nimble dependencies, and Nix flake inputs.
+# setup-dev-env hands the job two credentials, both GitHub App installation
+# tokens that expire one hour after they are minted; the codetracer build
+# alone takes over two hours.
+#
+#   * Nix reads its credential from files under MCL_JOB_CREDENTIALS_DIR.
+#     Passing `app-id` / `app-private-key` to setup-dev-env starts its job
+#     credential broker, which re-mints that token before it expires and
+#     rewrites the files in place, so every `nix` invocation gets a live
+#     token however late it runs.
+#   * The Git CLI credential is an `http.https://github.com/metacraft-labs/
+#     .extraHeader` carried in GIT_CONFIG_* job variables, which the runner
+#     copies into a step when the step starts, so the broker cannot rotate
+#     it. `refresh-build-auth` re-mints it for the steps after it. Each phase
+#     that fetches over Git is therefore a step of its own that starts right
+#     after a refresh, and a phase that would make its last Git fetch more
+#     than about 55 minutes after its refresh is split at a natural boundary
+#     with a refresh before each part (setup-dev-env's README, "How long the
+#     job's Nix credential lives"). Run 45139083018 failed exactly this way:
+#     "Record test traces" built ct-mcr 1 h 41 min after the last refresh,
+#     and Cargo could not fetch lldb-sys.rs.
+#
+# The extraHeader reaches only the git CLI; Cargo's built-in libgit2 fetcher
+# ignores it and fails with `failed to authenticate when downloading
+# repository`. setup-dev-env leaves the transport to the consumer, so
+# CARGO_NET_GIT_FETCH_WITH_CLI is set for every job below, as
+# codetracer-native-backend's own workflows set it.
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
 jobs:
   build:
     # Runs on the NixOS eph-linux-x64 class using the repo's nix dev env, the
@@ -224,6 +260,7 @@ jobs:
             codetracer-ruby-recorder
             codetracer-python-recorder
             codetracer-js-recorder
+            codetracer-wasm-instrumenter
             codetracer-beam-recorder
             codetracer-native-recorder
             nim-stackable-hooks
@@ -282,6 +319,12 @@ jobs:
       # - starkware-libs/cairo: the Cairo corelib (CAIRO_CORELIB_DIR below);
       #   the workspace checks it out as cairo-corelib-vendor, a clone here
       #   lands at ../cairo.
+      # - codetracer-wasm-instrumenter (`ct-instrument`), with the JS
+      #   recorder's CLI build and codetracer's session-manager: the tools
+      #   codetracer's cross-process value-origin regenerator
+      #   (account-balance-with-wasm) records with. "Verify value-origin
+      #   fixture prerequisites" builds the three through codetracer's
+      #   scripts/provision-cross-process-recording.sh.
       # - reprobuild-packages: codetracer's repro.nim imports recipes from
       #   ../reprobuild-packages, so `repro exec .` in ../codetracer (the
       #   value-origin regenerators prepare-wdio-fixtures.sh runs there) cannot
@@ -319,17 +362,12 @@ jobs:
           nix build -L ".?submodules=1#codetracer"
           nix build -L ".?submodules=1#db-backend" -o result-db-backend
 
-      # The codetracer build above takes over two hours, and the Git CLI
-      # credential setup-dev-env installed is frozen into GIT_CONFIG_* from
-      # the job-start token, which expires after one hour (the broker renews
-      # only the Nix access-tokens, which a git+https fetch does not use;
-      # setup-dev-env README, "Which token each step is handed"). The
-      # native-backend build fetches the private lldb-sys.rs Cargo git
-      # dependency at evaluation time (builtins.fetchGit, which runs the
-      # `git` CLI with this job's Git configuration), so with the stale
-      # header it failed with "could not read Username for
-      # 'https://github.com'" 2 h 22 min after the token was minted (run
-      # 44688110742). Re-mint Git's token before the recorder builds.
+      # The codetracer build above takes over two hours, far past the
+      # one-hour life of the Git credential the job started with (see
+      # "GITHUB CREDENTIALS" at the top of this file). Re-mint it before the
+      # recorder builds; the native backend's lldb-sys.rs fetch failed with
+      # "could not read Username for 'https://github.com'" 2 h 22 min after
+      # the token was minted (run 44688110742).
       - name: Refresh build authentication
         uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
         with:
@@ -473,7 +511,7 @@ jobs:
           fi
 
       # Record test traces for standard languages (Python, Ruby, Rust, C, Go, Nim).
-      # This step runs inside the native-backend dev shell because:
+      # These steps run inside the native-backend dev shell because:
       #   - ct record → ct-native-replay build needs compilers (gcc, rustc, go, nim)
       #   - ct record → ct-native-replay record needs rr for native language replay
       # The extension's own dev shell only has Node.js/VS Code tooling.
@@ -486,6 +524,60 @@ jobs:
       # script), then record-test-traces.sh records with
       # missing prerequisites counted as failures. Running record-test-traces
       # alone recorded without ct-mcr or the Python recorder (run 44865999648).
+      #
+      # The two longest builds that fetch over Git, ct-mcr and
+      # ct-native-replay, run first, each in a step of its own right after a
+      # refresh (`just prepare-wdio-ct-mcr` / `prepare-wdio-native-replay`
+      # build exactly what prepare-wdio-traces would, which then finds them
+      # built). Run 45139083018 did all of it in one step and reached
+      # ct-mcr's lldb-sys.rs fetch 1 h 41 min after the last refresh. The dev
+      # shell is realised in a step of its own first: that took 23 minutes in
+      # the same run, and fetches only through Nix, whose credential the
+      # broker keeps live.
+      - name: Realise the native backend's dev shell
+        run: |
+          cd ../codetracer-native-backend
+          nix develop ".?submodules=1" --accept-flake-config -c true
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      # About 30 minutes on a cold runner; its lldb-sys.rs fetch came 29
+      # minutes in (run 45139083018), its nimble fetches after that.
+      - name: Build the native recorder (ct-mcr)
+        run: |
+          cd ../codetracer-native-backend
+          nix develop ".?submodules=1" --accept-flake-config -c bash -c "
+            cd '$GITHUB_WORKSPACE'
+            just prepare-wdio-ct-mcr
+          "
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Build the native backend (ct-native-replay)
+        run: |
+          cd ../codetracer-native-backend
+          nix develop ".?submodules=1" --accept-flake-config -c bash -c "
+            cd '$GITHUB_WORKSPACE'
+            just prepare-wdio-native-replay
+          "
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Record test traces
         run: |
           cd ../codetracer-native-backend
@@ -496,8 +588,8 @@ jobs:
 
       # Symlink rr, dlv, and gdb into COMBINED_BIN so ct-native-replay can
       # find them at replay time. The native-backend dev shell's shellHook
-      # creates symlinks at target/debug/{rr,dlv,gdb}. These were
-      # created during the "Record test traces" step's `nix develop`.
+      # creates symlinks at target/debug/{rr,dlv,gdb}; the steps above that
+      # enter that shell created them.
       - name: Symlink replay tools (rr, dlv, gdb)
         run: |
           COMBINED_BIN="$GITHUB_WORKSPACE/.ct-bin"
@@ -533,6 +625,17 @@ jobs:
           echo "COMBINED_BIN contents:"
           ls -la "$COMBINED_BIN"
 
+      # Each of the build and test phases below can fetch over Git (Nix
+      # git+https inputs of the recorders' flakes, Cargo and nimble
+      # dependencies), so each starts right after a refresh; see "GITHUB
+      # CREDENTIALS" at the top of this file.
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # The extension built from the codetracer sibling (CODETRACER_DIR,
       # default ../codetracer): its panel and host bundles, middleware, theme
       # and replay backend. The smoke suite then runs against that build and
@@ -545,17 +648,76 @@ jobs:
           CT_EXPECT_PANEL_BUNDLE: "1"
         run: dev-exec just test-wdio-smoke
 
-      - name: Prepare blockchain trace fixtures
-        run: dev-exec just prepare-wdio-blockchain-fixtures
+      # Thirteen fixtures, each recorded with a recorder built in its own dev
+      # shell: an hour on a warm host, so they are prepared in three parts.
+      # `just prepare-wdio-blockchain-fixtures` with no argument prepares all
+      # of them (test-wdio-deep below depends on that and finds them done).
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Prepare blockchain trace fixtures (MASM, Sway, Move, Solana)
+        run: dev-exec just prepare-wdio-blockchain-fixtures masm sway move solana
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Prepare blockchain trace fixtures (Aiken, Cadence, Cairo, Circom)
+        run: dev-exec just prepare-wdio-blockchain-fixtures aiken cadence cairo circom
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Prepare blockchain trace fixtures (Leo, PolkaVM, Solidity, Tolk, Stylus)
+        run: dev-exec just prepare-wdio-blockchain-fixtures leo polkavm solidity tolk stylus
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Verify value-origin fixture prerequisites
         run: dev-exec just prepare-wdio-value-origin-fixtures
 
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Run per-language smoke tests
         run: dev-exec just test-wdio-smoke-langs
 
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Run deep integration tests
         run: dev-exec just test-wdio-deep
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Run value-origin integration tests
         run: dev-exec just test-wdio-value-origin

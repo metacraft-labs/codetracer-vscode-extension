@@ -542,6 +542,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 CODETRACER_REPO="$(resolve_codetracer_root)"
 
+# With a component argument, build and link only that sibling binary and stop.
+# CI's wdio-integration job builds these two first, each in a step of its own
+# started right after its Git credential is refreshed, because each fetches
+# over Git (.github/workflows/ci.yml, "GITHUB CREDENTIALS"); the full run that
+# follows then finds them built. Without an argument, prepare everything.
+case "${1:-}" in
+"") ;;
+ct-mcr)
+	ensure_mcr_recorder_shim
+	ensure_native_recorder_shim
+	exit 0
+	;;
+native-replay)
+	ensure_native_replay_shim
+	exit 0
+	;;
+*)
+	fail "unknown component '$1' (expected ct-mcr or native-replay, or no argument for everything)"
+	;;
+esac
+
 build_codetracer_if_needed
 ensure_codetracer_runtime_assets
 ensure_python_recorder_installed
