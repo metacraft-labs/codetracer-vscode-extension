@@ -52,6 +52,9 @@ jobs:
       - name: Unit-test WDIO helpers
         run: dev-exec just test-wdio-helpers
 
+      - name: Test trace-recording progress output
+        run: dev-exec just test-record-test-traces
+
   windows-build:
     # CIP-5: windows-latest → the Windows runner class (DIY setup-node/setup-just
     # is Windows-native here).

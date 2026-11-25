@@ -127,6 +127,52 @@ ct_record_command_text() {
 		bash "$REPO_ROOT/.ct-bin" "$CT" "$1" "$2"
 }
 
+# ---------------------------------------------------------------------------
+# codetracer's dev env, activated once and visibly
+# ---------------------------------------------------------------------------
+# Every recording runs inside `repro exec "$CODETRACER_PATH"`, and its output
+# is captured (record_trace needs it to find the recording in the CodeTracer
+# store). The first `repro exec` also activates codetracer's dev env, which on
+# a cold Nix store realises that whole shell and can take hours. Done inside
+# the capture, that wait printed nothing at all, so a slow CI step could not
+# be told apart from a hung one.
+#
+# So the env is activated on its own before the first recording, with its
+# output streamed rather than captured, and the step is announced and timed.
+# It runs lazily: a run that records nothing (every trace already present)
+# never activates the env.
+#
+#   _ct_env_state: "" = not attempted yet, "ready", or "failed".
+_ct_env_state=""
+
+ct_env_command_text() {
+	format_command repro exec "$CODETRACER_PATH" -- true
+}
+
+ensure_codetracer_env() {
+	case "$_ct_env_state" in
+		ready) return 0 ;;
+		failed) return 1 ;;
+	esac
+
+	local started
+	local status=0
+	started="$(date +%s)"
+	echo "  ACTIVATING codetracer's dev env (the first activation on a cold Nix store builds the whole shell) ..."
+	echo "    command: $(ct_env_command_text)"
+	# Not captured: whatever repro and nix print reaches the log as it is
+	# printed. stdin is closed so activation cannot wait on a prompt.
+	repro exec "$CODETRACER_PATH" -- true </dev/null || status=$?
+	if [ "$status" -eq 0 ]; then
+		_ct_env_state="ready"
+		echo "    codetracer's dev env is ready after $(($(date +%s) - started))s"
+		return 0
+	fi
+	_ct_env_state="failed"
+	echo "    FAIL: activating codetracer's dev env exited $status after $(($(date +%s) - started))s; its output is above"
+	return 1
+}
+
 run_ct_record() {
 	local trace_dir="$1"
 	local program="$2"
@@ -212,6 +258,12 @@ record_trace() {
 
 	if [ ! -f "$program" ] && [ ! -d "$program" ]; then
 		skip_or_fail "$name" "program not found: $program"
+		return 0
+	fi
+
+	if ! ensure_codetracer_env; then
+		echo "  FAIL $name (codetracer's dev env could not be activated)"
+		_failed=$((_failed + 1))
 		return 0
 	fi
 

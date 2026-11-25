@@ -277,6 +277,13 @@ test-stylus-fixture:
 test-prepare-wdio-codetracer-bin:
     bash scripts/test-prepare-wdio-codetracer-bin.sh
 
+# Runs the real trace-recording script against a staged workspace whose
+# codetracer dev env activates slowly (scripts/test-record-test-traces.sh).
+# (`just --list` shows only the last comment line, so it is the summary.)
+# Check that the dev-env activation's output reaches the log while it runs.
+test-record-test-traces:
+    bash scripts/test-record-test-traces.sh
+
 prepare-wdio-value-origin-fixtures:
     scripts/prepare-wdio-fixtures.sh value-origin
 
@@ -346,7 +353,7 @@ test-wdio: prepare-wdio-fixtures
     just _xvfb-run "npx wdio run wdio.conf.ts"
 
 # Run every repo-local test/check entrypoint; full WDIO needs siblings/fixtures.
-test: test-dev-shell lint compile-ts compile-wdio test-wdio-helpers test-stylus-fixture test-prepare-wdio-codetracer-bin test-vscode test-vscode-control test-wdio
+test: test-dev-shell lint compile-ts compile-wdio test-wdio-helpers test-stylus-fixture test-prepare-wdio-codetracer-bin test-record-test-traces test-vscode test-vscode-control test-wdio
 
 # Evaluate the locked development environment on every advertised platform.
 test-dev-shell:
