@@ -416,6 +416,11 @@
         "key": "ctrl+shift+o",
         "mac": "cmd+shift+o",
         "when": "codetracer:active"
+      },
+      {
+        "command": "workbench.action.debug.stepBack",
+        "key": "shift+f10",
+        "when": "codetracer:active && inDebugMode && debugState == 'stopped'"
       }
     ],
     "viewsContainers": {

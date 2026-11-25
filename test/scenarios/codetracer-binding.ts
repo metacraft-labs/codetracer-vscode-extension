@@ -23,7 +23,8 @@
 //   * the conditions it can detect (`replay-idle`);
 //   * the binding resolver: the chord VS Code binds to an operation is the
 //     one this extension contributes (package.json `contributes.keybindings`)
-//     for the command that performs it; with none, `null`.
+//     for the command that performs it, or VS Code's own default key for one
+//     of its debug commands (F10, F11, Shift+F11, F5); with none, `null`.
 //
 // Input never goes through here: the arm delivers it as W3C WebDriver Actions
 // (real key, pointer and wheel input), and its lint refuses script injection
@@ -874,7 +875,42 @@ async function openRecording(ctx: Ctx, launched: any, args: Record<string, unkno
     const front = !last || last.activeTab?.label === all[all.length - 1].title;
     return misplaced.length === 0 && front;
   }, wanted);
-  await waitFor(`the panels ${panes.join(", ")} did not open beside the source`, arrange, 60_000);
+  // `layout: split`: every panel in view at once, as the desktop shows its
+  // panes — the first beside the source, each next one in a group of its own
+  // below the one before.
+  const split = async () => b.executeWorkbench(async (vscode: any, all: Array<{ command: string; title: string }>) => {
+    const exec = (c: string, ...a: unknown[]) => vscode.commands.executeCommand(c, ...a);
+    const groupOf = (title: string) => vscode.window.tabGroups.all.find((g: any) => g.tabs.some((t: any) => t.label === title));
+    const nth = ["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth"];
+    const activate = async (title: string) => {
+      const g = groupOf(title);
+      if (!g || g.viewColumn > nth.length) return;
+      await exec(`workbench.action.focus${nth[g.viewColumn - 1]}EditorGroup`);
+      await exec("workbench.action.openEditorAtIndex", g.tabs.findIndex((t: any) => t.label === title));
+    };
+    const alone = (title: string) => {
+      const g = groupOf(title);
+      return !!g && g.viewColumn !== 1 && g.tabs.length === 1;
+    };
+    for (const [i, p] of all.entries()) {
+      if (alone(p.title)) continue;
+      if (!groupOf(p.title)) await exec(p.command);
+      await activate(p.title);
+      if (i === 0) {
+        await exec("workbench.action.moveEditorToRightGroup");
+      } else {
+        // into the group of the panel before it (the last one), then below it
+        if (groupOf(p.title) !== groupOf(all[i - 1].title)) {
+          await exec("workbench.action.moveEditorToLastGroup");
+          await activate(p.title);
+        }
+        await exec("workbench.action.moveEditorToBelowGroup");
+      }
+    }
+    return all.every((p) => alone(p.title));
+  }, wanted);
+  await waitFor(`the panels ${panes.join(", ")} did not open beside the source`,
+    args.layout === "split" ? split : arrange, 60_000);
   phase("panes open");
   // the keyboard in the source, where a user starts
   await showStop();
@@ -890,6 +926,21 @@ const OPERATIONS: Record<string, string> = {
   "scratchpad.add-value": "ct-vscode.addToScratchpad",
   "history.back": "ct-vscode.historyBack",
   "history.forward": "ct-vscode.historyForward",
+  // the debugger's moves are VS Code's own commands on the debug session
+  "debugger.step-over": "workbench.action.debug.stepOver",
+  "debugger.step-into": "workbench.action.debug.stepInto",
+  "debugger.step-out": "workbench.action.debug.stepOut",
+  "debugger.continue": "workbench.action.debug.continue",
+  "debugger.reverse-step-over": "workbench.action.debug.stepBack",
+};
+
+/** VS Code's own default keybindings for the commands above that the
+ *  extension does not contribute a key for (VS Code's `Run` menu shows them). */
+const BUILTIN_KEYS: Record<string, string> = {
+  "workbench.action.debug.stepOver": "f10",
+  "workbench.action.debug.stepInto": "f11",
+  "workbench.action.debug.stepOut": "shift+f11",
+  "workbench.action.debug.continue": "f5",
 };
 
 /** VS Code's key spelling (`ctrl+shift+o`, `cmd+k cmd+t`) in the format's. */
@@ -986,13 +1037,16 @@ const binding = {
     if (!command) return null;
     const pkg = JSON.parse(fs.readFileSync(path.join(extRoot, "package.json"), "utf-8"));
     const kb = (pkg.contributes?.keybindings ?? []).find((k: any) => k.command === command);
-    if (!kb) return null;
+    if (!kb) return BUILTIN_KEYS[command] ? formatChord(BUILTIN_KEYS[command]) : null;
     const key = process.platform === "darwin" ? (kb.mac ?? kb.key)
       : process.platform === "win32" ? (kb.win ?? kb.key) : (kb.linux ?? kb.key);
     return key ? formatChord(key) : null;
   },
 
   async anchor(_ctx: Ctx, n: any, anchor: string): Promise<{ x: number; y: number } | undefined> {
+    // a call's name: the row's geometry is its `.call-text`, the name a
+    // press on which goes to the call
+    if (anchor === "name" && n.role === "call") return { x: n.x + Math.min(12, n.w / 2), y: n.y + n.h / 2 };
     const a = n.anchors;
     if (!a) return undefined;
     if (anchor === "gutter") return a.gutter;
