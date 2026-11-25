@@ -344,6 +344,40 @@ jobs:
       #   value-origin regenerators prepare-wdio-fixtures.sh runs there) cannot
       #   enter codetracer's environment without it.
 
+      # codetracer-evm-recorder's dev shell, which the Solidity fixture below
+      # enters, starts only in a checkout whose Git hook samples are the ones
+      # its declared Git writes. The clone above was made by the runner's Git,
+      # so the shell refuses it ("modified pre-push hook body or mode:
+      # pre-push.sample"). As in that repository's own cross-repo workflow
+      # (its .github/workflows/cross-repo-tests.yml), the clone is therefore
+      # bootstrap-only: the recorder's source-bound `prepare-ci-checkout` app
+      # creates a fresh checkout of the same commit with its declared Git, in a
+      # namespace exclusive to this run and attempt, beside the siblings. The
+      # app refuses an existing namespace, a dirty bootstrap or one at another
+      # commit, and leaves the bootstrap unchanged.
+      #
+      # The revision is the bootstrap's HEAD, which setup-dev-env checked out
+      # at this commit's repro.lock pin. The new checkout's Cargo path
+      # dependencies and recipe import name ../codetracer-trace-format and
+      # ../codetracer-trace-format-nim, so the namespace receives copies of
+      # those two siblings as cloned above (the recorder's recipe refuses a
+      # symlinked source root). EVM_RECORDER_DIR then routes
+      # scripts/prepare-solidity-fixture.sh to the new checkout.
+      - name: Create the EVM recorder's declared checkout
+        run: |
+          siblings="$(cd "$GITHUB_WORKSPACE/.." && pwd -P)"
+          bootstrap="$siblings/codetracer-evm-recorder"
+          namespace="evm-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-vscode-wdio-linux-x64"
+          event="$(git -C "$bootstrap" rev-parse HEAD)"
+          cd "$bootstrap"
+          nix run .#prepare-ci-checkout -- "$bootstrap" \
+            "$siblings/$namespace/codetracer-evm-recorder" "$event" \
+            "$siblings/$namespace" "$namespace"
+          for peer in codetracer-trace-format codetracer-trace-format-nim; do
+            cp -a "$siblings/$peer" "$siblings/$namespace/$peer"
+          done
+          echo "EVM_RECORDER_DIR=$siblings/$namespace/codetracer-evm-recorder" >> "$GITHUB_ENV"
+
       # `repro` for the steps below: record-test-traces.sh records every trace
       # through `repro exec ../codetracer`, and prepare-wdio-codetracer-bin.sh,
       # prepare-wdio-fixtures.sh and prepare-stylus-fixture.sh enter sibling
