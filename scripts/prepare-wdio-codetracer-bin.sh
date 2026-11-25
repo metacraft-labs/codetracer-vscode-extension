@@ -75,6 +75,11 @@ find_first_candidate() {
 	return 1
 }
 
+# Run a command in a sibling's development environment. A shell command given
+# to it must be a plain `bash -c`, not a login shell: a NixOS login shell
+# resets PATH to the system profile when started from a systemd service (the
+# CI runner), discarding the environment `repro exec` set up (see
+# CT_RECORD_SCRIPT in record-test-traces.sh).
 run_in_repo_env() {
 	local repo="$1"
 	shift
@@ -116,7 +121,7 @@ ensure_python_recorder_installed() {
 	fi
 
 	echo "Installing codetracer_python_recorder into CodeTracer venv with sibling dev shell ..." >&2
-	run_in_repo_env "$recorder_repo" bash -lc \
+	run_in_repo_env "$recorder_repo" bash -c \
 		'export VIRTUAL_ENV="$1"; export PYO3_PYTHON="$2"; export PATH="$1/bin:$PATH"; exec maturin develop --manifest-path codetracer-python-recorder/Cargo.toml --features integration-test' \
 		bash "$venv" "$python"
 
@@ -175,13 +180,31 @@ ensure_nim_compiler_shim() {
 	if [ -x "$nim_repo/bin/nim" ]; then
 		nim_exe="$nim_repo/bin/nim"
 	elif command -v repro >/dev/null 2>&1 && { [ -f "$nim_repo/repro.nim" ] || [ -f "$nim_repo/.envrc" ]; }; then
-		nim_exe="$(run_in_repo_env "$nim_repo" bash -lc 'command -v nim' 2>/dev/null || true)"
+		nim_exe="$(run_in_repo_env "$nim_repo" bash -c 'command -v nim' 2>/dev/null || true)"
 	fi
 
 	if [ -n "$nim_exe" ] && [ -x "$nim_exe" ]; then
 		mkdir -p "$REPO_ROOT/.ct-bin"
 		replace_symlink "$nim_exe" "$REPO_ROOT/.ct-bin/nim"
 	fi
+}
+
+# Write .ct-bin/codetracer-js-recorder as a wrapper running the sibling's
+# locally built CLI ($1). An earlier run may have left a symlink there to the
+# sibling's nix package (result/bin/...); once that result link is gone the
+# symlink dangles, and a redirect writes through it into the missing
+# directory and fails. The old entry is removed first, so the wrapper is
+# always a regular file of this repository's .ct-bin.
+write_js_recorder_wrapper() {
+	local local_bin="$1"
+	local wrapper="$REPO_ROOT/.ct-bin/codetracer-js-recorder"
+
+	rm -f "$wrapper"
+	cat >"$wrapper" <<EOF
+#!/usr/bin/env bash
+exec node "$local_bin" "\$@"
+EOF
+	chmod +x "$wrapper"
 }
 
 ensure_js_recorder_shim() {
@@ -199,11 +222,7 @@ ensure_js_recorder_shim() {
 	fi
 
 	if [ -f "$local_bin" ] && [ -f "$native_addon" ]; then
-		cat >"$REPO_ROOT/.ct-bin/codetracer-js-recorder" <<EOF
-#!/usr/bin/env bash
-exec node "$local_bin" "\$@"
-EOF
-		chmod +x "$REPO_ROOT/.ct-bin/codetracer-js-recorder"
+		write_js_recorder_wrapper "$local_bin"
 		return 0
 	fi
 
@@ -220,7 +239,7 @@ EOF
 
 	if [ ! -f "$local_bin" ] || [ ! -f "$native_addon" ]; then
 		echo "codetracer-js-recorder CLI missing; building sibling JS recorder with repro exec ..." >&2
-		run_in_repo_env "$recorder_repo" bash -lc '
+		run_in_repo_env "$recorder_repo" bash -c '
 			if [ ! -d node_modules ]; then
 				npm install
 			fi
@@ -235,29 +254,51 @@ EOF
 	fi
 
 	if [ -f "$local_bin" ] && [ -f "$native_addon" ]; then
-		cat >"$REPO_ROOT/.ct-bin/codetracer-js-recorder" <<EOF
-#!/usr/bin/env bash
-exec node "$local_bin" "\$@"
-EOF
-		chmod +x "$REPO_ROOT/.ct-bin/codetracer-js-recorder"
+		write_js_recorder_wrapper "$local_bin"
 	fi
 }
 
 ensure_ruby_recorder_shim() {
 	local recorder_repo="$CODETRACER_REPO/../codetracer-ruby-recorder"
-	local package_bin="$recorder_repo/result/bin/codetracer-ruby-recorder"
-	local source_bin="$recorder_repo/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder"
+	local gem_dir="$recorder_repo/gems/codetracer-ruby-recorder"
+	local source_bin="$gem_dir/bin/codetracer-ruby-recorder"
+	# The native tracer the source shim loads (lib/codetracer/native.rb
+	# requires it from here, named with Ruby's DLEXT: `.so` on Linux,
+	# `.bundle` on macOS); it exists only once the sibling's `just build`
+	# (build-extension) has run.
+	local native_ext="$gem_dir/ext/native_tracer/target/release/codetracer_ruby_recorder"
+	local package_bin
 
 	[ -d "$recorder_repo" ] || return 0
 	mkdir -p "$REPO_ROOT/.ct-bin"
 
-	if [ -x "$package_bin" ]; then
-		replace_symlink "$package_bin" "$REPO_ROOT/.ct-bin/codetracer-ruby-recorder"
-		return 0
-	fi
+	# A packaged recorder (`nix build .#codetracer-ruby-recorder`) carries its
+	# native tracer. `result` is nix's default out-link; CI's wdio-integration
+	# job builds with `-o result-ruby-recorder` (.github/workflows/ci.yml), and
+	# must not have that package replaced by the source shim below.
+	for package_bin in \
+		"$recorder_repo/result/bin/codetracer-ruby-recorder" \
+		"$recorder_repo/result-ruby-recorder/bin/codetracer-ruby-recorder"; do
+		if [ -x "$package_bin" ]; then
+			replace_symlink "$package_bin" "$REPO_ROOT/.ct-bin/codetracer-ruby-recorder"
+			return 0
+		fi
+	done
 
 	if [ ! -x "$source_bin" ]; then
 		return 0
+	fi
+
+	# The source shim is a checked-in, always-executable Ruby script, so its
+	# presence says nothing about whether it can record: without the native
+	# tracer `ct record` of a Ruby program fails with "native tracer
+	# unavailable". Build the extension the way the sibling defines it.
+	if [ ! -f "$native_ext.so" ] && [ ! -f "$native_ext.bundle" ]; then
+		echo "codetracer-ruby-recorder native tracer missing; building sibling recorder with repro exec ..." >&2
+		run_in_repo_env "$recorder_repo" just build
+	fi
+	if [ ! -f "$native_ext.so" ] && [ ! -f "$native_ext.bundle" ]; then
+		fail "codetracer-ruby-recorder native tracer is still missing after 'just build': $native_ext.{so,bundle}"
 	fi
 
 	replace_symlink "$source_bin" "$REPO_ROOT/.ct-bin/codetracer-ruby-recorder"
@@ -277,6 +318,23 @@ ensure_native_replay_shim() {
 		replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-native-replay"
 		replace_symlink "$replay" "$REPO_ROOT/.ct-bin/ct-rr-support"
 	fi
+	ensure_native_replay_tools "$backend_repo/target/debug"
+}
+
+# The debuggers ct-native-replay drives an RR recording with, from the native
+# backend's dev shell (its shellHook links them into target/debug). It finds
+# `rr` beside itself, but looks `dlv` (Go recordings) and `gdb` up on PATH, so
+# they are linked into .ct-bin, which the WDIO runs put first on PATH. CI's
+# wdio-integration job does the same in its "Symlink replay tools" step.
+ensure_native_replay_tools() {
+	local tools_dir="$1"
+	local tool
+
+	for tool in rr dlv gdb; do
+		if [ -x "$tools_dir/$tool" ]; then
+			replace_symlink "$tools_dir/$tool" "$REPO_ROOT/.ct-bin/$tool"
+		fi
+	done
 }
 
 ensure_native_recorder_shim() {
@@ -315,6 +373,8 @@ build_codetracer_if_needed() {
 		"DAP backend" \
 		"$CODETRACER_REPO/result/bin/db-backend" \
 		"$CODETRACER_REPO/result/bin/replay-server" \
+		"$CODETRACER_REPO/result-db-backend/bin/replay-server" \
+		"$CODETRACER_REPO/result-db-backend/bin/db-backend" \
 		"$CODETRACER_REPO/src/db-backend/target/debug/db-backend" \
 		"$CODETRACER_REPO/src/db-backend/target/debug/replay-server" \
 		"$CODETRACER_REPO/src/build-debug/bin/db-backend" \
@@ -358,6 +418,8 @@ resolve_dap_backend_binary() {
 		"DAP backend" \
 		"$CODETRACER_REPO/result/bin/db-backend" \
 		"$CODETRACER_REPO/result/bin/replay-server" \
+		"$CODETRACER_REPO/result-db-backend/bin/replay-server" \
+		"$CODETRACER_REPO/result-db-backend/bin/db-backend" \
 		"$CODETRACER_REPO/src/db-backend/target/debug/db-backend" \
 		"$CODETRACER_REPO/src/db-backend/target/debug/replay-server" \
 		"$CODETRACER_REPO/src/build-debug/bin/db-backend" \
@@ -479,6 +541,27 @@ NODE
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 CODETRACER_REPO="$(resolve_codetracer_root)"
+
+# With a component argument, build and link only that sibling binary and stop.
+# CI's wdio-integration job builds these two first, each in a step of its own
+# started right after its Git credential is refreshed, because each fetches
+# over Git (.github/workflows/ci.yml, "GITHUB CREDENTIALS"); the full run that
+# follows then finds them built. Without an argument, prepare everything.
+case "${1:-}" in
+"") ;;
+ct-mcr)
+	ensure_mcr_recorder_shim
+	ensure_native_recorder_shim
+	exit 0
+	;;
+native-replay)
+	ensure_native_replay_shim
+	exit 0
+	;;
+*)
+	fail "unknown component '$1' (expected ct-mcr or native-replay, or no argument for everything)"
+	;;
+esac
 
 build_codetracer_if_needed
 ensure_codetracer_runtime_assets

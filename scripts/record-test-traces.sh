@@ -120,20 +120,36 @@ print_record_failure() {
 	printf '%s\n' "$output" | print_indented
 }
 
+# The `ct record` invocation for a trace directory, a program and, optionally,
+# a native recording backend (`ct record --backend rr|mcr|ttd`; empty means
+# ct's default, MCR). confutils requires the `=` form for named options. The
+# backend is the fifth positional argument of the inner script, so an empty
+# one adds no option at all.
+#
+# The script runs under a plain `bash -c`, never a login shell (`bash -l`). A
+# login shell sources /etc/profile, and on NixOS that re-runs the system
+# set-environment whenever __NIXOS_SET_ENVIRONMENT_DONE is empty, which it is
+# for a process started by a systemd service such as the CI runner. That
+# replaces PATH with the system profile and throws away everything
+# `repro exec` put on it, so `ct` found no ruby, rustc, gcc, go or nim (run
+# 44865999648: every native and Ruby recording failed with "not found").
+CT_RECORD_SCRIPT='PATH="$1:$PATH"; if [ -x "$1/ct-mcr" ]; then export CODETRACER_CT_MCR_PATH="$1/ct-mcr"; fi; if [ -n "$5" ]; then exec "$2" record "--backend=$5" "-o=$3" "$4"; fi; exec "$2" record "-o=$3" "$4"'
+
 ct_record_command_text() {
 	format_command \
 		repro exec "$CODETRACER_PATH" -- \
-		bash -lc 'PATH="$1:$PATH"; if [ -x "$1/ct-mcr" ]; then export CODETRACER_CT_MCR_PATH="$1/ct-mcr"; fi; exec "$2" record "-o=$3" "$4"' \
-		bash "$REPO_ROOT/.ct-bin" "$CT" "$1" "$2"
+		bash -c "$CT_RECORD_SCRIPT" \
+		bash "$REPO_ROOT/.ct-bin" "$CT" "$1" "$2" "${3:-}"
 }
 
 run_ct_record() {
 	local trace_dir="$1"
 	local program="$2"
+	local backend="${3:-}"
 
 	repro exec "$CODETRACER_PATH" -- \
-		bash -lc 'PATH="$1:$PATH"; if [ -x "$1/ct-mcr" ]; then export CODETRACER_CT_MCR_PATH="$1/ct-mcr"; fi; exec "$2" record "-o=$3" "$4"' \
-		bash "$REPO_ROOT/.ct-bin" "$CT" "$trace_dir" "$program"
+		bash -c "$CT_RECORD_SCRIPT" \
+		bash "$REPO_ROOT/.ct-bin" "$CT" "$trace_dir" "$program" "$backend"
 }
 
 configure_nim_compiler() {
@@ -154,7 +170,7 @@ configure_nim_compiler() {
 	elif command -v repro >/dev/null 2>&1 && { [ -f "$nim_repo/repro.nim" ] || [ -f "$nim_repo/.envrc" ]; }; then
 		nim_exe="$(
 			cd "$nim_repo" &&
-				repro exec . -- bash -lc 'command -v nim' 2>/dev/null || true
+				repro exec . -- bash -c 'command -v nim' 2>/dev/null || true
 		)"
 	fi
 
@@ -194,9 +210,12 @@ use_existing_trace_if_ready() {
 	return 1
 }
 
+# record_trace NAME PROGRAM [BACKEND]: BACKEND is passed to `ct record
+# --backend` (see run_ct_record); omitted, ct's default backend records.
 record_trace() {
 	local name="$1"
 	local program="$2"
+	local backend="${3:-}"
 	local trace_dir="$TRACES_DIR/$name"
 
 	# Check if trace already exists (skip unless FORCE=1).
@@ -225,8 +244,8 @@ record_trace() {
 	# positional argument).
 	local ct_output
 	local command_text
-	command_text="$(ct_record_command_text "$trace_dir" "$program")"
-	if ct_output="$(run_ct_record "$trace_dir" "$program" 2>&1)"; then
+	command_text="$(ct_record_command_text "$trace_dir" "$program" "$backend")"
+	if ct_output="$(run_ct_record "$trace_dir" "$program" "$backend" 2>&1)"; then
 		# Verify that ct produced trace metadata in the target directory.
 		# DB-based traces write trace_metadata.json; rr-based traces write
 		# trace_db_metadata.json.
@@ -255,7 +274,7 @@ record_trace() {
 # ---------------------------------------------------------------------------
 LANGUAGES=("$@")
 if [ ${#LANGUAGES[@]} -eq 0 ]; then
-	LANGUAGES=(python ruby rust c go nim beam)
+	LANGUAGES=(python python-panels python-scratchpad ruby rust c go nim beam)
 fi
 
 configure_nim_compiler
@@ -282,6 +301,30 @@ for lang in "${LANGUAGES[@]}"; do
 				fi
 			else
 				skip_or_fail "python" "codetracer-python-recorder not available"
+			fi
+			;;
+		python-panels)
+			# A recording longer than one window of the Call Trace and the Event
+			# Log, for the panel scenarios in test/scenarios/panels/.
+			if use_existing_trace_if_ready "python-panels"; then
+				continue
+			fi
+			if [ -n "${CODETRACER_PYTHON_RECORDER_PRESENT:-}" ]; then
+				record_trace "python-panels" "$REPO_ROOT/test/wdio/programs/python_panels/main.py"
+			else
+				skip_or_fail "python-panels" "codetracer-python-recorder not available"
+			fi
+			;;
+		python-scratchpad)
+			# A short recording with a list local one Call Trace row away, for
+			# the "Add to Scratchpad" scenario (test/scenarios/panels/).
+			if use_existing_trace_if_ready "python-scratchpad"; then
+				continue
+			fi
+			if [ -n "${CODETRACER_PYTHON_RECORDER_PRESENT:-}" ]; then
+				record_trace "python-scratchpad" "$REPO_ROOT/test/wdio/programs/python_scratchpad/main.py"
+			else
+				skip_or_fail "python-scratchpad" "codetracer-python-recorder not available"
 			fi
 			;;
 		ruby)
@@ -331,10 +374,17 @@ for lang in "${LANGUAGES[@]}"; do
 			if use_existing_trace_if_ready "go-sudoku"; then
 				continue
 			fi
+			# Recorded with RR, as codetracer's own Go sudoku GUI test is. A
+			# Go program always runs several threads, and CodeTracer refuses
+			# to replay an MCR recording of more than one thread until MCR
+			# can replay multi-threaded processes ("recorded N threads; a
+			# multi-threaded recording needs multi-threaded emulator
+			# replay"). `ct record --backend rr` is the supported Linux
+			# path that replays it.
 			if [ -n "${CODETRACER_NATIVE_TEST_PROGRAMS_PRESENT:-}" ]; then
-				record_trace "go-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/go/sudoku_solver/sudoku.go"
+				record_trace "go-sudoku" "$CODETRACER_NATIVE_TEST_PROGRAMS_PATH/go/sudoku_solver/sudoku.go" rr
 			elif [ -f "$CODETRACER_PATH/test-programs/go_sudoku_solver/sudoku.go" ]; then
-				record_trace "go-sudoku" "$CODETRACER_PATH/test-programs/go_sudoku_solver/sudoku.go"
+				record_trace "go-sudoku" "$CODETRACER_PATH/test-programs/go_sudoku_solver/sudoku.go" rr
 			else
 				skip_or_fail "go" "test program not found"
 			fi

@@ -17,12 +17,13 @@ EXTENSION_DIR="$(dirname "$SCRIPT_DIR")"
 FIXTURE_DIR="$EXTENSION_DIR/test/fixtures/stylus-fund-trace"
 
 # Locate the codetracer repo (sibling directory)
-CODETRACER_DIR="${CODETRACER_DIR:-$(cd "$EXTENSION_DIR/../codetracer" 2>/dev/null && pwd)}"
+CODETRACER_DIR="${CODETRACER_DIR:-$EXTENSION_DIR/../codetracer}"
 if [ ! -d "$CODETRACER_DIR/src/db-backend" ]; then
   echo "ERROR: codetracer repo not found at $CODETRACER_DIR"
   echo "Set CODETRACER_DIR to the path of the codetracer repository."
   exit 1
 fi
+CODETRACER_DIR="$(cd "$CODETRACER_DIR" && pwd)"
 
 echo "=== Preparing Stylus trace fixture ==="
 echo "  CodeTracer repo: $CODETRACER_DIR"
@@ -42,27 +43,26 @@ if [ ! -f "$CODETRACER_DIR/repro.nim" ] && [ ! -f "$CODETRACER_DIR/.envrc" ]; th
   exit 1
 fi
 
-repro exec "$CODETRACER_DIR" -- bash -c '
+# A fresh destination proves this invocation produced the container. Keep the
+# previous usable fixture until generation succeeds, and clean up on failure.
+mkdir -p "$FIXTURE_DIR"
+STAGING_DIR="$(mktemp -d "$FIXTURE_DIR/.prepare-XXXXXX")"
+trap 'rm -rf "$STAGING_DIR"' EXIT
+# The child shell expands its own positional argument after entering the environment.
+# shellcheck disable=SC2016
+repro exec "$CODETRACER_DIR" -- env STYLUS_FIXTURE_OUTPUT_DIR="$STAGING_DIR" bash -c '
   set -euo pipefail
   cd "$1/src/db-backend"
   cargo test --test stylus_fixture_rebuild -- --ignored --nocapture rebuild_stylus_ctfs_fixture
 ' _ "$CODETRACER_DIR"
 
-SOURCE_FIXTURE_DIR="$CODETRACER_DIR/src/db-backend/tests/fixtures/stylus-fund-trace"
-SOURCE_CT="$SOURCE_FIXTURE_DIR/stylus_fund_tracking_demo.ct"
-if [ ! -f "$SOURCE_CT" ]; then
-  echo "ERROR: CodeTracer Stylus fixture generation did not produce $SOURCE_CT"
+GENERATED_CT="$STAGING_DIR/stylus_fund_tracking_demo.ct"
+if [ ! -s "$GENERATED_CT" ]; then
+  echo "ERROR: CodeTracer Stylus fixture generation did not produce a nonempty $GENERATED_CT"
   exit 1
 fi
-
-rm -rf "$FIXTURE_DIR"
-mkdir -p "$FIXTURE_DIR"
-cp -a "$SOURCE_FIXTURE_DIR/." "$FIXTURE_DIR/"
-
-if [ -z "$(find "$FIXTURE_DIR" -maxdepth 1 -name '*.ct' -type f -print -quit)" ]; then
-  echo "ERROR: Fixture generation failed — no CTFS bundle (*.ct) found in $FIXTURE_DIR"
-  exit 1
-fi
+mv "$GENERATED_CT" "$FIXTURE_DIR/stylus_fund_tracking_demo.ct"
+rm -rf "$STAGING_DIR"
 
 echo ""
 echo "=== Stylus trace fixture ready ==="

@@ -162,17 +162,15 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
     // output: step at line 2 has ``vars=[a]``, line 3 ``vars=[b]``,
     // line 4 ``vars=[sum_val]``, line 7 (the return tuple) ``vars=[]``).
     //
-    // The recorder also emits a leading ``sekAbsoluteStep`` at line 1
-    // for main BEFORE main's actual body, so the initial DAP position
-    // is ``main:1`` (not ``main:11`` where ``compute()`` is invoked).
-    // A bare ``stepIn`` from line 1 has nothing to step into — it
-    // just advances to ``main:10``.  We must first walk to the
-    // ``compute()`` call site at line 11, *then* stepIn to enter
-    // compute, then advance one more step so the debugger settles on
-    // ``compute:2`` where ``a`` is bound.
-    await session.stepOver(2000) // step #1 (main:1) → #2 (main:10)
-    await session.stepOver(2000) // step #2 (main:10) → #3 (main:11 — compute() call site)
-    const stepInLoc = await session.stepIn(3000) // step #3 → #5 (compute:1 function decl)
+    // Replay starts at main's declaration (line 10), skipping the
+    // recorder's synthetic root. Step over once to the call site,
+    // then enter compute. A second step-over here would run the entire
+    // call to the trace's final line 7, leaving no successor to test.
+    expect((await session.currentLocation()).line).toBe(10)
+    const callSite = await session.stepOver(2000)
+    expect(callSite.line).toBe(11)
+    const stepInLoc = await session.stepIn(3000)
+    expect(stepInLoc.line).toBe(1)
     console.log('[Cairo] Stepped into:', JSON.stringify(stepInLoc))
     // One more stepOver lands at compute:2 where ``let a: felt252 = 10;``
     // is bound and the Step record's ``vars`` field becomes
@@ -184,8 +182,9 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
     // additional stepOver would drop ``a`` from the live payload.
     // The follow-on ``performs multiple step-over operations and
     // changes line`` block does its own 5 stepOvers from this position
-    // through lines 3..7 (4 unique additional lines).
+    // through lines 3..7 (5 unique additional lines).
     const aLoc = await session.stepOver(2000)
+    expect(aLoc.line).toBe(2)
     console.log('[Cairo] Settled at:', JSON.stringify(aLoc))
 
     const result = await session.loadLocals({ lang: 'Cairo', countBudget: 100, depthLimit: 3 })
@@ -223,6 +222,7 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
     // After the locals test, we should already be inside compute().
     // Record current position to include in the set of visited lines.
     const current = await session.currentLocation()
+    expect(current.line).toBe(2)
     console.log('[Cairo] Pre-step location:', JSON.stringify(current))
 
     const locations: Array<{ file: string; line: number }> = [current]
@@ -232,7 +232,8 @@ describe('CodeTracer Extension - Cairo Deep Test', () => {
       locations.push(loc)
       // Each step should land in a source file with a valid line
       expect(loc.file.length).toBeGreaterThan(0)
-      expect(loc.line).toBeGreaterThan(0)
+      expect(loc.file).toBe(current.file)
+      expect(loc.line).toBe(i + 3)
     }
 
     writeDiag('cairo-deep-multi-step.json', locations)

@@ -13,6 +13,11 @@
  * records a Solana BPF program's process_instruction() function which
  * computes arithmetic on u64 values and emits a log message via msg!.
  *
+ * The recording starts in the SBF entrypoint the `entrypoint!` macro
+ * generates, whose source is solana-program-entrypoint's own src/lib.rs, and
+ * process_instruction is reached through the call trace, as in CodeTracer's
+ * desktop scenario languages/solana-opens-at-entry.
+ *
  * Source: codetracer-solana-recorder/test-programs/src/lib.rs
  */
 import { browser, expect } from '@wdio/globals'
@@ -30,6 +35,11 @@ const TRACE_NAME = 'solana-flow-test'
 // Then emits a log message with the result via solana_msg::msg!.
 const KNOWN_FUNCTIONS = ['process_instruction']
 const KNOWN_VARIABLES = ['sum_val', 'doubled', 'final_result']
+// `let final_result: u64 = doubled + a;`: the first line at which the
+// release SBF build's debug info binds sum_val (at the call's entry only the
+// parameters are; it is computed on line 26, but its location range starts
+// here).
+const SUM_VAL_BOUND_LINE = 28
 const KNOWN_EVENT_TEXT = 'result'
 
 const session = new DebugSession()
@@ -71,9 +81,19 @@ describe('CodeTracer Extension - Solana Deep Test', () => {
     const active = await session.isActive()
     expect(active).toBe(true)
 
-    const location = await session.currentLocation()
+    // The first stop, once the replay reports it: the SBF entrypoint.
+    let location = await session.currentLocation()
+    await browser.waitUntil(
+      async () => {
+        location = await session.currentLocation()
+        return location.line > 0
+      },
+      { timeout: 30000, timeoutMsg: 'the Solana recording reported no first stop within 30s' },
+    )
     console.log('[Solana] Initial location:', JSON.stringify(location))
     writeDiag('solana-session-start.json', { started, active, location })
+    expect(location.file).toContain('solana-program-entrypoint')
+    expect(location.file).toMatch(/lib\.rs$/)
   })
 
   // ==================================================================
@@ -81,6 +101,8 @@ describe('CodeTracer Extension - Solana Deep Test', () => {
   // ==================================================================
 
   it('opens solana_flow_test.rs in the editor', async () => {
+    const atCall = await session.jumpToCall('process_instruction')
+    console.log('[Solana] At process_instruction:', JSON.stringify(atCall))
     const hasTab = await editor.hasOpenTab('solana_flow_test.rs')
     if (!hasTab) {
       await browser.waitUntil(
@@ -160,6 +182,15 @@ describe('CodeTracer Extension - Solana Deep Test', () => {
   // ==================================================================
 
   it('loads locals with variable values including sum_val', async () => {
+    await session.removeAllBreakpoints()
+    const bp = await session.addBreakpoint(SUM_VAL_BOUND_LINE)
+    expect(bp.added).toBe(true)
+    const stop = await session.continue(3000)
+    await session.removeAllBreakpoints()
+    console.log('[Solana] Stopped for locals at:', JSON.stringify(stop))
+    expect(stop.file).toContain('solana_flow_test.rs')
+    expect(stop.line).toBe(SUM_VAL_BOUND_LINE)
+
     const result = await session.loadLocals({ lang: 'Solana', countBudget: 100, depthLimit: 3 })
     expect(result.ok).toBe(true)
     writeDiag('solana-deep-locals.json', result.data)

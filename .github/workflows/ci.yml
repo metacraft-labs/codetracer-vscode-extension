@@ -9,6 +9,42 @@ on:
   pull_request:
     branches: [dev, main]
 
+# GITHUB CREDENTIALS
+#
+# wdio-integration fetches private metacraft-labs repositories hours after
+# setup: Cargo's git dependency on metacraft-labs/lldb-sys.rs, which
+# codetracer-native-backend's workspace patches in and which both the native
+# recorder's `build-ct-mcr` (its license FFI) and the native backend's
+# `just build` compile, ct-mcr's nimble dependencies, and Nix flake inputs.
+# setup-dev-env hands the job two credentials, both GitHub App installation
+# tokens that expire one hour after they are minted; the codetracer build
+# alone takes over two hours.
+#
+#   * Nix reads its credential from files under MCL_JOB_CREDENTIALS_DIR.
+#     Passing `app-id` / `app-private-key` to setup-dev-env starts its job
+#     credential broker, which re-mints that token before it expires and
+#     rewrites the files in place, so every `nix` invocation gets a live
+#     token however late it runs.
+#   * The Git CLI credential is an `http.https://github.com/metacraft-labs/
+#     .extraHeader` carried in GIT_CONFIG_* job variables, which the runner
+#     copies into a step when the step starts, so the broker cannot rotate
+#     it. `refresh-build-auth` re-mints it for the steps after it. Each phase
+#     that fetches over Git is therefore a step of its own that starts right
+#     after a refresh, and a phase that would make its last Git fetch more
+#     than about 55 minutes after its refresh is split at a natural boundary
+#     with a refresh before each part (setup-dev-env's README, "How long the
+#     job's Nix credential lives"). Run 45139083018 failed exactly this way:
+#     "Record test traces" built ct-mcr 1 h 41 min after the last refresh,
+#     and Cargo could not fetch lldb-sys.rs.
+#
+# The extraHeader reaches only the git CLI; Cargo's built-in libgit2 fetcher
+# ignores it and fails with `failed to authenticate when downloading
+# repository`. setup-dev-env leaves the transport to the consumer, so
+# CARGO_NET_GIT_FETCH_WITH_CLI is set for every job below, as
+# codetracer-native-backend's own workflows set it.
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
 jobs:
   build:
     # Runs on the NixOS eph-linux-x64 class using the repo's nix dev env, the
@@ -34,8 +70,23 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          # Keeps the Nix GitHub credential valid past the token's one-hour
+          # lifetime: a job-scoped broker re-mints it while setup and the
+          # build run (setup-dev-env app-id / app-private-key).
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           substituters: ${{ vars.SUBSTITUTERS }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          # The read credential for the private cache named in SUBSTITUTERS.
+          # Without it setup-nix reads that cache anonymously, gets HTTP 401,
+          # removes it from nix.conf, and every path only it serves is built
+          # from source. In wdio-integration that included the Sui, Forc,
+          # Miden and cargo-build-sbf toolchains of codetracer's dev shell,
+          # which `repro exec ../codetracer` (scripts/record-test-traces.sh)
+          # realises: the first recording then built them for hours, silently,
+          # until the job hit its 6 h limit. No attic-cache is given, so this
+          # job only reads the cache and uploads nothing.
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
 
       - name: Install dependencies
         run: dev-exec just install
@@ -114,8 +165,15 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          # Keeps the Nix GitHub credential valid past the token's one-hour
+          # lifetime: a job-scoped broker re-mints it while setup and the
+          # build run (setup-dev-env app-id / app-private-key).
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           substituters: ${{ vars.SUBSTITUTERS }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          # Read credential for the private cache; see the build job.
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
 
       - name: Install dependencies
         run: dev-exec just install
@@ -141,6 +199,11 @@ jobs:
       - name: Run VS Code extension host tests
         run: dev-exec just test-vscode
 
+      # Proves the step above can fail: a run of an always-throwing test must
+      # exit non-zero and name that test.
+      - name: Run VS Code extension host test positive control
+        run: dev-exec just test-vscode-control
+
       - name: Upload diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -161,6 +224,10 @@ jobs:
     # language traces (Rust, C, Go, Nim).
     env:
       CODETRACER_RR_SOFT_MODE: "1"
+      # The Cairo corelib prepare-cairo-fixture.sh compiles against: the
+      # starkware-libs/cairo sibling below, which lands at ../cairo rather
+      # than the workspace's ../cairo-corelib-vendor the script looks for.
+      CAIRO_CORELIB_DIR: ${{ github.workspace }}/../cairo/corelib/src
 
     steps:
       - name: Generate CI token
@@ -176,44 +243,197 @@ jobs:
 
       # setup-dev-env installs Nix, materialises this repo's nix dev env,
       # installs the `dev-exec` wrapper, and clones the cross-repo siblings
-      # this job needs at workspace-lock-pinned revisions (replacing the
-      # former setup-nix + manifest/resolve/clone steps). codetracer and the
-      # lock-managed recorder/backend siblings resolve from the workspace lock.
+      # this job needs (replacing the former setup-nix + manifest/resolve/clone
+      # steps). Each entry is a repository name (`owner/name` outside
+      # metacraft-labs), cloned beside this checkout (../<name>) at the
+      # revision this commit's repro.lock pins;
+      # a bare entry needs a `uses:` line in repro.nim and a lock refresh
+      # (`repro lock refresh .`), or clone-siblings refuses it. The workspace
+      # manifest's `depends` no longer feeds the lock. aiken-lang/stdlib and
+      # starkware-libs/cairo declare no reprobuild package, so the lock cannot
+      # pin them: they are pinned here by commit, at the revisions the
+      # workspace manifest records (stdlib release/v3 for Aiken v1.1.21;
+      # cairo v2.17.0-rc.4, the cairo-lang-compiler the Cairo recorder uses).
       - name: Setup dev env
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
           gh-token: ${{ steps.app-token.outputs.token }}
+          # Keeps the Nix GitHub credential valid past the token's one-hour
+          # lifetime: a job-scoped broker re-mints it while setup and the
+          # build run (setup-dev-env app-id / app-private-key).
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           substituters: ${{ vars.SUBSTITUTERS }}
           trusted-public-keys: ${{ vars.TRUSTED_PUBLIC_KEYS }}
+          # Read credential for the private cache; see the build job.
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
           siblings: |
             codetracer
             codetracer-native-backend
             codetracer-ruby-recorder
             codetracer-python-recorder
+            codetracer-js-recorder
+            codetracer-wasm-instrumenter
+            codetracer-beam-recorder
+            codetracer-native-recorder
+            nim-stackable-hooks
+            codetracer-visual-replay
+            isonim
+            isonim-tui
+            nim-everywhere
+            codetracer-native-test-programs
+            codetracer-trace-format
+            codetracer-trace-format-nim
+            reprobuild-packages
+            codetracer-miden-recorder
+            codetracer-fuel-recorder
+            codetracer-move-recorder
+            codetracer-solana-recorder
+            codetracer-cardano-recorder
+            aiken-lang/stdlib=62f92b09555dbb9184c6581a0401fde482afb7a5
+            codetracer-flow-recorder
+            codetracer-cairo-recorder
+            starkware-libs/cairo=88fd4e946fa37cc5c0102f2e847f5a0cbcce477f
+            codetracer-circom-recorder
+            codetracer-leo-recorder
+            codetracer-polkavm-recorder
+            codetracer-evm-recorder
+            codetracer-ton-recorder
+      # What each sibling above is for:
+      # - codetracer: `ct`, db-backend, the value-origin fixture catalogue
+      #   and the Stylus staging inputs (prepare-stylus-fixture.sh).
+      # - codetracer-native-backend: ct-native-replay and the rr/dlv/gdb it
+      #   drives; its dev shell records the native traces.
+      # - the ruby, python, js and beam recorders, codetracer-native-recorder
+      #   (`ct-mcr`) and codetracer-native-test-programs (the Rust, C, Go and
+      #   Nim sudoku solvers): `just record-test-traces`, through
+      #   prepare-wdio-codetracer-bin.sh and record-test-traces.sh.
+      # - nim-stackable-hooks and codetracer-visual-replay: sources the native
+      #   recorder's `just build-ct-mcr` compiles against
+      #   (ct_interpose/config.nims reads ../nim-stackable-hooks/src,
+      #   ct_cli/config.nims ../codetracer-visual-replay/src);
+      #   prepare-wdio-codetracer-bin.sh builds ct-mcr there.
+      # - isonim, isonim-tui and nim-everywhere: Nim sources codetracer's
+      #   config.nims puts on the path from ../<name>/src, which `just build`
+      #   below imports when it compiles the panel, host and middleware
+      #   bundles (without them vscode_panel.nim stops at "cannot open file:
+      #   isonim/core/owner"). codetracer's config.nims names further siblings
+      #   (isonim-gpui, nim-agents, ...) that none of the three bundles import,
+      #   so they are not cloned.
+      # - one recorder per blockchain fixture `just
+      #   prepare-wdio-blockchain-fixtures` records (scripts/prepare-*-fixture.sh):
+      #   miden (MASM), fuel (Sway), move, solana, cardano (Aiken), flow
+      #   (Cadence), cairo, circom, leo, polkavm, evm (Solidity) and ton (Tolk).
+      #   Each script exits 1 when its recorder checkout is missing.
+      # - codetracer-trace-format and codetracer-trace-format-nim: the
+      #   recorders' Cargo path dependencies and repro.nim develop siblings.
+      # - aiken-lang/stdlib: the Cardano recorder resolves
+      #   `aiken/collection/list` from ../stdlib.
+      # - starkware-libs/cairo: the Cairo corelib (CAIRO_CORELIB_DIR below);
+      #   the workspace checks it out as cairo-corelib-vendor, a clone here
+      #   lands at ../cairo.
+      # - codetracer-wasm-instrumenter (`ct-instrument`), with the JS
+      #   recorder's CLI build and codetracer's session-manager: the tools
+      #   codetracer's cross-process value-origin regenerator
+      #   (account-balance-with-wasm) records with. "Verify value-origin
+      #   fixture prerequisites" builds the three through codetracer's
+      #   scripts/provision-cross-process-recording.sh.
+      # - reprobuild-packages: codetracer's repro.nim imports recipes from
+      #   ../reprobuild-packages, so `repro exec .` in ../codetracer (the
+      #   value-origin regenerators prepare-wdio-fixtures.sh runs there) cannot
+      #   enter codetracer's environment without it.
+
+      # codetracer-evm-recorder's dev shell, which the Solidity fixture below
+      # enters, starts only in a checkout whose Git hook samples are the ones
+      # its declared Git writes. The clone above was made by the runner's Git,
+      # so the shell refuses it ("modified pre-push hook body or mode:
+      # pre-push.sample"). As in that repository's own cross-repo workflow
+      # (its .github/workflows/cross-repo-tests.yml), the clone is therefore
+      # bootstrap-only: the recorder's source-bound `prepare-ci-checkout` app
+      # creates a fresh checkout of the same commit with its declared Git, in a
+      # namespace exclusive to this run and attempt, beside the siblings. The
+      # app refuses an existing namespace, a dirty bootstrap or one at another
+      # commit, and leaves the bootstrap unchanged.
+      #
+      # The revision is the bootstrap's HEAD, which setup-dev-env checked out
+      # at this commit's repro.lock pin. The new checkout's Cargo path
+      # dependencies and recipe import name ../codetracer-trace-format and
+      # ../codetracer-trace-format-nim, so the namespace receives copies of
+      # those two siblings as cloned above (the recorder's recipe refuses a
+      # symlinked source root). EVM_RECORDER_DIR then routes
+      # scripts/prepare-solidity-fixture.sh to the new checkout.
+      - name: Create the EVM recorder's declared checkout
+        run: |
+          siblings="$(cd "$GITHUB_WORKSPACE/.." && pwd -P)"
+          bootstrap="$siblings/codetracer-evm-recorder"
+          namespace="evm-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-vscode-wdio-linux-x64"
+          event="$(git -C "$bootstrap" rev-parse HEAD)"
+          cd "$bootstrap"
+          nix run .#prepare-ci-checkout -- "$bootstrap" \
+            "$siblings/$namespace/codetracer-evm-recorder" "$event" \
+            "$siblings/$namespace" "$namespace"
+          for peer in codetracer-trace-format codetracer-trace-format-nim; do
+            cp -a "$siblings/$peer" "$siblings/$namespace/$peer"
+          done
+          echo "EVM_RECORDER_DIR=$siblings/$namespace/codetracer-evm-recorder" >> "$GITHUB_ENV"
+
+      # `repro` for the steps below: record-test-traces.sh records every trace
+      # through `repro exec ../codetracer`, and prepare-wdio-codetracer-bin.sh,
+      # prepare-wdio-fixtures.sh and prepare-stylus-fixture.sh enter sibling
+      # environments the same way. setup-dev-env installs the CLI only for
+      # env-flavor: reprobuild, so until now this job ran whatever `repro` the
+      # runner image happened to carry. On the GARM Linux golden that was a
+      # repro-portable bundle (reprobuild 0.2.18), which runs inside its own
+      # chroot: it cannot see the Nix this job installs, nor /lib64, so it
+      # reported "this host has no Nix" and failed every recording with
+      # "/usr/bin/cc ... could not run it: No such file or directory" (run
+      # 44610114615). The image no longer ships a `repro` at all.
+      #
+      # A verified release archive runs natively, finds the job's Nix, and
+      # compiles recipes with the pinned nixpkgs gcc. Pinned to a release so a
+      # new one cannot change this job unreviewed; move it to each new release.
+      - name: Install repro
+        uses: metacraft-labs/metacraft-github-actions/setup-reprobuild@dev
+        with:
+          gh-token: ${{ steps.app-token.outputs.token }}
+          repro-version: v0.2.31
 
       - name: Build codetracer (ct + db-backend binaries)
         run: |
           cd ../codetracer
-          FLAKE_OVERRIDE="--override-input codetracer-trace-format path:./libs/codetracer-trace-format"
-          nix build -L ".?submodules=1#codetracer" $FLAKE_OVERRIDE
-          nix build -L ".?submodules=1#db-backend" $FLAKE_OVERRIDE -o result-db-backend
+          # codetracer-trace-format is a locked flake input of codetracer's
+          # own. It is no longer a submodule (codetracer e901eb6c8 moved it to
+          # a sibling repo), so the former
+          # `--override-input codetracer-trace-format path:./libs/codetracer-trace-format`
+          # names a path that does not exist and fails the evaluation.
+          nix build -L ".?submodules=1#codetracer"
+          nix build -L ".?submodules=1#db-backend" -o result-db-backend
+
+      # The codetracer build above takes over two hours, far past the
+      # one-hour life of the Git credential the job started with (see
+      # "GITHUB CREDENTIALS" at the top of this file). Re-mint it before the
+      # recorder builds; the native backend's lldb-sys.rs fetch failed with
+      # "could not read Username for 'https://github.com'" 2 h 22 min after
+      # the token was minted (run 44688110742).
+      - name: Refresh build authentication
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       # Build recorder components that ct needs to record traces for each
       # language family.  These are separate repos (restored as siblings above)
       # with their own flake.nix.  The built binaries are symlinked into
       # COMBINED_BIN below so ct can discover them via PATH.
-      - name: Build ct-native-replay (native language recording)
-        run: |
-          if [ -d ../codetracer-native-backend ]; then
-            cd ../codetracer-native-backend
-            nix build -L ".?submodules=1#ct-native-replay" -o result-native-replay
-          elif [ -d ../codetracer-rr-backend ]; then
-            cd ../codetracer-rr-backend
-            nix build -L ".?submodules=1#codetracer-rr-support" -o result-rr-support
-          else
-            echo "WARNING: codetracer-native-backend not found — native language recording will fail"
-          fi
+      # ct-native-replay is not built here as a Nix package. The package is a
+      # release build that bakes Nix's SOURCE_DATE_EPOCH (1980-01-01) as its
+      # build time, and the native backend's binary-lifetime check then
+      # refuses every replay ("older than its supported lifetime", exit 3),
+      # so every native WDIO test failed although the recordings succeeded.
+      # scripts/prepare-wdio-codetracer-bin.sh (the "Record test traces"
+      # step) builds the backend's debug binaries with `just build` instead,
+      # which bake the build's wall-clock time.
 
       - name: Build codetracer-ruby-recorder
         run: |
@@ -229,10 +449,15 @@ jobs:
       # (which provides the Rust toolchain, capnproto, and Python needed to
       # compile the native extension).  The default dev shell has multiple
       # Python versions; the package requires >=3.12, so we use python3.12.
+      # The venv is codetracer's `.python-recorder-venv`, where codetracer's
+      # scripts/detect-siblings.sh and scripts/prepare-wdio-codetracer-bin.sh
+      # look for it; the latter puts its `codetracer-python-recorder` console
+      # script into .ct-bin, which is where `ct record` finds the recorder (on
+      # PATH). CODETRACER_PYTHON_INTERPRETER alone does not make `ct` find it.
       - name: Set up Python recorder
         run: |
           if [ -d ../codetracer-python-recorder/codetracer-python-recorder ]; then
-            VENV_DIR="$(pwd)/.python-recorder-venv"
+            VENV_DIR="$(cd ../codetracer && pwd)/.python-recorder-venv"
             cd ../codetracer-python-recorder
             nix develop . --accept-flake-config -c bash -c '
               python3.12 -m venv "'"$VENV_DIR"'"
@@ -289,22 +514,19 @@ jobs:
           else
             echo "WARNING: ct binary not found in ../codetracer/result/bin/ or ../codetracer/src/build-debug/bin/"
           fi
-          # Symlink db-backend from the db-backend package.
-          DB_SRC="$(realpath ../codetracer/result-db-backend/bin/db-backend 2>/dev/null || true)"
+          # Symlink the DAP backend from the db-backend package. Its binary
+          # is `replay-server` (codetracer src/db-backend/Cargo.toml); the
+          # extension looks for that name, then the former `db-backend`, beside
+          # runnablePath (src/extension.ts, DAP_SERVER_BINARY_NAMES).
+          DB_SRC="$(realpath ../codetracer/result-db-backend/bin/replay-server 2>/dev/null || true)"
           if [ -x "$DB_SRC" ]; then
-            ln -sf "$DB_SRC" "$COMBINED_BIN/db-backend"
+            ln -sf "$DB_SRC" "$COMBINED_BIN/replay-server"
           else
-            echo "WARNING: db-backend not found in ../codetracer/result-db-backend/bin/"
+            echo "WARNING: replay-server not found in ../codetracer/result-db-backend/bin/"
           fi
-          # Symlink ct-native-replay for native language recording (Rust, C, Go, Nim).
-          RR_SRC="$(realpath ../codetracer-native-backend/result-native-replay/bin/ct-native-replay 2>/dev/null \
-                    || realpath ../codetracer-rr-backend/result-rr-support/bin/ct-rr-support 2>/dev/null || true)"
-          if [ -x "$RR_SRC" ]; then
-            ln -sf "$RR_SRC" "$COMBINED_BIN/ct-native-replay"
-            echo "ct-native-replay: $RR_SRC"
-          else
-            echo "WARNING: ct-native-replay not found — native language recording will fail"
-          fi
+          # ct-native-replay (Rust, C, Go and Nim) is built and linked into
+          # COMBINED_BIN by scripts/prepare-wdio-codetracer-bin.sh in the
+          # "Record test traces" step.
           # rr is resolved later in the "Record test traces" step (which
           # enters the rr-backend dev shell) and symlinked into COMBINED_BIN.
           # Symlink codetracer-ruby-recorder for Ruby recording.
@@ -331,27 +553,91 @@ jobs:
           # Also add to PATH for the extension's findInPath fallback.
           echo "$COMBINED_BIN" >> "$GITHUB_PATH"
           # Set Python recorder interpreter for Python recording.
-          if [ -x "$(pwd)/.python-recorder-venv/bin/python" ]; then
-            echo "CODETRACER_PYTHON_INTERPRETER=$(pwd)/.python-recorder-venv/bin/python" >> "$GITHUB_ENV"
+          PYTHON_RECORDER_VENV="$(cd ../codetracer && pwd)/.python-recorder-venv"
+          if [ -x "$PYTHON_RECORDER_VENV/bin/python" ]; then
+            echo "CODETRACER_PYTHON_INTERPRETER=$PYTHON_RECORDER_VENV/bin/python" >> "$GITHUB_ENV"
           fi
 
       # Record test traces for standard languages (Python, Ruby, Rust, C, Go, Nim).
-      # This step runs inside the native-backend dev shell because:
+      # These steps run inside the native-backend dev shell because:
       #   - ct record → ct-native-replay build needs compilers (gcc, rustc, go, nim)
       #   - ct record → ct-native-replay record needs rr for native language replay
       # The extension's own dev shell only has Node.js/VS Code tooling.
+      #
+      # `just prepare-wdio-traces` is what the WDIO suites below depend on:
+      # scripts/prepare-wdio-codetracer-bin.sh first completes .ct-bin with
+      # what the steps above do not provide (ct-mcr, which MCR -- ct's
+      # default native backend -- records Rust, C and Nim with; the native
+      # backend's debug ct-native-replay; the Python recorder's console
+      # script), then record-test-traces.sh records with
+      # missing prerequisites counted as failures. Running record-test-traces
+      # alone recorded without ct-mcr or the Python recorder (run 44865999648).
+      #
+      # The two longest builds that fetch over Git, ct-mcr and
+      # ct-native-replay, run first, each in a step of its own right after a
+      # refresh (`just prepare-wdio-ct-mcr` / `prepare-wdio-native-replay`
+      # build exactly what prepare-wdio-traces would, which then finds them
+      # built). Run 45139083018 did all of it in one step and reached
+      # ct-mcr's lldb-sys.rs fetch 1 h 41 min after the last refresh. The dev
+      # shell is realised in a step of its own first: that took 23 minutes in
+      # the same run, and fetches only through Nix, whose credential the
+      # broker keeps live.
+      - name: Realise the native backend's dev shell
+        run: |
+          cd ../codetracer-native-backend
+          nix develop ".?submodules=1" --accept-flake-config -c true
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      # About 30 minutes on a cold runner; its lldb-sys.rs fetch came 29
+      # minutes in (run 45139083018), its nimble fetches after that.
+      - name: Build the native recorder (ct-mcr)
+        run: |
+          cd ../codetracer-native-backend
+          nix develop ".?submodules=1" --accept-flake-config -c bash -c "
+            cd '$GITHUB_WORKSPACE'
+            just prepare-wdio-ct-mcr
+          "
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Build the native backend (ct-native-replay)
+        run: |
+          cd ../codetracer-native-backend
+          nix develop ".?submodules=1" --accept-flake-config -c bash -c "
+            cd '$GITHUB_WORKSPACE'
+            just prepare-wdio-native-replay
+          "
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Record test traces
         run: |
           cd ../codetracer-native-backend
           nix develop ".?submodules=1" --accept-flake-config -c bash -c "
             cd '$GITHUB_WORKSPACE'
-            just record-test-traces
+            just prepare-wdio-traces
           "
 
       # Symlink rr, dlv, and gdb into COMBINED_BIN so ct-native-replay can
       # find them at replay time. The native-backend dev shell's shellHook
-      # creates symlinks at target/debug/{rr,dlv,gdb}. These were
-      # created during the "Record test traces" step's `nix develop`.
+      # creates symlinks at target/debug/{rr,dlv,gdb}; the steps above that
+      # enter that shell created them.
       - name: Symlink replay tools (rr, dlv, gdb)
         run: |
           COMBINED_BIN="$GITHUB_WORKSPACE/.ct-bin"
@@ -387,17 +673,99 @@ jobs:
           echo "COMBINED_BIN contents:"
           ls -la "$COMBINED_BIN"
 
-      - name: Prepare blockchain trace fixtures
-        run: dev-exec just prepare-wdio-blockchain-fixtures
+      # Each of the build and test phases below can fetch over Git (Nix
+      # git+https inputs of the recorders' flakes, Cargo and nimble
+      # dependencies), so each starts right after a refresh; see "GITHUB
+      # CREDENTIALS" at the top of this file.
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      # The extension built from the codetracer sibling (CODETRACER_DIR,
+      # default ../codetracer): its panel and host bundles, middleware, theme
+      # and replay backend. The smoke suite then runs against that build and
+      # fails, rather than skips, if the panel bundle is missing.
+      - name: Build the extension against the codetracer sibling
+        run: dev-exec just build
+
+      - name: Run WDIO smoke tests against the built bundle
+        env:
+          CT_EXPECT_PANEL_BUNDLE: "1"
+        run: dev-exec just test-wdio-smoke
+
+      # Thirteen fixtures, each recorded with a recorder built in its own dev
+      # shell: an hour on a warm host, so they are prepared in three parts.
+      # `just prepare-wdio-blockchain-fixtures` with no argument prepares all
+      # of them (test-wdio-deep below depends on that and finds them done).
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Prepare blockchain trace fixtures (MASM, Sway, Move, Solana)
+        run: dev-exec just prepare-wdio-blockchain-fixtures masm sway move solana
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Prepare blockchain trace fixtures (Aiken, Cadence, Cairo, Circom)
+        run: dev-exec just prepare-wdio-blockchain-fixtures aiken cadence cairo circom
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Prepare blockchain trace fixtures (Leo, PolkaVM, Solidity, Tolk, Stylus)
+        run: dev-exec just prepare-wdio-blockchain-fixtures leo polkavm solidity tolk stylus
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Verify value-origin fixture prerequisites
         run: dev-exec just prepare-wdio-value-origin-fixtures
 
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Run per-language smoke tests
         run: dev-exec just test-wdio-smoke-langs
 
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Run deep integration tests
         run: dev-exec just test-wdio-deep
+
+      - name: Refresh build authentication
+        # See "GITHUB CREDENTIALS" at the top of this file.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Run value-origin integration tests
         run: dev-exec just test-wdio-value-origin

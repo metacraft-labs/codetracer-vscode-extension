@@ -1,147 +1,106 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
+import { attachWebview } from "./sessionHost";
+import { getPanelWebviewContent, PanelKind } from "./utils";
 
-type PanelId = 'stateComponent' | 'calltraceComponent' | 'scratchpadComponent' | 'eventLogComponent' | 'terminalOutputComponent' | 'flowComponent' | 'tracepointComponent';
+/**
+ * CodeTracer's webviews: one per panel (Shared-DOM-Front-Ends D9, SDF-AREQ9),
+ * each a mirror of the session the extension host owns. Arranging, moving
+ * and closing them is VS Code's own behaviour, and VS Code restores them
+ * (`registerPanelSerializers`).
+ */
 
-export interface PanelConfig {
-    id: PanelId;
-    title: string;
-    retainContextWhenHidden?: boolean;
-    // When true (the default) the panel is created without stealing focus from
-    // the currently-active panel.  The caller is responsible for explicitly
-    // calling panel.reveal() when it wants the panel to become active.
-    preserveFocus?: boolean;
-    getContent?: (panel: vscode.Webview, context: vscode.ExtensionContext) => string;
-    getFlowContent?: (panel: vscode.Webview, context: vscode.ExtensionContext, flowLine: number, flowFile: string) => string;
-    getTraceContent?: (panel: vscode.Webview, context: vscode.ExtensionContext, traceLine: number, traceFile: string, traceId: number) => string;
+/** The view type of panel `kind`'s webview. */
+export function viewTypeOf(kind: PanelKind): string {
+  return `codetracer.${kind}`;
 }
 
-const panels: Map<PanelId, vscode.WebviewPanel> = new Map();
-let traceId = 0;
-
-function setInsetHtmlAsync(inset: vscode.WebviewEditorInset, html: string): void {
-    // Defer initial HTML attachment until the inset has been mounted by VS Code.
-    setTimeout(() => {
-        inset.webview.html = html;
-    }, 0);
+export function webviewOptions(context: vscode.ExtensionContext): vscode.WebviewOptions {
+  return {
+    enableScripts: true,
+    localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "media")],
+  };
 }
 
-export function createFlowPanel(
-    config: PanelConfig,
-    editor: vscode.TextEditor,
-    line: number,
-    context: vscode.ExtensionContext,
-    onMessage?: (msg: any, panel: vscode.WebviewEditorInset) => void
-): vscode.WebviewEditorInset {
-    const inset = vscode.window.createWebviewTextEditorInset(
-        editor,
-        line,
-        1,
-        {
-            enableScripts: true,
-            localResourceRoots: [
-                vscode.Uri.joinPath(context.extensionUri, "media"),
-                vscode.Uri.joinPath(context.extensionUri, "public"),
-                vscode.Uri.joinPath(context.extensionUri, "libs"),
-            ],
-        }
-    );
-    if (onMessage) {
-        inset.webview.onDidReceiveMessage(
-            message => onMessage(message, inset),
-            undefined,
-            context.subscriptions
-        );
+const panels: Map<PanelKind, vscode.WebviewPanel> = new Map();
+
+/**
+ * Show panel `kind`'s view in `panel` and serve it the host's session. Used
+ * for a new panel and for one VS Code restored.
+ */
+export function adoptPanel(
+  context: vscode.ExtensionContext,
+  kind: PanelKind,
+  panel: vscode.WebviewPanel
+): vscode.WebviewPanel {
+  panel.webview.options = webviewOptions(context);
+  panel.webview.html = getPanelWebviewContent(panel.webview, context, kind);
+  const served = attachWebview(panel.webview);
+  panel.onDidDispose(() => {
+    served.dispose();
+    if (panels.get(kind) === panel) {
+      panels.delete(kind);
     }
-
-    const html = config.getFlowContent
-        ? config.getFlowContent(inset.webview, context, line + 1, editor.document.fileName)
-        : (config.getContent ? config.getContent(inset.webview, context) : "");
-    setInsetHtmlAsync(inset, html);
-
-    return inset;
-}
-
-export function createTracepointPanel(
-    config: PanelConfig,
-    editor: vscode.TextEditor,
-    line: number,
-    context: vscode.ExtensionContext,
-    onMessage?: (msg: any, panel: vscode.WebviewEditorInset) => void
-): vscode.WebviewEditorInset {
-    const inset = vscode.window.createWebviewTextEditorInset(
-        editor,
-        line,
-        20,
-        {
-            enableScripts: true,
-            localResourceRoots: [
-                vscode.Uri.joinPath(context.extensionUri, "media"),
-                vscode.Uri.joinPath(context.extensionUri, "public"),
-                vscode.Uri.joinPath(context.extensionUri, "libs"),
-            ],
-        }
-    );
-    if (onMessage) {
-        inset.webview.onDidReceiveMessage(
-            message => onMessage(message, inset),
-            undefined,
-            context.subscriptions
-        );
-    }
-
-    const html = config.getTraceContent ? config.getTraceContent(inset.webview, context, line + 1, editor.document.fileName, traceId) : "";
-    setInsetHtmlAsync(inset, html);
-    traceId += 1;
-    return inset;
+  });
+  panels.set(kind, panel);
+  return panel;
 }
 
 export function getOrCreatePanel(
-    config: PanelConfig,
-    context: vscode.ExtensionContext,
-    onMessage?: (msg: any, panel: vscode.WebviewPanel) => void
+  context: vscode.ExtensionContext,
+  kind: PanelKind,
+  title: string
 ): vscode.WebviewPanel {
-    const existing = panels.get(config.id);
-    if (existing) {
-        existing.reveal();
-        return existing;
-    }
+  const existing = panels.get(kind);
+  if (existing) {
+    existing.reveal(undefined, true);
+    return existing;
+  }
+  const panel = vscode.window.createWebviewPanel(
+    viewTypeOf(kind),
+    title,
+    { viewColumn: vscode.ViewColumn.Two, preserveFocus: true },
+    // A panel's bundle is the panel's view alone, so a hidden panel keeps its
+    // context: it stays a live mirror and shows the current state when
+    // revealed.
+    { ...webviewOptions(context), retainContextWhenHidden: true }
+  );
+  return adoptPanel(context, kind, panel);
+}
 
-    const panel = vscode.window.createWebviewPanel(
-        config.id,
-        config.title,
-        { viewColumn: vscode.ViewColumn.Two, preserveFocus: config.preserveFocus ?? true },
-        {
-            enableScripts: true,
-            // `retainContextWhenHidden: false` so a hidden panel releases
-            // its renderer/iframe context. The CodeTracer webview loads a
-            // large (~44 MB) frontend bundle plus a ~14 MB Nim `ui.js`;
-            // keeping the context alive for every hidden panel kept a copy
-            // of all that resident in the VS Code renderer for each of the
-            // five panels at once. With this off, only the visible panel
-            // holds the bundle; hidden panels reload it when revealed.
-            retainContextWhenHidden: config.retainContextWhenHidden ?? false,
-            localResourceRoots: [
-                vscode.Uri.joinPath(context.extensionUri, "media"),
-                vscode.Uri.joinPath(context.extensionUri, "public"),
-                vscode.Uri.joinPath(context.extensionUri, "libs"),
-            ],
-        }
-    );
+export function activePanels(): Map<PanelKind, vscode.WebviewPanel> {
+  return new Map(panels);
+}
 
-    panel.webview.html = config.getContent ? config.getContent(panel.webview, context) : "";
+export function disposeAllPanels(): void {
+  for (const panel of [...panels.values()]) {
+    panel.dispose();
+  }
+  panels.clear();
+}
 
-    if (onMessage) {
-        panel.webview.onDidReceiveMessage(
-            message => onMessage(message, panel),
-            undefined,
-            context.subscriptions
-        );
-    }
-
-    panel.onDidDispose(() => {
-        panels.delete(config.id);
-    });
-
-    panels.set(config.id, panel);
-    return panel;
+/**
+ * A panel's view in an editor inset, at `line` (0-based): the flow's loop
+ * control. Insets are a proposed VS Code API (`editorInsets`).
+ */
+export function createPanelInset(
+  context: vscode.ExtensionContext,
+  editor: vscode.TextEditor,
+  kind: PanelKind,
+  line: number,
+  height: number
+): vscode.WebviewEditorInset {
+  const inset = vscode.window.createWebviewTextEditorInset(
+    editor,
+    line,
+    height,
+    webviewOptions(context)
+  );
+  const served = attachWebview(inset.webview);
+  inset.onDidDispose(() => served.dispose());
+  // Set after the inset exists: an inset's webview ignores HTML set in the
+  // same tick it was created.
+  setTimeout(() => {
+    inset.webview.html = getPanelWebviewContent(inset.webview, context, kind);
+  }, 0);
+  return inset;
 }
