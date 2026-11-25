@@ -32,4 +32,7 @@ applicable:
   - ../value-origin/python-trivial-chain-badges.yaml
   - ../value-origin/python-trivial-chain-hover.yaml
   - ../value-origin/ruby-canonical.yaml
+  # codetracer's whole debugging session, the one every front-end renders
+  # into a video (its stage opens the panels with `layout: split`)
+  - ../../../../codetracer/src/tests/scenarios/tour/calc-debugging-session.yaml
 unsupported: []
